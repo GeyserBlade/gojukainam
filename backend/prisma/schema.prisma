@@ -1,0 +1,292 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+// ---------------- Generators & Datasource ----------------
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------- Enums ----------------
+enum Role {
+  SUPERADMIN
+  ADMIN
+  CLUB_MANAGER
+  COACH
+  ATHLETE
+}
+
+enum Gender {
+  Male
+  Female
+}
+
+enum EntryType {
+  KATA
+  KUMITE
+  TEAM_KATA
+  TEAM_KUMITE
+  BUNKAI
+}
+
+enum EntryStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  RETURNED
+}
+
+enum TeamStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  RETURNED
+}
+
+enum InvoiceStatus {
+  DUE
+  SENT
+  PAID
+  CANCELLED
+}
+
+// ---------------- Models ----------------
+model User {
+  id        String  @id @default(cuid())
+  name      String?
+  email     String  @unique
+  role      Role
+  clubId    String?
+  club      Club?   @relation(fields: [clubId], references: [id])
+
+  passwordHash String? // if you add password flow; for magic-link keep null
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  AuditLogs AuditLog[]
+}
+
+model Club {
+  id          String    @id @default(cuid())
+  name        String
+  region      String?
+  contactName String
+  email       String
+  phone       String?
+  notes       String?
+
+  users    User[]
+  athletes Athlete[]
+  teams    Team[]
+  entries  Entry[]
+  invoices Invoice[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([name])
+}
+
+model Event {
+  id        String   @id @default(cuid())
+  name      String
+  venue     String
+  city      String
+  country   String
+  startDate DateTime
+  regOpen   DateTime
+  regClose  DateTime
+  /// JSON string of your YAML config (persisted snapshot)
+  configJson String
+
+  divisions    Division[]
+  weightClasses WeightClass[]
+  entries      Entry[]
+  teams        Team[]
+  invoices     Invoice[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([startDate])
+}
+
+model Division {
+  id       String  @id @default(cuid())
+  eventId  String
+  event    Event   @relation(fields: [eventId], references: [id])
+  key      String  // e.g., "CADET"
+  name     String  // e.g., "Cadet (14–15)"
+  minAge   Int
+  maxAge   Int
+  gender   Gender
+  notes    String?
+
+  entries Entry[]
+  teams   Team[]
+  weightClasses WeightClass[] // optional linkage
+
+  @@index([eventId, key, gender])
+}
+
+model WeightClass {
+  id         String  @id @default(cuid())
+  eventId    String
+  event      Event   @relation(fields: [eventId], references: [id])
+  divisionId String?
+  division   Division? @relation(fields: [divisionId], references: [id])
+  gender     Gender
+  name       String   // e.g., "-57kg"
+  minKg      Float?
+  maxKg      Float?
+
+  entries Entry[]
+
+  @@index([eventId, gender])
+  @@index([divisionId])
+}
+
+model Athlete {
+  id            String   @id @default(cuid())
+  clubId        String
+  club          Club     @relation(fields: [clubId], references: [id])
+  firstName     String
+  lastName      String
+  dob           DateTime
+  gender        Gender
+  nationality   String
+  idType        String?
+  idNumber      String?
+  beltRank      String?
+  weightKg      Float?
+  medicalNotes  String?
+  emergencyName String
+  emergencyPhone String
+  guardianName  String?
+  guardianPhone String?
+  photoUrl      String?
+  waiverUrl     String?
+
+  entries     Entry[]
+  teamMembers TeamMember[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([clubId])
+  @@index([dob])
+  @@index([gender])
+}
+
+model Entry {
+  id            String      @id @default(cuid())
+  eventId       String
+  event         Event       @relation(fields: [eventId], references: [id])
+  clubId        String
+  club          Club        @relation(fields: [clubId], references: [id])
+
+  // Individual entry
+  athleteId     String?
+  athlete       Athlete?    @relation(fields: [athleteId], references: [id])
+
+  // Team entry (optional - when representing a team entry as a row here)
+  teamId        String?
+  team          Team?       @relation(fields: [teamId], references: [id])
+
+  entryType     EntryType
+  divisionId    String
+  division      Division    @relation(fields: [divisionId], references: [id])
+
+  // Used for Kumite individual
+  weightClassId String?
+  weightClass   WeightClass? @relation(fields: [weightClassId], references: [id])
+
+  status   EntryStatus @default(DRAFT)
+  feeCents Int         @default(0)
+  notes    String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Fast filters
+  @@index([eventId, divisionId, entryType, status])
+  @@index([clubId, status])
+
+  // Uniqueness (two paths):
+  // 1) individual: one unique entry per athlete per event/type/division
+  @@unique([eventId, athleteId, entryType, divisionId])
+  // 2) team: one unique entry per team per event/type/division
+  @@unique([eventId, teamId, entryType, divisionId])
+}
+
+model Team {
+  id         String     @id @default(cuid())
+  eventId    String
+  event      Event      @relation(fields: [eventId], references: [id])
+  clubId     String
+  club       Club       @relation(fields: [clubId], references: [id])
+  name       String
+  teamType   EntryType  // use TEAM_KATA or TEAM_KUMITE
+  divisionId String
+  division   Division   @relation(fields: [divisionId], references: [id])
+
+  status     TeamStatus @default(DRAFT)
+
+  members    TeamMember[]
+  entries    Entry[]    // optional: if you also create an Entry row for team
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([eventId, clubId, teamType, divisionId, status])
+}
+
+model TeamMember {
+  id        String  @id @default(cuid())
+  teamId    String
+  team      Team    @relation(fields: [teamId], references: [id])
+  athleteId String
+  athlete   Athlete @relation(fields: [athleteId], references: [id])
+  isReserve Boolean @default(false)
+
+  @@unique([teamId, athleteId]) // an athlete appears at most once on a team
+  @@index([athleteId])
+}
+
+model Invoice {
+  id        String        @id @default(cuid())
+  clubId    String
+  club      Club          @relation(fields: [clubId], references: [id])
+  eventId   String
+  event     Event         @relation(fields: [eventId], references: [id])
+  totalCents Int
+  status    InvoiceStatus @default(DUE)
+  pdfUrl    String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([eventId, clubId, status])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String?
+  user       User?    @relation(fields: [userId], references: [id])
+  entityType String   // e.g., "Entry", "Team", "Athlete"
+  entityId   String
+  action     String   // e.g., "CREATE", "UPDATE", "APPROVE", "RETURN"
+  diffJson   String   // store JSON string of changes
+  createdAt  DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([createdAt])
+}

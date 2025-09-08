@@ -1,0 +1,61 @@
+currency: "NAD"
+fees: { kataIndividual: 150, kumiteIndividual: 150, teamKata: 300, teamKumite: 300 }
+limits: { maxIndividualEventsPerAthlete: 2, maxEntriesPerClubPerCategory: 10 }
+teams: { teamKata: { size: 3, reserves: 1 }, teamKumite: { size: 3, reserves: 1 } }
+divisions:
+  - key: U8
+    name: Under 8
+    minAge: 5
+    maxAge: 7
+    genders: [Male, Female]
+    kata: { allowed: true }
+    kumite: { allowed: true }
+  - key: U10
+    name: Under 10
+    minAge: 8
+    maxAge: 9
+    genders: [Male, Female]
+    kata: { allowed: true }
+    kumite: { allowed: true }
+  - key: U12
+    name: Under 12
+    minAge: 10
+    maxAge: 11
+    genders: [Male, Female]
+    kata: { allowed: true }
+    kumite: { allowed: true }
+  - key: U14
+    name: Under 14
+    minAge: 12
+    maxAge: 13
+    genders: [Male, Female]
+    kata: { allowed: true }
+    kumite: { allowed: true }
+  - key: CADET
+    name: Cadet (14–15)
+    minAge: 14
+    maxAge: 15
+    genders: [Male, Female]
+    kata: { allowed: true }
+    kumite: { allowed: true }
+  - key: JUNIOR
+    name: Junior (16–17)
+    minAge: 16
+    maxAge: 17
+    genders: [Male, Female]
+    kata: { allowed: true }
+    kumite: { allowed: true }
+  - key: SENIOR
+    name: Senior (18+)
+    minAge: 18
+    maxAge: 39
+    genders: [Male, Female]
+    kata: { allowed: true }
+    kumite: { allowed: true }
+  - key: VETERAN
+    name: Veteran (40+)
+    minAge: 40
+    maxAge: 80
+    genders: [Male, Female]
+    kata: { allowed: true }
+    kumite: { allowed: true }
