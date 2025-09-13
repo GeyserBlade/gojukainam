@@ -21,6 +21,7 @@ export type Athlete = {
   guardianPhone?: string | null;
   photoUrl?: string | null;
   waiverUrl?: string | null;
+  club?: { id: string; name: string };
 };
 
 export async function listAthletes(clubId: string): Promise<Athlete[]> {

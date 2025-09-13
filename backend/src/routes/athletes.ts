@@ -8,7 +8,10 @@ export const router = Router();
 
 // list all athletes (Superadmin)
 router.get("/all", requireRoles("SUPERADMIN"), async (req, res) => {
-  const rows = await prisma.athlete.findMany();
+  const rows = await prisma.athlete.findMany({
+    include: { club: { select: { id: true, name: true } } },
+    orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
+  });
   res.json(rows);
 });
 
@@ -20,7 +23,11 @@ router.get("/", async (req, res) => {
   if (req.user?.role === "CLUB_MANAGER" || req.user?.role === "COACH") {
     if (req.user.clubId !== clubId) return res.status(403).json({ error: "Forbidden" });
   }
-  const rows = await prisma.athlete.findMany({ where: { clubId } });
+  const rows = await prisma.athlete.findMany({
+    where: { clubId },
+    include: { club: { select: { id: true, name: true } } },
+    orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
+  });
   res.json(rows);
 });
 

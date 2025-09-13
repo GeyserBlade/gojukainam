@@ -1,8 +1,9 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
 // import { BrowserRouter, Routes, Route, Navigate, useNavigate } from "react-router-dom";
 import { useAuth, Role } from "../contexts/AuthContext";
-import { api } from "../lib/api"; // Make sure this path matches your project structure
+import { api } from "../lib/api";
 import { listAthletes, listAllAthletes, deleteAthlete, type Athlete } from "../lib/athletes";
+import { Input, Select } from "../components/Input";
 // import { Button } from "../components/Input";
 // import { Input } from "../components/Input";
 // import { Label } from "../components/Input";
@@ -17,6 +18,9 @@ const Dashboard: React.FC = () => {
   const [athletes, setAthletes] = useState<Athlete[]>([]);
   const [loadingAthletes, setLoadingAthletes] = useState(false);
   const [errorAthletes, setErrorAthletes] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [sortBy, setSortBy] = useState<"name"|"dob"|"gender"|"belt"|"club">("name");
+  const [sortDir, setSortDir] = useState<"asc"|"desc">("asc");
 
   // added state for club record (so we can show name)
   const [club, setClub] = useState<{ id: string; name?: string } | null>(null);
@@ -48,6 +52,47 @@ const Dashboard: React.FC = () => {
       .catch((e) => setErrorAthletes(e?.response?.data?.error || e.message))
       .finally(() => setLoadingAthletes(false));
   }, [clubId, role]);
+
+  const filteredSorted = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    let rows = athletes;
+    if (q) {
+      rows = rows.filter(a => {
+        const name = `${a.firstName} ${a.lastName}`.toLowerCase();
+        const clubName = a.club?.name?.toLowerCase() || "";
+        return (
+          name.includes(q) ||
+          (a.nationality?.toLowerCase?.() || "").includes(q) ||
+          (a.beltRank?.toLowerCase?.() || "").includes(q) ||
+          clubName.includes(q)
+        );
+      });
+    }
+    const dir = sortDir === "asc" ? 1 : -1;
+    const cmp = (a: Athlete, b: Athlete) => {
+      if (sortBy === "name") {
+        const an = `${a.lastName} ${a.firstName}`.toLowerCase();
+        const bn = `${b.lastName} ${b.firstName}`.toLowerCase();
+        return an < bn ? -1*dir : an > bn ? 1*dir : 0;
+      }
+      if (sortBy === "dob") {
+        const ad = new Date(a.dob).getTime();
+        const bd = new Date(b.dob).getTime();
+        return (ad - bd) * dir;
+      }
+      if (sortBy === "gender") {
+        return (a.gender || "").localeCompare(b.gender || "") * dir;
+      }
+      if (sortBy === "belt") {
+        return (a.beltRank || "").localeCompare(b.beltRank || "") * dir;
+      }
+      if (sortBy === "club") {
+        return (a.club?.name || "").localeCompare(b.club?.name || "") * dir;
+      }
+      return 0;
+    };
+    return [...rows].sort(cmp);
+  }, [athletes, query, sortBy, sortDir]);
 
   async function onDeleteAthlete(id: string) {
     if (!confirm("Delete this athlete? This cannot be undone.")) return;
@@ -91,15 +136,38 @@ const Dashboard: React.FC = () => {
                 <span className="text-xs text-gray-400">Set a club to view athletes</span>
               )}
             </div>
+            <div className="flex flex-col md:flex-row md:items-center gap-2 mb-3">
+              <div className="flex-1">
+                <Input placeholder="Search name, club, nationality, belt..." value={query} onChange={(e)=>setQuery(e.target.value)} />
+              </div>
+              <div className="flex items-center gap-2">
+                <Select value={sortBy} onChange={(e)=>setSortBy(e.target.value as any)}>
+                  <option value="name">Sort: Name</option>
+                  <option value="dob">Sort: DOB</option>
+                  <option value="gender">Sort: Gender</option>
+                  <option value="belt">Sort: Belt</option>
+                  <option value="club">Sort: Club</option>
+                </Select>
+                <Select value={sortDir} onChange={(e)=>setSortDir(e.target.value as any)}>
+                  <option value="asc">Asc</option>
+                  <option value="desc">Desc</option>
+                </Select>
+              </div>
+            </div>
             {loadingAthletes && <p className="text-sm text-gray-400">Loading athletes…</p>}
             {errorAthletes && <p className="text-sm text-red-400">{errorAthletes}</p>}
-            {!!athletes.length && (
+            {!!filteredSorted.length && (
               <ul className="divide-y divide-gray-800">
-                {athletes.map((a) => (
+                {filteredSorted.map((a) => (
                   <li key={a.id} className="py-2 flex items-center justify-between">
-                    <div>
-                      <p className="text-sm text-gray-200">{a.firstName} {a.lastName}</p>
-                      <p className="text-xs text-gray-500">{new Date(a.dob).toLocaleDateString()} • {a.gender}</p>
+                    <div className="min-w-0">
+                      <p className="text-sm text-gray-200 truncate">{a.firstName} {a.lastName} <span className="text-xs text-gray-500">({a.gender})</span></p>
+                      <p className="text-xs text-gray-500 truncate">
+                        {new Date(a.dob).toLocaleDateString()} • {a.nationality}
+                        {a.beltRank ? <> • {a.beltRank}</> : null}
+                        {a.weightKg ? <> • {a.weightKg}kg</> : null}
+                        {a.club?.name ? <> • {a.club.name}</> : null}
+                      </p>
                     </div>
                     <button
                       onClick={() => onDeleteAthlete(a.id)}
@@ -111,7 +179,7 @@ const Dashboard: React.FC = () => {
                 ))}
               </ul>
             )}
-            {!loadingAthletes && !errorAthletes && (clubId || role === "SUPERADMIN") && athletes.length === 0 && (
+            {!loadingAthletes && !errorAthletes && (clubId || role === "SUPERADMIN") && filteredSorted.length === 0 && (
               <p className="text-sm text-gray-400">No athletes yet.</p>
             )}
           </div>
