@@ -59,12 +59,12 @@ enum InvoiceStatus {
 
 // ---------------- Models ----------------
 model User {
-  id        String  @id @default(cuid())
-  name      String?
-  email     String  @unique
-  role      Role
-  clubId    String?
-  club      Club?   @relation(fields: [clubId], references: [id])
+  id     String  @id @default(cuid())
+  name   String?
+  email  String  @unique
+  role   Role
+  clubId String?
+  club   Club?   @relation(fields: [clubId], references: [id])
 
   passwordHash String? // if you add password flow; for magic-link keep null
 
@@ -75,7 +75,7 @@ model User {
 }
 
 model Club {
-  id          String    @id @default(cuid())
+  id          String  @id @default(cuid())
   name        String
   region      String?
   contactName String
@@ -96,22 +96,22 @@ model Club {
 }
 
 model Event {
-  id        String   @id @default(cuid())
-  name      String
-  venue     String
-  city      String
-  country   String
-  startDate DateTime
-  regOpen   DateTime
-  regClose  DateTime
+  id         String   @id @default(cuid())
+  name       String
+  venue      String
+  city       String
+  country    String
+  startDate  DateTime
+  regOpen    DateTime
+  regClose   DateTime
   /// JSON string of your YAML config (persisted snapshot)
   configJson String
 
-  divisions    Division[]
+  divisions     Division[]
   weightClasses WeightClass[]
-  entries      Entry[]
-  teams        Team[]
-  invoices     Invoice[]
+  entries       Entry[]
+  teams         Team[]
+  invoices      Invoice[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -120,31 +120,31 @@ model Event {
 }
 
 model Division {
-  id       String  @id @default(cuid())
-  eventId  String
-  event    Event   @relation(fields: [eventId], references: [id])
-  key      String  // e.g., "CADET"
-  name     String  // e.g., "Cadet (14–15)"
-  minAge   Int
-  maxAge   Int
-  gender   Gender
-  notes    String?
+  id      String  @id @default(cuid())
+  eventId String
+  event   Event   @relation(fields: [eventId], references: [id])
+  key     String // e.g., "CADET"
+  name    String // e.g., "Cadet (14–15)"
+  minAge  Int
+  maxAge  Int
+  gender  Gender
+  notes   String?
 
-  entries Entry[]
-  teams   Team[]
+  entries       Entry[]
+  teams         Team[]
   weightClasses WeightClass[] // optional linkage
 
   @@index([eventId, key, gender])
 }
 
 model WeightClass {
-  id         String  @id @default(cuid())
+  id         String    @id @default(cuid())
   eventId    String
-  event      Event   @relation(fields: [eventId], references: [id])
+  event      Event     @relation(fields: [eventId], references: [id])
   divisionId String?
   division   Division? @relation(fields: [divisionId], references: [id])
   gender     Gender
-  name       String   // e.g., "-57kg"
+  name       String // e.g., "-57kg"
   minKg      Float?
   maxKg      Float?
 
@@ -154,26 +154,45 @@ model WeightClass {
   @@index([divisionId])
 }
 
+model Belt {
+  id                  String  @id @default(cuid())
+  name                String?
+  colour              String?
+  notes               String?
+  gradingRequirements String?
+  order               Int
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  Athlete   Athlete[]
+}
+
 model Athlete {
-  id            String   @id @default(cuid())
-  clubId        String
-  club          Club     @relation(fields: [clubId], references: [id])
-  firstName     String
-  lastName      String
-  dob           DateTime
-  gender        Gender
-  nationality   String
-  idType        String?
-  idNumber      String?
-  beltRank      String?
-  weightKg      Float?
-  medicalNotes  String?
-  emergencyName String
-  emergencyPhone String
-  guardianName  String?
-  guardianPhone String?
-  photoUrl      String?
-  waiverUrl     String?
+  id             String    @id @default(cuid())
+  clubId         String
+  club           Club      @relation(fields: [clubId], references: [id])
+  firstName      String
+  lastName       String
+  invoiceRef     String?
+  dob            DateTime
+  gender         Gender
+  nationality    String
+  idType         String?
+  idNumber       String?
+  beltId         String
+  belt           Belt      @relation(fields: [beltId], references: [id])
+  weightKg       Float?
+  joinDate       DateTime?
+  lastGraded     DateTime?
+  isInstructor   Boolean   @default(false)
+  medicalNotes   String?
+  contactEmail   String?
+  contactPhone   String?
+  guardianName1  String?
+  guardianPhone1 String?
+  guardianName2  String?
+  guardianPhone2 String?
+  photoUrl       String?
 
   entries     Entry[]
   teamMembers TeamMember[]
@@ -187,23 +206,23 @@ model Athlete {
 }
 
 model Entry {
-  id            String      @id @default(cuid())
-  eventId       String
-  event         Event       @relation(fields: [eventId], references: [id])
-  clubId        String
-  club          Club        @relation(fields: [clubId], references: [id])
+  id      String @id @default(cuid())
+  eventId String
+  event   Event  @relation(fields: [eventId], references: [id])
+  clubId  String
+  club    Club   @relation(fields: [clubId], references: [id])
 
   // Individual entry
-  athleteId     String?
-  athlete       Athlete?    @relation(fields: [athleteId], references: [id])
+  athleteId String?
+  athlete   Athlete? @relation(fields: [athleteId], references: [id])
 
   // Team entry (optional - when representing a team entry as a row here)
-  teamId        String?
-  team          Team?       @relation(fields: [teamId], references: [id])
+  teamId String?
+  team   Team?   @relation(fields: [teamId], references: [id])
 
-  entryType     EntryType
-  divisionId    String
-  division      Division    @relation(fields: [divisionId], references: [id])
+  entryType  EntryType
+  divisionId String
+  division   Division  @relation(fields: [divisionId], references: [id])
 
   // Used for Kumite individual
   weightClassId String?
@@ -216,32 +235,31 @@ model Entry {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  // Fast filters
-  @@index([eventId, divisionId, entryType, status])
-  @@index([clubId, status])
-
   // Uniqueness (two paths):
   // 1) individual: one unique entry per athlete per event/type/division
   @@unique([eventId, athleteId, entryType, divisionId])
   // 2) team: one unique entry per team per event/type/division
   @@unique([eventId, teamId, entryType, divisionId])
+  // Fast filters
+  @@index([eventId, divisionId, entryType, status])
+  @@index([clubId, status])
 }
 
 model Team {
-  id         String     @id @default(cuid())
+  id         String    @id @default(cuid())
   eventId    String
-  event      Event      @relation(fields: [eventId], references: [id])
+  event      Event     @relation(fields: [eventId], references: [id])
   clubId     String
-  club       Club       @relation(fields: [clubId], references: [id])
+  club       Club      @relation(fields: [clubId], references: [id])
   name       String
-  teamType   EntryType  // use TEAM_KATA or TEAM_KUMITE
+  teamType   EntryType // use TEAM_KATA or TEAM_KUMITE
   divisionId String
-  division   Division   @relation(fields: [divisionId], references: [id])
+  division   Division  @relation(fields: [divisionId], references: [id])
 
-  status     TeamStatus @default(DRAFT)
+  status TeamStatus @default(DRAFT)
 
-  members    TeamMember[]
-  entries    Entry[]    // optional: if you also create an Entry row for team
+  members TeamMember[]
+  entries Entry[] // optional: if you also create an Entry row for team
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -262,14 +280,14 @@ model TeamMember {
 }
 
 model Invoice {
-  id        String        @id @default(cuid())
-  clubId    String
-  club      Club          @relation(fields: [clubId], references: [id])
-  eventId   String
-  event     Event         @relation(fields: [eventId], references: [id])
+  id         String        @id @default(cuid())
+  clubId     String
+  club       Club          @relation(fields: [clubId], references: [id])
+  eventId    String
+  event      Event         @relation(fields: [eventId], references: [id])
   totalCents Int
-  status    InvoiceStatus @default(DUE)
-  pdfUrl    String?
+  status     InvoiceStatus @default(DUE)
+  pdfUrl     String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -281,10 +299,10 @@ model AuditLog {
   id         String   @id @default(cuid())
   userId     String?
   user       User?    @relation(fields: [userId], references: [id])
-  entityType String   // e.g., "Entry", "Team", "Athlete"
+  entityType String // e.g., "Entry", "Team", "Athlete"
   entityId   String
-  action     String   // e.g., "CREATE", "UPDATE", "APPROVE", "RETURN"
-  diffJson   String   // store JSON string of changes
+  action     String // e.g., "CREATE", "UPDATE", "APPROVE", "RETURN"
+  diffJson   String // store JSON string of changes
   createdAt  DateTime @default(now())
 
   @@index([entityType, entityId])

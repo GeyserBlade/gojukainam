@@ -1,10 +1,3 @@
-import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
-import { BrowserRouter, Routes, Route, Navigate, useNavigate } from "react-router-dom";
-
-
-/***************************************
-* src/lib/api.ts - axios wrapper
-***************************************/
 import axios from "axios";
 
 // Vite exposes env via import.meta.env

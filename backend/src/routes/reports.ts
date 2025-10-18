@@ -1,16 +1,19 @@
 import { Router } from "express";
 import { prisma } from "../server";
+import { requireRoles } from "../utils/auth";
 
 export const router = Router();
 
-router.get("/entries.csv", async (req, res) => {
+router.get("/entries.csv", requireRoles("CLUB_MANAGER", "COACH", "ADMIN", "SUPERADMIN"), async (req, res) => {
   const { eventId } = req.query as { eventId?: string };
   if (!eventId) return res.status(400).json({ error: "eventId required" });
 
   // scope to club for non-admins
   const where: any = { eventId };
-  if (req.user?.role !== "SUPERADMIN" && req.user?.role !== "ADMIN") {
-    where.clubId = req.user?.clubId;
+  const isAdmin = req.user?.role === "SUPERADMIN" || req.user?.role === "ADMIN";
+  if (!isAdmin) {
+    if (!req.user?.clubId) return res.status(400).json({ error: "clubId missing for scoped request" });
+    where.clubId = req.user.clubId;
   }
 
   const rows = await prisma.entry.findMany({

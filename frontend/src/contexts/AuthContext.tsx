@@ -1,5 +1,4 @@
-import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
-import { BrowserRouter, Routes, Route, Navigate, useNavigate } from "react-router-dom";
+import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
 
 /***************************************
  * src/contexts/AuthContext.tsx
@@ -26,7 +25,7 @@ export const useAuth = () => {
   return ctx;
 };
 
-export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }: { children: React.ReactNode }) => {
+export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [auth, setAuth] = useState<AuthState>(() => ({
     role: (localStorage.getItem("role") as Role) || undefined,
     clubId: localStorage.getItem("clubId"),

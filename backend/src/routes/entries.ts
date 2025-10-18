@@ -1,17 +1,22 @@
 import { Router } from "express";
 import { prisma } from "../server";
+import { requireRoles } from "../utils/auth";
 import { CreateEntry, UpdateEntryStatus } from "../utils/validators";
 import { assertNoDuplicateEntry, validateWeightClass } from "../utils/eligibility";
 
 export const router = Router();
 
 // list entries by event (club-scoped unless admin)
-router.get("/", async (req, res) => {
+router.get("/", requireRoles("CLUB_MANAGER", "COACH", "ADMIN", "SUPERADMIN"), async (req, res) => {
   const { eventId, clubId } = req.query as { eventId?: string; clubId?: string };
   if (!eventId) return res.status(400).json({ error: "eventId required" });
   const where: any = { eventId };
-  if (req.user?.role !== "SUPERADMIN" && req.user?.role !== "ADMIN") {
-    where.clubId = req.user?.clubId; // force own club
+  const isAdmin = req.user?.role === "SUPERADMIN" || req.user?.role === "ADMIN";
+  if (!isAdmin) {
+    if (!req.user?.clubId) {
+      return res.status(400).json({ error: "clubId missing for scoped request" });
+    }
+    where.clubId = req.user.clubId; // force own club
   } else if (clubId) {
     where.clubId = clubId;
   }
@@ -24,13 +29,15 @@ router.get("/", async (req, res) => {
 });
 
 // create entry (individual or team)
-router.post("/", async (req, res, next) => {
+router.post("/", requireRoles("CLUB_MANAGER", "ADMIN", "SUPERADMIN"), async (req, res, next) => {
   try {
     const body = CreateEntry.parse(req.body);
+    const isAdmin = req.user?.role === "SUPERADMIN" || req.user?.role === "ADMIN";
 
     // club scoping
-    if (req.user?.role !== "SUPERADMIN" && req.user?.role !== "ADMIN") {
-      if (req.user?.clubId !== body.clubId) return res.status(403).json({ error: "Forbidden" });
+    if (!isAdmin) {
+      if (!req.user?.clubId) return res.status(400).json({ error: "clubId missing for scoped request" });
+      if (req.user.clubId !== body.clubId) return res.status(403).json({ error: "Forbidden" });
     }
 
     // individual path
@@ -75,7 +82,7 @@ router.post("/", async (req, res, next) => {
 });
 
 // change status (submit/approve/return)
-router.put("/:id/status", async (req, res, next) => {
+router.put("/:id/status", requireRoles("CLUB_MANAGER", "COACH", "ADMIN", "SUPERADMIN"), async (req, res, next) => {
   try {
     const { id } = req.params;
     const { status, reason } = UpdateEntryStatus.parse({ id, ...req.body });

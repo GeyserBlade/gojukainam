@@ -1,6 +1,6 @@
-import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
-// import { BrowserRouter, Routes, Route, Navigate, useNavigate } from "react-router-dom";
-import { useAuth, Role } from "../contexts/AuthContext";
+import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { useAuth } from "../contexts/AuthContext";
 import { api } from "../lib/api";
 import { listAthletes, listAllAthletes, deleteAthlete, type Athlete } from "../lib/athletes";
 import { Input, Select } from "../components/Input";
@@ -12,8 +12,9 @@ import { Input, Select } from "../components/Input";
 /***************************************
  * src/pages/Dashboard.tsx (placeholder)
  ***************************************/
-const Dashboard: React.FC = () => {
+const Dashboard = () => {
   const { role, clubId, logout } = useAuth();
+  const navigate = useNavigate();
   const [events, setEvents] = useState<any[]>([]);
   const [athletes, setAthletes] = useState<Athlete[]>([]);
   const [loadingAthletes, setLoadingAthletes] = useState(false);
@@ -63,7 +64,7 @@ const Dashboard: React.FC = () => {
         return (
           name.includes(q) ||
           (a.nationality?.toLowerCase?.() || "").includes(q) ||
-          (a.beltRank?.toLowerCase?.() || "").includes(q) ||
+          (a.belt?.name?.toLowerCase?.() || "").includes(q) ||
           clubName.includes(q)
         );
       });
@@ -84,7 +85,7 @@ const Dashboard: React.FC = () => {
         return (a.gender || "").localeCompare(b.gender || "") * dir;
       }
       if (sortBy === "belt") {
-        return (a.beltRank || "").localeCompare(b.beltRank || "") * dir;
+        return ((a.belt?.name || "").localeCompare(b.belt?.name || "")) * dir;
       }
       if (sortBy === "club") {
         return (a.club?.name || "").localeCompare(b.club?.name || "") * dir;
@@ -129,6 +130,31 @@ const Dashboard: React.FC = () => {
               ))}
             </ul>
           </div>
+          {(role === "ADMIN" || role === "SUPERADMIN" || role === "CLUB_MANAGER") && (
+            <div className="p-4 rounded-2xl border border-gray-800 bg-gray-900/50">
+              <h2 className="font-semibold mb-2">Administration</h2>
+              <div className="flex gap-2 flex-wrap">
+                <button
+                  onClick={() => navigate("/athletes")}
+                  className="text-sm px-4 py-2 rounded-md bg-cyan-600/80 hover:bg-cyan-600 text-black font-semibold"
+                >
+                  Manage Athletes
+                </button>
+                <button
+                  onClick={() => navigate("/users")}
+                  className="text-sm px-4 py-2 rounded-md bg-cyan-600/80 hover:bg-cyan-600 text-black font-semibold"
+                >
+                  Manage Users
+                </button>
+                <button
+                  onClick={() => navigate("/belts")}
+                  className="text-sm px-4 py-2 rounded-md bg-cyan-600/80 hover:bg-cyan-600 text-black font-semibold"
+                >
+                  Manage Belts
+                </button>
+              </div>
+            </div>
+          )}
           <div className="p-4 rounded-2xl border border-gray-800 bg-gray-900/50 md:col-span-2">
             <div className="flex items-center justify-between mb-2">
               <h2 className="font-semibold">Athletes</h2>
@@ -164,7 +190,7 @@ const Dashboard: React.FC = () => {
                       <p className="text-sm text-gray-200 truncate">{a.firstName} {a.lastName} <span className="text-xs text-gray-500">({a.gender})</span></p>
                       <p className="text-xs text-gray-500 truncate">
                         {new Date(a.dob).toLocaleDateString()} • {a.nationality}
-                        {a.beltRank ? <> • {a.beltRank}</> : null}
+                        {a.belt?.name ? <> • {a.belt.name}</> : null}
                         {a.weightKg ? <> • {a.weightKg}kg</> : null}
                         {a.club?.name ? <> • {a.club.name}</> : null}
                       </p>

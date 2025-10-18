@@ -10,6 +10,8 @@ import { router as review } from "./routes/review.js";
 import { router as events } from "./routes/events.js";
 import { router as reports } from "./routes/reports.js";
 import { router as clubs } from "./routes/clubs.js";
+import { router as users } from "./routes/users.js";
+import { router as belts } from "./routes/belts.js";
 
 export const prisma = new PrismaClient();
 const app = express();
@@ -27,6 +29,8 @@ app.use("/api/review", review);
 app.use("/api/events", events);
 app.use("/api/reports", reports);
 app.use("/api/clubs", clubs);
+app.use("/api/users", users);
+app.use("/api/belts", belts);
 
 app.use(errorHandler);
 

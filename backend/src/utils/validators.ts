@@ -3,26 +3,31 @@ import { z } from "zod";
 export const GenderEnum = z.enum(["Male", "Female"]);
 export const EntryTypeEnum = z.enum(["KATA","KUMITE","TEAM_KATA","TEAM_KUMITE"]);
 export const EntryStatusEnum = z.enum(["DRAFT","SUBMITTED","APPROVED","RETURNED"]);
+export const RoleEnum = z.enum(["SUPERADMIN","ADMIN","CLUB_MANAGER","COACH","ATHLETE"]);
 
 export const CreateAthlete = z.object({
   clubId: z.string().min(1),
   firstName: z.string().min(1),
   lastName: z.string().min(1),
+  invoiceRef: z.string().optional(),
   dob: z.string().transform(s => new Date(s)),
   gender: GenderEnum,
   nationality: z.string().min(1),
+  idType: z.string().optional(),
   idNumber: z.string().optional(),
-  wkfId: z.string().optional(),
-  beltRank: z.string().optional(),
+  beltId: z.string().min(1),
   weightKg: z.number().optional(),
-  heightCm: z.number().optional(),
+  joinDate: z.string().optional().transform(s => s ? new Date(s) : undefined),
+  lastGraded: z.string().optional().transform(s => s ? new Date(s) : undefined),
+  isInstructor: z.boolean().optional(),
   medicalNotes: z.string().optional(),
-  emergencyName: z.string().min(1),
-  emergencyPhone: z.string().min(1),
-  guardianName: z.string().optional(),
-  guardianPhone: z.string().optional(),
+  contactEmail: z.string().email().optional(),
+  contactPhone: z.string().optional(),
+  guardianName1: z.string().optional(),
+  guardianPhone1: z.string().optional(),
+  guardianName2: z.string().optional(),
+  guardianPhone2: z.string().optional(),
   photoUrl: z.string().url().optional(),
-  waiverUrl: z.string().url().optional(),
 });
 
 export const CreateEntry = z.object({
@@ -32,7 +37,7 @@ export const CreateEntry = z.object({
   divisionId: z.string(),
   athleteId: z.string().optional(),      // required for individual
   weightClassId: z.string().optional(),  // required for Kumite individual
-  teamId: z.string().optional(),         // required for team entries
+    teamId: z.string().optional(),         // required for team entries
   feeCents: z.number().int().nonnegative().default(0),
   status: EntryStatusEnum.default("DRAFT"),
   notes: z.string().optional(),
@@ -66,3 +71,24 @@ export const AddTeamMembers = z.object({
     isReserve: z.boolean().default(false),
   })).min(1),
 });
+
+// ---------------- Users ----------------
+export const CreateUser = z.object({
+  name: z.string().optional(),
+  email: z.string().email(),
+  role: RoleEnum,
+  clubId: z.string().optional().nullable(),
+});
+
+export const UpdateUser = CreateUser.partial();
+
+// ---------------- Belts ----------------
+export const CreateBelt = z.object({
+  name: z.string().optional().nullable(),
+  colour: z.string().optional().nullable(),
+  notes: z.string().optional().nullable(),
+  gradingRequirements: z.string().optional().nullable(),
+  order: z.number().int(),
+});
+
+export const UpdateBelt = CreateBelt.partial();

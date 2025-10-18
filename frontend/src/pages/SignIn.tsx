@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth, Role } from "../contexts/AuthContext";
 import { Button } from "../components/Input";
@@ -11,7 +11,7 @@ import { Select } from "../components/Input";
  ***************************************/
 const roles: Role[] = ["SUPERADMIN", "ADMIN", "CLUB_MANAGER", "COACH", "ATHLETE"];
 
-export const SignInPage: React.FC = () => {
+export const SignInPage = () => {
   const { loginDev } = useAuth();
   const nav = useNavigate();
   const [mode, setMode] = useState<"dev" | "magic">("dev");
@@ -22,14 +22,14 @@ export const SignInPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
 
-  async function onDevSignIn(e: React.FormEvent) {
+  async function onDevSignIn(e: FormEvent) {
     e.preventDefault();
     setError(null);
     await loginDev({ role, clubId: clubId || undefined });
     nav("/dashboard");
   }
 
-  async function onMagicLink(e: React.FormEvent) {
+  async function onMagicLink(e: FormEvent) {
     e.preventDefault();
     setError(null); setInfo(null); setSending(true);
     try {
