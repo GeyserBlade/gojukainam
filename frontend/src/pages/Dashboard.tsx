@@ -12,6 +12,16 @@ import { Input, Select } from "../components/Input";
 /***************************************
  * src/pages/Dashboard.tsx (placeholder)
  ***************************************/
+function calculateAge(dob: string) {
+  const birth = new Date(dob);
+  if (Number.isNaN(birth.getTime())) return null;
+  const today = new Date();
+  let age = today.getFullYear() - birth.getFullYear();
+  const monthDiff = today.getMonth() - birth.getMonth();
+  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birth.getDate())) age--;
+  return age >= 0 ? age : null;
+}
+
 const Dashboard = () => {
   const { role, clubId, logout } = useAuth();
   const navigate = useNavigate();
@@ -140,11 +150,25 @@ const Dashboard = () => {
                 >
                   Manage Athletes
                 </button>
+                {role === "SUPERADMIN" && (
+                  <button
+                    onClick={() => navigate("/athletes/import")}
+                    className="text-sm px-4 py-2 rounded-md bg-cyan-600/80 hover:bg-cyan-600 text-black font-semibold"
+                  >
+                    Import Athletes
+                  </button>
+                )}
                 <button
                   onClick={() => navigate("/users")}
                   className="text-sm px-4 py-2 rounded-md bg-cyan-600/80 hover:bg-cyan-600 text-black font-semibold"
                 >
                   Manage Users
+                </button>
+                <button
+                  onClick={() => navigate("/clubs")}
+                  className="text-sm px-4 py-2 rounded-md bg-cyan-600/80 hover:bg-cyan-600 text-black font-semibold"
+                >
+                  Manage Clubs
                 </button>
                 <button
                   onClick={() => navigate("/belts")}
@@ -189,7 +213,11 @@ const Dashboard = () => {
                     <div className="min-w-0">
                       <p className="text-sm text-gray-200 truncate">{a.firstName} {a.lastName} <span className="text-xs text-gray-500">({a.gender})</span></p>
                       <p className="text-xs text-gray-500 truncate">
-                        {new Date(a.dob).toLocaleDateString()} • {a.nationality}
+                        {new Date(a.dob).toLocaleDateString()}
+                        {(() => {
+                          const age = calculateAge(a.dob);
+                          return age !== null ? <> • {age} yrs</> : null;
+                        })()}
                         {a.belt?.name ? <> • {a.belt.name}</> : null}
                         {a.weightKg ? <> • {a.weightKg}kg</> : null}
                         {a.club?.name ? <> • {a.club.name}</> : null}

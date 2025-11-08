@@ -58,3 +58,19 @@ export async function updateAthlete(id: string, payload: Partial<Athlete>): Prom
 export async function deleteAthlete(id: string): Promise<void> {
   await api.delete(`/athletes/${id}`);
 }
+
+export type AthleteImportResult = {
+  insertedCount: number;
+  failedCount: number;
+  failures: Array<{ rowNumber: number; reason: string }>;
+};
+
+export async function importAthletes(params: { clubId: string; file: File }): Promise<AthleteImportResult> {
+  const formData = new FormData();
+  formData.append("clubId", params.clubId);
+  formData.append("file", params.file);
+  const { data } = await api.post("/athletes/import", formData, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+  return data;
+}

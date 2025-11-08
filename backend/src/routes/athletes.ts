@@ -1,8 +1,11 @@
 import { Router } from "express";
-import { z } from "zod";
 import { prisma } from "../server";
 import { requireRoles } from "../utils/auth";
 import { CreateAthlete } from "../utils/validators";
+import multer from "multer";
+import { parse as parseCsv } from "csv-parse/sync";
+import * as XLSX from "xlsx";
+import { ZodError } from "zod";
 
 export const router = Router();
 
@@ -14,6 +17,11 @@ function scrubEmptyStrings<T extends Record<string, any>>(obj: T): T {
   }
   return copy as T;
 }
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
+});
 
 // list all athletes (Superadmin)
 router.get("/all", requireRoles("SUPERADMIN"), async (_req, res) => {
@@ -130,5 +138,119 @@ router.delete("/:id", requireRoles("CLUB_MANAGER","ADMIN","SUPERADMIN"), async (
     });
 
     res.status(204).send();
+  } catch (err) { next(err); }
+});
+
+type RawRow = Record<string, any> & { __rowNum__?: number };
+
+function parseImportFile(buffer: Buffer, filename: string): RawRow[] {
+  const lower = filename.toLowerCase();
+  if (lower.endsWith(".csv")) {
+    const text = buffer.toString("utf8");
+    return parseCsv(text, {
+      columns: true,
+      skip_empty_lines: true,
+      trim: true,
+    }) as RawRow[];
+  }
+  if (lower.endsWith(".xlsx") || lower.endsWith(".xls") || lower.endsWith(".xlsm") || lower.endsWith(".xlsb")) {
+    const workbook = XLSX.read(buffer, { type: "buffer" });
+    const sheetName = workbook.SheetNames[0];
+    if (!sheetName) return [];
+    const sheet = workbook.Sheets[sheetName];
+    return XLSX.utils.sheet_to_json<RawRow>(sheet, { defval: "", raw: false });
+  }
+  throw { status: 400, message: "Unsupported file type. Upload CSV or Excel." };
+}
+
+function mapImportRow(row: RawRow, clubId: string) {
+  const fields = [
+    "firstName",
+    "lastName",
+    "invoiceRef",
+    "dob",
+    "gender",
+    "nationality",
+    "idType",
+    "idNumber",
+    "beltId",
+    "weightKg",
+    "joinDate",
+    "lastGraded",
+    "isInstructor",
+    "medicalNotes",
+    "contactEmail",
+    "contactPhone",
+    "guardianName1",
+    "guardianPhone1",
+    "guardianName2",
+    "guardianPhone2",
+    "photoUrl",
+  ] as const;
+  const mapped: Record<string, any> = { clubId };
+  for (const key of fields) {
+    const value = row[key];
+    if (value === undefined || value === null) continue;
+    if (typeof value === "string") {
+      mapped[key] = value.trim();
+    } else {
+      mapped[key] = value;
+    }
+  }
+  if (mapped.gender) {
+    const g = String(mapped.gender).trim().toLowerCase();
+    if (g === "male" || g === "m") mapped.gender = "Male";
+    else if (g === "female" || g === "f") mapped.gender = "Female";
+  }
+  if (mapped.weightKg !== undefined) {
+    const num = Number(mapped.weightKg);
+    mapped.weightKg = Number.isFinite(num) ? num : undefined;
+  }
+  if (mapped.isInstructor !== undefined) {
+    const val = String(mapped.isInstructor).trim().toLowerCase();
+    mapped.isInstructor = val === "true" || val === "1" || val === "yes";
+  }
+  return scrubEmptyStrings(mapped);
+}
+
+router.post("/import", requireRoles("SUPERADMIN"), upload.single("file"), async (req, res, next) => {
+  try {
+    const clubId = (req.body?.clubId as string | undefined)?.trim();
+    if (!clubId) return res.status(400).json({ error: "clubId required" });
+    const club = await prisma.club.findUnique({ where: { id: clubId }, select: { id: true } });
+    if (!club) return res.status(404).json({ error: "Club not found" });
+    if (!req.file) return res.status(400).json({ error: "file required" });
+
+    const rows = parseImportFile(req.file.buffer, req.file.originalname);
+    if (rows.length === 0) return res.status(400).json({ error: "No rows found in file" });
+
+    const failures: { rowNumber: number; reason: string }[] = [];
+    let insertedCount = 0;
+
+    for (let i = 0; i < rows.length; i++) {
+      const raw = rows[i] ?? {};
+      const rowNumber = typeof raw.__rowNum__ === "number" ? raw.__rowNum__ + 1 : i + 2;
+      try {
+        const data = mapImportRow(raw, clubId);
+        const parsed = CreateAthlete.parse(data);
+        const athleteData = { ...parsed, gender: parsed.gender as "Male" | "Female" };
+        await prisma.athlete.create({ data: athleteData });
+        insertedCount++;
+      } catch (err: any) {
+        let reason = err?.message ?? "Unknown error";
+        if (err instanceof ZodError) {
+          reason = err.issues.map(issue => `${issue.path.join(".") || "field"}: ${issue.message}`).join("; ");
+        } else if (err?.code === "P2002") {
+          reason = "Duplicate record violates unique constraint";
+        }
+        failures.push({ rowNumber, reason });
+      }
+    }
+
+    res.json({
+      insertedCount,
+      failedCount: failures.length,
+      failures,
+    });
   } catch (err) { next(err); }
 });

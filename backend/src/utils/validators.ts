@@ -92,3 +92,15 @@ export const CreateBelt = z.object({
 });
 
 export const UpdateBelt = CreateBelt.partial();
+
+// ---------------- Clubs ----------------
+export const CreateClub = z.object({
+  name: z.string().min(1),
+  region: z.string().optional().nullable(),
+  contactName: z.string().min(1),
+  email: z.string().email(),
+  phone: z.string().optional().nullable(),
+  notes: z.string().optional().nullable(),
+});
+
+export const UpdateClub = CreateClub.partial();
