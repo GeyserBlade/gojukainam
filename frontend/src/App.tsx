@@ -9,6 +9,7 @@ import AthletesListPage from "./pages/AthletesList";
 import AthleteFormPage from "./pages/AthleteForm";
 import ClubsPage from "./pages/Clubs";
 import AthleteImportPage from "./pages/AthleteImport";
+import AthleteExtractPage from "./pages/AthleteExtract";
 
 const Protected: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { role } = useAuth();
@@ -27,6 +28,7 @@ const AppRoutes: React.FC = () => (
     <Route path="/athletes/new" element={<Protected><AthleteFormPage /></Protected>} />
     <Route path="/athletes/:id/edit" element={<Protected><AthleteFormPage /></Protected>} />
     <Route path="/athletes/import" element={<Protected><AthleteImportPage /></Protected>} />
+    <Route path="/athletes/extract" element={<Protected><AthleteExtractPage /></Protected>} />
     <Route path="*" element={<Navigate to="/signin" replace />} />
   </Routes>
 );

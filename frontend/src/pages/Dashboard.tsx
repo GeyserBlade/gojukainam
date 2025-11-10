@@ -150,6 +150,12 @@ const Dashboard = () => {
                 >
                   Manage Athletes
                 </button>
+                <button
+                  onClick={() => navigate("/athletes/extract")}
+                  className="text-sm px-4 py-2 rounded-md bg-cyan-600/80 hover:bg-cyan-600 text-black font-semibold"
+                >
+                  Athlete Extract
+                </button>
                 {role === "SUPERADMIN" && (
                   <button
                     onClick={() => navigate("/athletes/import")}
@@ -190,7 +196,7 @@ const Dashboard = () => {
               <div className="flex-1">
                 <Input placeholder="Search name, club, nationality, belt..." value={query} onChange={(e)=>setQuery(e.target.value)} />
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 md:min-w-[300px]">
                 <Select value={sortBy} onChange={(e)=>setSortBy(e.target.value as any)}>
                   <option value="name">Sort: Name</option>
                   <option value="dob">Sort: DOB</option>
