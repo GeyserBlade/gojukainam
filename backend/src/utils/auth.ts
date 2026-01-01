@@ -1,4 +1,4 @@
-import type { Request, Response, NextFunction } from "express";
+﻿import type { Request, Response, NextFunction } from "express";
 
 export type AuthUser = {
   id: string;
@@ -14,7 +14,11 @@ declare global {
   }
 }
 
-export function authMiddleware(req: Request, _res: Response, next: NextFunction) {
+export function authMiddleware(req: Request, res: Response, next: NextFunction) {
+  const allowDevAuth = process.env.ALLOW_DEV_AUTH === "true" || process.env.NODE_ENV !== "production";
+  if (!allowDevAuth) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
   // TODO: replace with JWT/Session. For dev, allow a header to impersonate.
   const role = (req.header("x-role") as AuthUser["role"]) || "SUPERADMIN";
   const clubId = req.header("x-club-id") || undefined;
@@ -30,3 +34,7 @@ export function requireRoles(...roles: AuthUser["role"][]) {
     next();
   };
 }
+
+
+
+

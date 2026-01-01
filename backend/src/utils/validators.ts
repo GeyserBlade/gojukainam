@@ -1,33 +1,40 @@
-import { z } from "zod";
+﻿import { z } from "zod";
 
 export const GenderEnum = z.enum(["Male", "Female"]);
 export const EntryTypeEnum = z.enum(["KATA","KUMITE","TEAM_KATA","TEAM_KUMITE"]);
 export const EntryStatusEnum = z.enum(["DRAFT","SUBMITTED","APPROVED","RETURNED"]);
 export const RoleEnum = z.enum(["SUPERADMIN","ADMIN","CLUB_MANAGER","COACH","ATHLETE"]);
 
+const dateSchema = z.preprocess((value) => {
+  if (value === "" || value === null || value === undefined) return value;
+  if (value instanceof Date) return value;
+  if (typeof value === "string" || typeof value === "number") return new Date(value);
+  return value;
+}, z.date().refine((d) => !Number.isNaN(d.getTime()), "Invalid date"));
+
 export const CreateAthlete = z.object({
   clubId: z.string().min(1),
   firstName: z.string().min(1),
   lastName: z.string().min(1),
-  invoiceRef: z.string().optional(),
-  dob: z.string().transform(s => new Date(s)),
+  invoiceRef: z.string().optional().nullable(),
+  dob: dateSchema,
   gender: GenderEnum,
   nationality: z.string().min(1),
-  idType: z.string().optional(),
-  idNumber: z.string().optional(),
+  idType: z.string().optional().nullable(),
+  idNumber: z.string().optional().nullable(),
   beltId: z.string().min(1),
-  weightKg: z.number().optional(),
-  joinDate: z.string().optional().transform(s => s ? new Date(s) : undefined),
-  lastGraded: z.string().optional().transform(s => s ? new Date(s) : undefined),
-  isInstructor: z.boolean().optional(),
-  medicalNotes: z.string().optional(),
-  contactEmail: z.string().email().optional(),
-  contactPhone: z.string().optional(),
-  guardianName1: z.string().optional(),
-  guardianPhone1: z.string().optional(),
-  guardianName2: z.string().optional(),
-  guardianPhone2: z.string().optional(),
-  photoUrl: z.string().url().optional(),
+  weightKg: z.number().optional().nullable(),
+  joinDate: dateSchema.optional().nullable(),
+  lastGraded: dateSchema.optional().nullable(),
+  isInstructor: z.boolean().optional().nullable(),
+  medicalNotes: z.string().optional().nullable(),
+  contactEmail: z.string().email().optional().nullable(),
+  contactPhone: z.string().optional().nullable(),
+  guardianName1: z.string().optional().nullable(),
+  guardianPhone1: z.string().optional().nullable(),
+  guardianName2: z.string().optional().nullable(),
+  guardianPhone2: z.string().optional().nullable(),
+  photoUrl: z.string().url().optional().nullable(),
 });
 
 export const CreateEntry = z.object({
@@ -37,7 +44,7 @@ export const CreateEntry = z.object({
   divisionId: z.string(),
   athleteId: z.string().optional(),      // required for individual
   weightClassId: z.string().optional(),  // required for Kumite individual
-    teamId: z.string().optional(),         // required for team entries
+  teamId: z.string().optional(),         // required for team entries
   feeCents: z.number().int().nonnegative().default(0),
   status: EntryStatusEnum.default("DRAFT"),
   notes: z.string().optional(),
@@ -104,3 +111,6 @@ export const CreateClub = z.object({
 });
 
 export const UpdateClub = CreateClub.partial();
+
+
+

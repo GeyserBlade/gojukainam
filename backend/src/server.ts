@@ -1,4 +1,4 @@
-import express from "express";
+﻿import express from "express";
 import cors from "cors";
 import { PrismaClient } from "@prisma/client";
 import { errorHandler } from "./utils/error-handler.js";
@@ -35,4 +35,5 @@ app.use("/api/belts", belts);
 app.use(errorHandler);
 
 const PORT = process.env.PORT ?? 4000;
-app.listen(PORT, () => console.log(`🚀 API on http://localhost:${PORT}`));
+app.listen(PORT, () => console.log(`API on http://localhost:${PORT}`));
+

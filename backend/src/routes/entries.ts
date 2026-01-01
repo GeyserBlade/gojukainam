@@ -101,6 +101,9 @@ router.put("/:id/status", requireRoles("CLUB_MANAGER", "COACH", "ADMIN", "SUPERA
     if (isClub) {
       if (existing.clubId !== req.user?.clubId) return res.status(403).json({ error: "Forbidden" });
       if (status !== "SUBMITTED") return res.status(403).json({ error: "Club can only submit" });
+      if (existing.status !== "DRAFT") {
+        return res.status(409).json({ error: "Only DRAFT entries can be submitted" });
+      }
     }
     if (!isAdmin && !isClub) return res.status(403).json({ error: "Forbidden" });
 

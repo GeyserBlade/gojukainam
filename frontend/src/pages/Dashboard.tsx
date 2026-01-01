@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+﻿import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { api } from "../lib/api";
@@ -136,7 +136,7 @@ const Dashboard = () => {
             <h2 className="font-semibold mb-2">Events</h2>
             <ul className="text-sm text-gray-300 list-disc pl-5">
               {events.map(ev => (
-                <li key={ev.id}>{ev.name} — {new Date(ev.startDate).toLocaleDateString()}</li>
+                <li key={ev.id}>{ev.name} - {new Date(ev.startDate).toLocaleDateString()}</li>
               ))}
             </ul>
           </div>
@@ -210,7 +210,7 @@ const Dashboard = () => {
                 </Select>
               </div>
             </div>
-            {loadingAthletes && <p className="text-sm text-gray-400">Loading athletes…</p>}
+            {loadingAthletes && <p className="text-sm text-gray-400">Loading athletes...</p>}
             {errorAthletes && <p className="text-sm text-red-400">{errorAthletes}</p>}
             {!!filteredSorted.length && (
               <ul className="divide-y divide-gray-800">
@@ -222,11 +222,11 @@ const Dashboard = () => {
                         {new Date(a.dob).toLocaleDateString()}
                         {(() => {
                           const age = calculateAge(a.dob);
-                          return age !== null ? <> • {age} yrs</> : null;
+                          return age !== null ? <> - {age} yrs</> : null;
                         })()}
-                        {a.belt?.name ? <> • {a.belt.name}</> : null}
-                        {a.weightKg ? <> • {a.weightKg}kg</> : null}
-                        {a.club?.name ? <> • {a.club.name}</> : null}
+                        {a.belt?.name ? <> - {a.belt.name}</> : null}
+                        {a.weightKg ? <> - {a.weightKg}kg</> : null}
+                        {a.club?.name ? <> - {a.club.name}</> : null}
                       </p>
                     </div>
                     <button
@@ -249,3 +249,4 @@ const Dashboard = () => {
   );
 };
 export { Dashboard };
+

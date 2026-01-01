@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+﻿import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { Button, Input, Label, Select, Textarea } from "../components/Input";
@@ -7,6 +7,18 @@ import { listClubs, Club } from "../lib/clubs";
 import { listBelts, Belt } from "../lib/belts";
 
 type Mode = "create" | "edit";
+
+const formatApiError = (err: any) => {
+  const data = err?.response?.data;
+  if (data?.issues && Array.isArray(data.issues)) {
+    const details = data.issues.map((issue: any) => {
+      const path = Array.isArray(issue.path) && issue.path.length ? issue.path.join(".") : "field";
+      return `${path}: ${issue.message}`;
+    }).join("; ");
+    return `${data.error || "Validation failed"}: ${details}`;
+  }
+  return data?.error || err?.message || "Failed to save athlete";
+};
 
 const AthleteFormPage = () => {
   const { id } = useParams<{ id: string }>();
@@ -62,19 +74,20 @@ const AthleteFormPage = () => {
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
+    setError(null);
     try {
       const payload: any = { ...form };
       if (typeof payload.weightKg === "string") payload.weightKg = Number(payload.weightKg) || undefined;
       if (!payload.clubId && clubId) payload.clubId = clubId;
       if (mode === "create") {
-        const a = await createAthlete(payload);
+        await createAthlete(payload);
         nav("/athletes");
       } else if (mode === "edit" && id) {
         await updateAthlete(id, payload);
         nav("/athletes");
       }
     } catch (err: any) {
-      alert(err?.response?.data?.error || err.message || "Failed to save athlete");
+      setError(formatApiError(err));
     }
   }
 
@@ -85,7 +98,7 @@ const AthleteFormPage = () => {
           <h1 className="text-2xl font-semibold">{mode === "create" ? "New Athlete" : "Edit Athlete"}</h1>
           <button className="text-sm text-gray-400 hover:text-white" onClick={() => nav("/athletes")}>Back</button>
         </div>
-        {loading && <p className="text-sm text-gray-400">Loading…</p>}
+        {loading && <p className="text-sm text-gray-400">Loading...</p>}
         {error && <p className="text-sm text-red-400">{error}</p>}
         <form onSubmit={onSubmit} className="space-y-4">
           {role !== "CLUB_MANAGER" && (
