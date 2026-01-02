@@ -1,0 +1,93 @@
+import { prisma } from "../server.js";
+import { CreateEntry, UpdateEntryStatus } from "../utils/validators.js";
+import { assertNoDuplicateEntry, validateWeightClass } from "../utils/eligibility.js";
+
+export class EntryService {
+  static async list(eventId: string, clubId?: string) {
+    const where: any = { eventId };
+    if (clubId) where.clubId = clubId;
+
+    return prisma.entry.findMany({
+      where,
+      include: { athlete: true, team: true, division: true, weightClass: true, club: true },
+      orderBy: { createdAt: "desc" },
+    });
+  }
+
+  static async create(data: unknown) {
+    const body = CreateEntry.parse(data);
+
+    // individual path
+    if (body.entryType === "KATA" || body.entryType === "KUMITE") {
+      if (!body.athleteId) throw { status: 400, message: "athleteId required for individual entries" };
+      const athlete = await prisma.athlete.findUnique({ where: { id: body.athleteId } });
+      if (!athlete) throw { status: 404, message: "Athlete not found" };
+      if (athlete.clubId !== body.clubId) throw { status: 403, message: "Athlete does not belong to club" };
+
+      // kumite needs weight class
+      if (body.entryType === "KUMITE") {
+        if (!body.weightClassId) throw { status: 400, message: "weightClassId required for Kumite" };
+        await validateWeightClass(body.weightClassId, body.eventId, body.divisionId, athlete.gender);
+      }
+
+      await assertNoDuplicateEntry({
+        eventId: body.eventId,
+        entryType: body.entryType,
+        divisionId: body.divisionId,
+        athleteId: body.athleteId
+      });
+    }
+
+    // team path
+    if (body.entryType === "TEAM_KATA" || body.entryType === "TEAM_KUMITE") {
+      if (!body.teamId) throw { status: 400, message: "teamId required for team entries" };
+      const team = await prisma.team.findUnique({ where: { id: body.teamId } });
+      if (!team) throw { status: 404, message: "Team not found" };
+      if (team.clubId !== body.clubId) throw { status: 403, message: "Team does not belong to club" };
+
+      await assertNoDuplicateEntry({
+        eventId: body.eventId,
+        entryType: body.entryType,
+        divisionId: body.divisionId,
+        teamId: body.teamId
+      });
+    }
+
+    return prisma.entry.create({ data: body });
+  }
+
+  static async updateStatus(id: string, data: unknown, user: { id: string; role: string; clubId?: string | null }) {
+    const { status, reason } = UpdateEntryStatus.parse({ id, ...(data as any) });
+
+    const existing = await prisma.entry.findUnique({
+      where: { id }, include: { club: true }
+    });
+    if (!existing) throw { status: 404, message: "Not found" };
+
+    // permissions:
+    // - club can move DRAFT -> SUBMITTED on own entries
+    // - admin can APPROVE/RETURN any
+    const isClub = user.role === "CLUB_MANAGER" || user.role === "COACH";
+    const isAdmin = user.role === "SUPERADMIN" || user.role === "ADMIN";
+
+    if (isClub) {
+      if (existing.clubId !== user.clubId) throw { status: 403, message: "Forbidden" };
+      if (status !== "SUBMITTED") throw { status: 403, message: "Club can only submit" };
+      if (existing.status !== "DRAFT") {
+        throw { status: 409, message: "Only DRAFT entries can be submitted" };
+      }
+    }
+    if (!isAdmin && !isClub) throw { status: 403, message: "Forbidden" };
+
+    return prisma.$transaction(async (tx) => {
+      const u = await tx.entry.update({ where: { id }, data: { status } });
+      await tx.auditLog.create({
+        data: {
+          userId: user.id, entityType: "Entry", entityId: id,
+          action: `STATUS_${status}`, diffJson: JSON.stringify({ reason })
+        }
+      });
+      return u;
+    });
+  }
+}

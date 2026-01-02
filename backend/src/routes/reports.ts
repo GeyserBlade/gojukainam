@@ -1,8 +1,10 @@
 import { Router } from "express";
-import { prisma } from "../server";
-import { requireRoles } from "../utils/auth";
+import { prisma } from "../server.js";
+import { requireRoles } from "../utils/auth.js";
 
 export const router = Router();
+
+// ... existing code ...
 
 router.get("/entries.csv", requireRoles("CLUB_MANAGER", "COACH", "ADMIN", "SUPERADMIN"), async (req, res) => {
   const { eventId } = req.query as { eventId?: string };

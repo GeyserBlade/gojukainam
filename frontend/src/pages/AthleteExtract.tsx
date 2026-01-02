@@ -15,30 +15,14 @@ type Filters = {
   maxAge: string;
 };
 
-const calculateAge = (dob: string) => {
+const calculateAge = (dob: string, refDate: Date = new Date()) => {
   const birth = new Date(dob);
   if (Number.isNaN(birth.getTime())) return null;
-  const today = new Date();
-  let age = today.getFullYear() - birth.getFullYear();
-  const monthDiff = today.getMonth() - birth.getMonth();
-  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birth.getDate())) age--;
+  let age = refDate.getFullYear() - birth.getFullYear();
+  const monthDiff = refDate.getMonth() - birth.getMonth();
+  if (monthDiff < 0 || (monthDiff === 0 && refDate.getDate() < birth.getDate())) age--;
   return age >= 0 ? age : null;
 };
-
-const columns = [
-  { label: "First Name", get: (a: Athlete) => a.firstName },
-  { label: "Last Name", get: (a) => a.lastName },
-  { label: "Gender", get: (a) => a.gender },
-  { label: "DOB", get: (a) => new Date(a.dob).toLocaleDateString() },
-  { label: "Age", get: (a) => String(calculateAge(a.dob) ?? "") },
-  { label: "Club", get: (a) => a.club?.name ?? "" },
-  { label: "Belt", get: (a) => a.belt?.name ?? "" },
-  { label: "Nationality", get: (a) => a.nationality ?? "" },
-  { label: "Weight (kg)", get: (a) => a.weightKg ? String(a.weightKg) : "" },
-  { label: "Instructor", get: (a) => a.isInstructor ? "Yes" : "No" },
-  { label: "Contact Email", get: (a) => a.contactEmail ?? "" },
-  { label: "Contact Phone", get: (a) => a.contactPhone ?? "" },
-];
 
 const AthleteExtractPage = () => {
   const { role, clubId } = useAuth();
@@ -55,6 +39,7 @@ const AthleteExtractPage = () => {
     minAge: "",
     maxAge: "",
   });
+  const [ageRefDate, setAgeRefDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -62,6 +47,24 @@ const AthleteExtractPage = () => {
 
   const canExtract = role === "SUPERADMIN" || role === "ADMIN" || role === "CLUB_MANAGER" || role === "COACH";
   const canSeeAll = role === "SUPERADMIN";
+
+  const columns = useMemo(() => {
+    const refDate = new Date(ageRefDate);
+    return [
+      { label: "First Name", get: (a: Athlete) => a.firstName },
+      { label: "Last Name", get: (a: Athlete) => a.lastName },
+      { label: "Gender", get: (a: Athlete) => a.gender },
+      { label: "DOB", get: (a: Athlete) => new Date(a.dob).toLocaleDateString() },
+      { label: "Age", get: (a: Athlete) => String(calculateAge(a.dob, refDate) ?? "") },
+      { label: "Club", get: (a: Athlete) => a.club?.name ?? "" },
+      { label: "Belt", get: (a: Athlete) => a.belt?.name ?? "" },
+      { label: "Nationality", get: (a: Athlete) => a.nationality ?? "" },
+      { label: "Weight (kg)", get: (a: Athlete) => a.weightKg ? String(a.weightKg) : "" },
+      { label: "Instructor", get: (a: Athlete) => a.isInstructor ? "Yes" : "No" },
+      { label: "Contact Email", get: (a: Athlete) => a.contactEmail ?? "" },
+      { label: "Contact Phone", get: (a: Athlete) => a.contactPhone ?? "" },
+    ];
+  }, [ageRefDate]);
 
   useEffect(() => {
     setFilters((prev) => ({ ...prev, clubId: clubId ?? "" }));
@@ -106,13 +109,14 @@ const AthleteExtractPage = () => {
     const search = filters.search.trim().toLowerCase();
     const minAge = filters.minAge ? Number(filters.minAge) : null;
     const maxAge = filters.maxAge ? Number(filters.maxAge) : null;
+    const refDate = new Date(ageRefDate);
 
     return athletes.filter((athlete) => {
       if (filters.clubId && athlete.clubId !== filters.clubId) return false;
       if (filters.beltId && athlete.beltId !== filters.beltId) return false;
       if (filters.gender && athlete.gender !== filters.gender) return false;
 
-      const age = calculateAge(athlete.dob);
+      const age = calculateAge(athlete.dob, refDate);
       if (minAge !== null && (age ?? Infinity) < minAge) return false;
       if (maxAge !== null && (age ?? -Infinity) > maxAge) return false;
 
@@ -128,7 +132,7 @@ const AthleteExtractPage = () => {
       }
       return true;
     });
-  }, [athletes, filters]);
+  }, [athletes, filters, ageRefDate]);
 
   const availableAthletes = useMemo(() => {
     const selectedSet = new Set(selectedIds);
@@ -295,16 +299,26 @@ const AthleteExtractPage = () => {
               value={filters.maxAge}
               onChange={(e) => setFilters((prev) => ({ ...prev, maxAge: e.target.value }))}
             />
+            <Input
+              type="date"
+              placeholder="Age Ref Date"
+              title="Age Calculation Reference Date"
+              value={ageRefDate}
+              onChange={(e) => setAgeRefDate(e.target.value)}
+            />
             <button
-              className="rounded-2xl bg-gray-800/60 border border-gray-700 text-sm text-gray-200 hover:border-cyan-500 transition py-2"
-              onClick={() => setFilters({
-                search: "",
-                clubId: clubId ?? "",
-                beltId: "",
-                gender: "",
-                minAge: "",
-                maxAge: "",
-              })}
+              className="col-span-4 md:col-span-4 rounded-2xl bg-gray-800/60 border border-gray-700 text-sm text-gray-200 hover:border-cyan-500 transition py-2"
+              onClick={() => {
+                setFilters({
+                  search: "",
+                  clubId: clubId ?? "",
+                  beltId: "",
+                  gender: "",
+                  minAge: "",
+                  maxAge: "",
+                });
+                setAgeRefDate(new Date().toISOString().split('T')[0]);
+              }}
             >
               Reset filters
             </button>
@@ -418,7 +432,7 @@ const AthleteExtractPage = () => {
                   <p className="text-xs text-gray-400 mt-2">
                     {athlete.gender} • DOB {new Date(athlete.dob).toLocaleDateString()}
                     {(() => {
-                      const age = calculateAge(athlete.dob);
+                      const age = calculateAge(athlete.dob, new Date(ageRefDate));
                       return age !== null ? ` • ${age} yrs` : "";
                     })()}
                   </p>

@@ -1,13 +1,10 @@
-﻿import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { api } from "../lib/api";
 import { listAthletes, listAllAthletes, deleteAthlete, type Athlete } from "../lib/athletes";
 import { Input, Select } from "../components/Input";
-// import { Button } from "../components/Input";
-// import { Input } from "../components/Input";
-// import { Label } from "../components/Input";
-// import { Select } from "../components/Input";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 
 /***************************************
  * src/pages/Dashboard.tsx (placeholder)
@@ -25,48 +22,71 @@ function calculateAge(dob: string) {
 const Dashboard = () => {
   const { role, clubId, logout } = useAuth();
   const navigate = useNavigate();
-  const [events, setEvents] = useState<any[]>([]);
-  const [athletes, setAthletes] = useState<Athlete[]>([]);
-  const [loadingAthletes, setLoadingAthletes] = useState(false);
-  const [errorAthletes, setErrorAthletes] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+
   const [query, setQuery] = useState("");
   const [sortBy, setSortBy] = useState<"name"|"dob"|"gender"|"belt"|"club">("name");
   const [sortDir, setSortDir] = useState<"asc"|"desc">("asc");
 
-  // added state for club record (so we can show name)
-  const [club, setClub] = useState<{ id: string; name?: string } | null>(null);
-
-  useEffect(() => { api.get("/events").then(r => setEvents(r.data)); }, []);
-
-  // fetch club details when clubId changes
-  useEffect(() => {
-    if (!clubId) {
-      setClub(null);
-      return;
+  // 1. Fetch Events
+  const { data: events = [] } = useQuery({
+    queryKey: ['events'],
+    queryFn: async () => {
+      const res = await api.get("/events");
+      return res.data;
     }
-    let cancelled = false;
-    api.get(`/clubs/${clubId}`)
-      .then((r) => { if (!cancelled) setClub(r.data); })
-      .catch(() => { if (!cancelled) setClub(null); });
-    return () => { cancelled = true; };
-  }, [clubId]);
+  });
 
-  useEffect(() => {
-    setAthletes([]);
-    // SUPERADMIN/ADMIN without clubId -> list all
-    const canListAll = role === "SUPERADMIN";
-    if (!clubId && !canListAll) return;
-    setLoadingAthletes(true);
-    setErrorAthletes(null);
-    const p = clubId ? listAthletes(clubId) : listAllAthletes();
-    p.then(setAthletes)
-      .catch((e) => setErrorAthletes(e?.response?.data?.error || e.message))
-      .finally(() => setLoadingAthletes(false));
-  }, [clubId, role]);
+  // 2. Fetch Club (if clubId exists)
+  const { data: club } = useQuery({
+    queryKey: ['club', clubId],
+    queryFn: async () => {
+      const res = await api.get(`/clubs/${clubId}`);
+      return res.data;
+    },
+    enabled: !!clubId
+  });
+
+  // 3. Fetch Athletes
+  const { 
+    data: athletes = [], 
+    isLoading: loadingAthletes, 
+    error: errorAthletes 
+  } = useQuery({
+    queryKey: ['athletes', clubId, role],
+    queryFn: async () => {
+      // SUPERADMIN/ADMIN without clubId -> list all
+      const canListAll = role === "SUPERADMIN";
+      if (!clubId && !canListAll) return [];
+      
+      if (clubId) {
+        return listAthletes(clubId);
+      } else {
+        return listAllAthletes();
+      }
+    },
+    enabled: !!clubId || role === "SUPERADMIN"
+  });
+
+  // 4. Delete Mutation
+  const deleteMutation = useMutation({
+    mutationFn: deleteAthlete,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['athletes'] });
+    },
+    onError: (error: any) => {
+      alert(error?.response?.data?.error || error.message || "Failed to delete athlete");
+    }
+  });
+
+  async function onDeleteAthlete(id: string) {
+    if (!confirm("Delete this athlete? This cannot be undone.")) return;
+    deleteMutation.mutate(id);
+  }
 
   const filteredSorted = useMemo(() => {
     const q = query.trim().toLowerCase();
-    let rows = athletes;
+    let rows: Athlete[] = athletes;
     if (q) {
       rows = rows.filter(a => {
         const name = `${a.firstName} ${a.lastName}`.toLowerCase();
@@ -105,17 +125,6 @@ const Dashboard = () => {
     return [...rows].sort(cmp);
   }, [athletes, query, sortBy, sortDir]);
 
-  async function onDeleteAthlete(id: string) {
-    if (!confirm("Delete this athlete? This cannot be undone.")) return;
-    const prev = athletes;
-    setAthletes((list) => list.filter((a) => a.id !== id));
-    try {
-      await deleteAthlete(id);
-    } catch (e: any) {
-      alert(e?.response?.data?.error || e.message || "Failed to delete athlete");
-      setAthletes(prev);
-    }
-  }
   return (
     <div className="min-h-screen bg-gray-950 text-gray-100 p-6">
       <div className="max-w-5xl mx-auto">
@@ -135,7 +144,7 @@ const Dashboard = () => {
           <div className="p-4 rounded-2xl border border-gray-800 bg-gray-900/50">
             <h2 className="font-semibold mb-2">Events</h2>
             <ul className="text-sm text-gray-300 list-disc pl-5">
-              {events.map(ev => (
+              {events.map((ev: any) => (
                 <li key={ev.id}>{ev.name} - {new Date(ev.startDate).toLocaleDateString()}</li>
               ))}
             </ul>
@@ -211,7 +220,7 @@ const Dashboard = () => {
               </div>
             </div>
             {loadingAthletes && <p className="text-sm text-gray-400">Loading athletes...</p>}
-            {errorAthletes && <p className="text-sm text-red-400">{errorAthletes}</p>}
+            {errorAthletes && <p className="text-sm text-red-400">{errorAthletes instanceof Error ? errorAthletes.message : "Error loading athletes"}</p>}
             {!!filteredSorted.length && (
               <ul className="divide-y divide-gray-800">
                 {filteredSorted.map((a) => (
@@ -232,8 +241,9 @@ const Dashboard = () => {
                     <button
                       onClick={() => onDeleteAthlete(a.id)}
                       className="text-xs px-3 py-1 rounded-md bg-red-600/80 hover:bg-red-600 text-white"
+                      disabled={deleteMutation.isPending}
                     >
-                      Delete
+                      {deleteMutation.isPending ? "..." : "Delete"}
                     </button>
                   </li>
                 ))}

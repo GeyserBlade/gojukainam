@@ -1,44 +1,13 @@
 import { Router } from "express";
-import { prisma } from "../server";
-import { requireRoles } from "../utils/auth";
-import { CreateClub, UpdateClub } from "../utils/validators";
+import { requireRoles } from "../utils/auth.js";
+import { ClubService } from "../services/club.service.js";
 
 export const router = Router();
-
-const clubSelect = {
-  id: true,
-  name: true,
-  region: true,
-  contactName: true,
-  email: true,
-  phone: true,
-  notes: true,
-  createdAt: true,
-  updatedAt: true,
-  _count: {
-    select: {
-      athletes: true,
-      users: true,
-      teams: true,
-      entries: true,
-    },
-  },
-};
-
-function normalizeOptional(value: string | null | undefined) {
-  if (value === undefined) return undefined;
-  if (value === null) return null;
-  const trimmed = value.trim();
-  return trimmed.length === 0 ? null : trimmed;
-}
 
 // list clubs (admin only)
 router.get("/", requireRoles("SUPERADMIN", "ADMIN"), async (_req, res, next) => {
   try {
-    const clubs = await prisma.club.findMany({
-      select: clubSelect,
-      orderBy: { name: "asc" },
-    });
+    const clubs = await ClubService.getAll();
     res.json(clubs);
   } catch (err) { next(err); }
 });
@@ -47,20 +16,7 @@ router.get("/", requireRoles("SUPERADMIN", "ADMIN"), async (_req, res, next) => 
 router.get("/:id", requireRoles("SUPERADMIN", "ADMIN", "CLUB_MANAGER", "COACH", "ATHLETE"), async (req, res, next) => {
   try {
     const { id } = req.params;
-    const club = await prisma.club.findUnique({
-      where: { id },
-      select: {
-        id: true,
-        name: true,
-        region: true,
-        contactName: true,
-        email: true,
-        phone: true,
-        notes: true,
-        createdAt: true,
-        updatedAt: true,
-      },
-    });
+    const club = await ClubService.getById(id);
     if (!club) return res.status(404).json({ error: "Not found" });
 
     // Authorization: SUPERADMIN/ADMIN can read any; others only own club
@@ -76,18 +32,7 @@ router.get("/:id", requireRoles("SUPERADMIN", "ADMIN", "CLUB_MANAGER", "COACH", 
 // create club
 router.post("/", requireRoles("SUPERADMIN", "ADMIN"), async (req, res, next) => {
   try {
-    const parsed = CreateClub.parse(req.body);
-    const created = await prisma.club.create({
-      data: {
-        name: parsed.name.trim(),
-        region: normalizeOptional(parsed.region) ?? null,
-        contactName: parsed.contactName.trim(),
-        email: parsed.email.trim(),
-        phone: normalizeOptional(parsed.phone) ?? null,
-        notes: normalizeOptional(parsed.notes) ?? null,
-      },
-      select: clubSelect,
-    });
+    const created = await ClubService.create(req.body);
     res.status(201).json(created);
   } catch (err) { next(err); }
 });
@@ -96,22 +41,10 @@ router.post("/", requireRoles("SUPERADMIN", "ADMIN"), async (req, res, next) => 
 router.put("/:id", requireRoles("SUPERADMIN", "ADMIN"), async (req, res, next) => {
   try {
     const { id } = req.params;
-    const existing = await prisma.club.findUnique({ where: { id }, select: { id: true } });
+    const existing = await ClubService.getById(id);
     if (!existing) return res.status(404).json({ error: "Not found" });
 
-    const parsed = UpdateClub.parse(req.body);
-    const updated = await prisma.club.update({
-      where: { id },
-      data: {
-        name: parsed.name?.trim(),
-        region: normalizeOptional(parsed.region),
-        contactName: parsed.contactName?.trim(),
-        email: parsed.email?.trim(),
-        phone: normalizeOptional(parsed.phone),
-        notes: normalizeOptional(parsed.notes),
-      },
-      select: clubSelect,
-    });
+    const updated = await ClubService.update(id, req.body);
     res.json(updated);
   } catch (err) { next(err); }
 });
@@ -120,24 +53,12 @@ router.put("/:id", requireRoles("SUPERADMIN", "ADMIN"), async (req, res, next) =
 router.delete("/:id", requireRoles("SUPERADMIN", "ADMIN"), async (req, res, next) => {
   try {
     const { id } = req.params;
-    const club = await prisma.club.findUnique({
-      where: { id },
-      select: {
-        id: true,
-        _count: { select: { athletes: true, users: true, teams: true, entries: true, invoices: true } },
-      },
-    });
-    if (!club) return res.status(404).json({ error: "Not found" });
-
-    const { athletes, users, teams, entries, invoices } = club._count;
-    if (athletes || users || teams || entries || invoices) {
-      return res.status(409).json({
-        error: "Cannot delete club with linked records",
-        meta: { athletes, users, teams, entries, invoices },
-      });
-    }
-
-    await prisma.club.delete({ where: { id } });
+    await ClubService.delete(id);
     res.status(204).send();
-  } catch (err) { next(err); }
+  } catch (err: any) {
+    if (err.status && err.message) {
+      return res.status(err.status).json({ error: err.message, meta: err.meta });
+    }
+    next(err);
+  }
 });
