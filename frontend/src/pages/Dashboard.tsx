@@ -126,81 +126,108 @@ const Dashboard = () => {
   }, [athletes, query, sortBy, sortDir]);
 
   return (
-    <div className="min-h-screen bg-gray-950 text-gray-100 p-6">
-      <div className="max-w-5xl mx-auto">
+    <div className="min-h-screen bg-gray-950 text-gray-100 p-4">
+      <div className="max-w-7xl mx-auto">
         <div className="flex items-center justify-between mb-6">
           <h1 className="text-2xl font-semibold">Dashboard</h1>
           <button onClick={logout} className="text-sm text-gray-400 hover:text-white">Sign out</button>
         </div>
-        <div className="grid md:grid-cols-2 gap-4">
-          <div className="p-4 rounded-2xl border border-gray-800 bg-gray-900/50">
+        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-3">
+          <div className="p-3 rounded-xl border border-gray-800 bg-gray-900/50">
             <h2 className="font-semibold mb-2">Session</h2>
-            <p className="text-sm text-gray-400">Role: <span className="text-gray-200">{role ?? "(none)"}</span></p>
-            <p className="text-sm text-gray-400">
-              Club:&nbsp;
-              <span className="text-gray-200">{club ? `${club.name ?? "(no name)"} (${club.id})` : (clubId ?? "(none)")}</span>
-            </p>
+            <div className="space-y-1 text-xs text-gray-400">
+              <p>Role: <span className="text-gray-200">{role ?? "(none)"}</span></p>
+              <p>
+                Club:&nbsp;
+                <span className="text-gray-200">{club ? `${club.name ?? "(no name)"} (${club.id})` : (clubId ?? "(none)")}</span>
+              </p>
+              {club?.region && <p>Region: <span className="text-gray-200">{club.region}</span></p>}
+              {club?.contactName && <p>Contact: <span className="text-gray-200">{club.contactName}</span></p>}
+              {club?.email && <p>Email: <span className="text-gray-200">{club.email}</span></p>}
+            </div>
           </div>
-          <div className="p-4 rounded-2xl border border-gray-800 bg-gray-900/50">
+          <div className="p-3 rounded-xl border border-gray-800 bg-gray-900/50">
             <h2 className="font-semibold mb-2">Events</h2>
-            <ul className="text-sm text-gray-300 list-disc pl-5">
+            <p className="text-xs text-gray-500 mb-2">Total: {events.length}</p>
+            <ul className="text-xs text-gray-300 list-disc pl-5">
               {events.map((ev: any) => (
                 <li key={ev.id}>{ev.name} - {new Date(ev.startDate).toLocaleDateString()}</li>
               ))}
             </ul>
           </div>
           {(role === "ADMIN" || role === "SUPERADMIN" || role === "CLUB_MANAGER") && (
-            <div className="p-4 rounded-2xl border border-gray-800 bg-gray-900/50">
+            <div className="p-3 rounded-xl border border-gray-800 bg-gray-900/50">
               <h2 className="font-semibold mb-2">Administration</h2>
               <div className="flex gap-2 flex-wrap">
                 <button
                   onClick={() => navigate("/athletes")}
-                  className="text-sm px-4 py-2 rounded-md bg-cyan-600/80 hover:bg-cyan-600 text-black font-semibold"
+                  className="text-xs px-3 py-1.5 rounded-md bg-cyan-600/80 hover:bg-cyan-600 text-black font-semibold"
                 >
                   Manage Athletes
                 </button>
                 <button
                   onClick={() => navigate("/athletes/extract")}
-                  className="text-sm px-4 py-2 rounded-md bg-cyan-600/80 hover:bg-cyan-600 text-black font-semibold"
+                  className="text-xs px-3 py-1.5 rounded-md bg-cyan-600/80 hover:bg-cyan-600 text-black font-semibold"
                 >
                   Athlete Extract
+                </button>
+                <button
+                  onClick={() => navigate("/events/manage")}
+                  className="text-xs px-3 py-1.5 rounded-md bg-purple-600/80 hover:bg-purple-600 text-black font-semibold"
+                >
+                  Event Admin
+                </button>
+                <button
+                  onClick={() => navigate("/events")}
+                  className="text-xs px-3 py-1.5 rounded-md bg-green-600/80 hover:bg-green-600 text-black font-semibold"
+                >
+                  Entry Management
+                </button>
+                <button
+                  onClick={() => navigate("/entries/view")}
+                  className="text-xs px-3 py-1.5 rounded-md bg-blue-600/80 hover:bg-blue-600 text-black font-semibold"
+                >
+                  View All Entries
                 </button>
                 {role === "SUPERADMIN" && (
                   <button
                     onClick={() => navigate("/athletes/import")}
-                    className="text-sm px-4 py-2 rounded-md bg-cyan-600/80 hover:bg-cyan-600 text-black font-semibold"
+                    className="text-xs px-3 py-1.5 rounded-md bg-cyan-600/80 hover:bg-cyan-600 text-black font-semibold"
                   >
                     Import Athletes
                   </button>
                 )}
                 <button
                   onClick={() => navigate("/users")}
-                  className="text-sm px-4 py-2 rounded-md bg-cyan-600/80 hover:bg-cyan-600 text-black font-semibold"
+                  className="text-xs px-3 py-1.5 rounded-md bg-cyan-600/80 hover:bg-cyan-600 text-black font-semibold"
                 >
                   Manage Users
                 </button>
                 <button
                   onClick={() => navigate("/clubs")}
-                  className="text-sm px-4 py-2 rounded-md bg-cyan-600/80 hover:bg-cyan-600 text-black font-semibold"
+                  className="text-xs px-3 py-1.5 rounded-md bg-cyan-600/80 hover:bg-cyan-600 text-black font-semibold"
                 >
                   Manage Clubs
                 </button>
                 <button
                   onClick={() => navigate("/belts")}
-                  className="text-sm px-4 py-2 rounded-md bg-cyan-600/80 hover:bg-cyan-600 text-black font-semibold"
+                  className="text-xs px-3 py-1.5 rounded-md bg-cyan-600/80 hover:bg-cyan-600 text-black font-semibold"
                 >
                   Manage Belts
                 </button>
               </div>
             </div>
           )}
-          <div className="p-4 rounded-2xl border border-gray-800 bg-gray-900/50 md:col-span-2">
+          <div className="p-3 rounded-xl border border-gray-800 bg-gray-900/50 md:col-span-2 lg:col-span-3">
             <div className="flex items-center justify-between mb-2">
               <h2 className="font-semibold">Athletes</h2>
               {!clubId && role !== "SUPERADMIN" && (
                 <span className="text-xs text-gray-400">Set a club to view athletes</span>
               )}
             </div>
+            {(clubId || role === "SUPERADMIN") && (
+              <p className="text-xs text-gray-500 mb-2">Total: {athletes.length} | Showing: {filteredSorted.length}</p>
+            )}
             <div className="flex flex-col md:flex-row md:items-center gap-2 mb-3">
               <div className="flex-1">
                 <Input placeholder="Search name, club, nationality, belt..." value={query} onChange={(e)=>setQuery(e.target.value)} />
@@ -228,14 +255,18 @@ const Dashboard = () => {
                     <div className="min-w-0">
                       <p className="text-sm text-gray-200 truncate">{a.firstName} {a.lastName} <span className="text-xs text-gray-500">({a.gender})</span></p>
                       <p className="text-xs text-gray-500 truncate">
-                        {new Date(a.dob).toLocaleDateString()}
-                        {(() => {
-                          const age = calculateAge(a.dob);
-                          return age !== null ? <> - {age} yrs</> : null;
-                        })()}
-                        {a.belt?.name ? <> - {a.belt.name}</> : null}
-                        {a.weightKg ? <> - {a.weightKg}kg</> : null}
-                        {a.club?.name ? <> - {a.club.name}</> : null}
+                        {[
+                          new Date(a.dob).toLocaleDateString(),
+                          (() => {
+                            const age = calculateAge(a.dob);
+                            return age !== null ? `${age} yrs` : null;
+                          })(),
+                          a.nationality || null,
+                          a.belt?.name || null,
+                          a.weightKg ? `${a.weightKg}kg` : null,
+                          a.club?.name || null,
+                          a.idNumber ? `ID ${a.idNumber}` : null
+                        ].filter(Boolean).join(" - ")}
                       </p>
                     </div>
                     <button

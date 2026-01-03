@@ -27,6 +27,9 @@
     "tsx": "^4.20.5"
   },
   "dependencies": {
+    "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/sortable": "^10.0.0",
+    "@dnd-kit/utilities": "^3.2.2",
     "@tanstack/react-query": "^5.90.16",
     "axios": "^1.11.0",
     "js-yaml": "^4.1.0",

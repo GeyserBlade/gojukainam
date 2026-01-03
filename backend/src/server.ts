@@ -1,8 +1,10 @@
-﻿import express from "express";
+import express from "express";
 import cors from "cors";
-import { PrismaClient } from "@prisma/client";
+import cookieParser from "cookie-parser";
+import { prisma } from "./lib/prisma.js";
 import { errorHandler } from "./utils/error-handler.js";
 import { authMiddleware } from "./utils/auth.js";
+import { router as auth } from "./routes/auth.js";
 import { router as athletes } from "./routes/athletes.js";
 import { router as entries } from "./routes/entries.js";
 import { router as teams } from "./routes/teams.js";
@@ -13,11 +15,15 @@ import { router as clubs } from "./routes/clubs.js";
 import { router as users } from "./routes/users.js";
 import { router as belts } from "./routes/belts.js";
 
-export const prisma = new PrismaClient();
 const app = express();
 
 app.use(cors({ origin: "http://localhost:5173", credentials: true }));
 app.use(express.json());
+app.use(cookieParser());
+
+// Auth routes before middleware because login shouldn't require auth
+app.use("/api/auth", auth);
+
 app.use(authMiddleware); // populates req.user with { id, role, clubId }
 
 app.get("/api/health", (_req, res) => res.json({ ok: true }));

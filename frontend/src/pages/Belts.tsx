@@ -4,6 +4,8 @@ import { useAuth } from "../contexts/AuthContext";
 import { Button, Input, Label, Select, Textarea } from "../components/Input";
 import { Belt, createBelt, deleteBelt, listBelts, updateBelt } from "../lib/belts";
 
+const formatDate = (value?: string | null) => (value ? new Date(value).toLocaleDateString() : "");
+
 const BeltsPage = () => {
   const { role } = useAuth();
   const nav = useNavigate();
@@ -55,8 +57,8 @@ const BeltsPage = () => {
 
   if (!canManage) {
     return (
-      <div className="min-h-screen bg-gray-950 text-gray-100 p-6">
-        <div className="max-w-4xl mx-auto">
+      <div className="min-h-screen bg-gray-950 text-gray-100 p-4">
+        <div className="max-w-6xl mx-auto">
           <div className="flex items-center justify-between mb-6">
             <h1 className="text-2xl font-semibold">Belts</h1>
             <button className="text-sm text-gray-400 hover:text-white" onClick={() => nav("/dashboard")}>Back</button>
@@ -118,22 +120,22 @@ const BeltsPage = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gray-950 text-gray-100 p-6">
-      <div className="max-w-5xl mx-auto">
+    <div className="min-h-screen bg-gray-950 text-gray-100 p-4">
+      <div className="max-w-7xl mx-auto">
         <div className="flex items-center justify-between mb-6">
           <h1 className="text-2xl font-semibold">Belts</h1>
           <button className="text-sm text-gray-400 hover:text-white" onClick={() => nav("/dashboard")}>Back</button>
         </div>
 
-        <div className="p-4 rounded-2xl border border-gray-800 bg-gray-900/50 mb-4">
+        <div className="p-3 rounded-xl border border-gray-800 bg-gray-900/50 mb-4">
           <div className="flex items-center justify-between">
-            <div className="flex-1 max-w-sm">
+            <div className="flex-1 max-w-md">
               <Input placeholder="Search name, colour, notes" value={q} onChange={(e)=>setQ(e.target.value)} />
             </div>
             <div>
               <button
                 onClick={() => setCreating((v)=>!v)}
-                className="ml-3 text-xs px-3 py-2 rounded-md bg-cyan-600/80 hover:bg-cyan-600 text-black font-semibold"
+                className="ml-3 text-xs px-3 py-1.5 rounded-md bg-cyan-600/80 hover:bg-cyan-600 text-black font-semibold"
               >
                 {creating ? "Cancel" : "New Belt"}
               </button>
@@ -169,7 +171,7 @@ const BeltsPage = () => {
         </div>
 
         {editingId && (
-          <div className="p-4 rounded-2xl border border-gray-800 bg-gray-900/50 mb-4">
+          <div className="p-3 rounded-xl border border-gray-800 bg-gray-900/50 mb-4">
             <h3 className="font-semibold mb-2">Edit Belt</h3>
             <form onSubmit={onSaveEdit} className="mt-1 grid md:grid-cols-5 gap-3">
               <div>
@@ -203,27 +205,31 @@ const BeltsPage = () => {
         {loading && <p className="text-sm text-gray-400">Loading belts…</p>}
         {error && <p className="text-sm text-red-400">{error}</p>}
         {!loading && !error && (
-          <div className="rounded-2xl border border-gray-800 overflow-hidden">
-            <table className="min-w-full text-sm">
+          <div className="rounded-xl border border-gray-800 overflow-hidden">
+            <table className="min-w-full text-xs">
               <thead className="bg-gray-900/60 text-gray-300">
                 <tr>
-                  <th className="text-left px-4 py-2">Order</th>
-                  <th className="text-left px-4 py-2">Name</th>
-                  <th className="text-left px-4 py-2">Colour</th>
-                  <th className="text-left px-4 py-2">Notes</th>
-                  <th className="text-left px-4 py-2">Requirements</th>
-                  <th className="text-right px-4 py-2">Actions</th>
+                  <th className="text-left px-3 py-2">Order</th>
+                  <th className="text-left px-3 py-2">Name</th>
+                  <th className="text-left px-3 py-2">Colour</th>
+                  <th className="text-left px-3 py-2">Notes</th>
+                  <th className="text-left px-3 py-2">Requirements</th>
+                  <th className="text-right px-3 py-2 hidden lg:table-cell">Athletes</th>
+                  <th className="text-left px-3 py-2 hidden lg:table-cell">Updated</th>
+                  <th className="text-right px-3 py-2">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-800">
                 {filtered.map((b) => (
                   <tr key={b.id} className="hover:bg-gray-900/40">
-                    <td className="px-4 py-2 text-gray-100">{b.order}</td>
-                    <td className="px-4 py-2 text-gray-200">{b.name ?? ""}</td>
-                    <td className="px-4 py-2 text-gray-300">{b.colour ?? ""}</td>
-                    <td className="px-4 py-2 text-gray-400 truncate max-w-[16rem]">{b.notes ?? ""}</td>
-                    <td className="px-4 py-2 text-gray-500 truncate max-w-[16rem]">{b.gradingRequirements ?? ""}</td>
-                    <td className="px-4 py-2">
+                    <td className="px-3 py-2 text-gray-100">{b.order}</td>
+                    <td className="px-3 py-2 text-gray-200">{b.name ?? ""}</td>
+                    <td className="px-3 py-2 text-gray-300">{b.colour ?? ""}</td>
+                    <td className="px-3 py-2 text-gray-400 truncate max-w-[16rem]">{b.notes ?? ""}</td>
+                    <td className="px-3 py-2 text-gray-500 truncate max-w-[16rem]">{b.gradingRequirements ?? ""}</td>
+                    <td className="px-3 py-2 text-right text-gray-400 hidden lg:table-cell">{b._count?.Athlete ?? 0}</td>
+                    <td className="px-3 py-2 text-gray-400 hidden lg:table-cell">{formatDate(b.updatedAt)}</td>
+                    <td className="px-3 py-2">
                       <div className="text-right space-x-2">
                         {editingId === b.id ? (
                           <button disabled className="text-xs px-3 py-1 rounded bg-gray-700 text-white opacity-70 cursor-not-allowed">Editing…</button>

@@ -1,4 +1,5 @@
-﻿import type { Request, Response, NextFunction } from "express";
+import type { Request, Response, NextFunction } from "express";
+import { AuthService } from "../services/auth.service.js";
 
 export type AuthUser = {
   id: string;
@@ -15,15 +16,28 @@ declare global {
 }
 
 export function authMiddleware(req: Request, res: Response, next: NextFunction) {
-  const allowDevAuth = process.env.ALLOW_DEV_AUTH === "true" || process.env.NODE_ENV !== "production";
-  if (!allowDevAuth) {
-    return res.status(401).json({ error: "Unauthorized" });
+  // 1. Try Cookie Auth (JWT)
+  const token = req.cookies?.auth_token;
+  if (token) {
+    const user = AuthService.verifySessionToken(token);
+    if (user) {
+      req.user = user as AuthUser;
+      return next();
+    }
+    // If token is invalid (expired/bad signature), we could clear it?
+    // But let's fall through to see if dev auth catches it or we 401.
   }
-  // TODO: replace with JWT/Session. For dev, allow a header to impersonate.
-  const role = (req.header("x-role") as AuthUser["role"]) || "SUPERADMIN";
-  const clubId = req.header("x-club-id") || undefined;
-  req.user = { id: "dev-user", role, clubId };
-  next();
+
+  // 2. Try Dev Auth (Headers)
+  const allowDevAuth = process.env.ALLOW_DEV_AUTH === "true" || process.env.NODE_ENV !== "production";
+  if (allowDevAuth && req.header("x-role")) {
+    const role = (req.header("x-role") as AuthUser["role"]) || "SUPERADMIN";
+    const clubId = req.header("x-club-id") || undefined;
+    req.user = { id: "dev-user", role, clubId };
+    return next();
+  }
+
+  return res.status(401).json({ error: "Unauthorized" });
 }
 
 export function requireRoles(...roles: AuthUser["role"][]) {

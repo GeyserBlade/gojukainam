@@ -1,16 +1,77 @@
-import { prisma } from "../server.js";
+import { prisma } from "../lib/prisma.js";
 import { CreateEntry, UpdateEntryStatus } from "../utils/validators.js";
-import { assertNoDuplicateEntry, validateWeightClass } from "../utils/eligibility.js";
+import { assertNoDuplicateEntry, validateWeightClass, validateAthleteEligibility, validateAthleteWeight } from "../utils/eligibility.js";
 
 export class EntryService {
-  static async list(eventId: string, clubId?: string) {
+  static async list(eventId: string, filters?: {
+    clubId?: string;
+    divisionId?: string;
+    status?: string;
+    entryType?: string;
+    searchQuery?: string;
+  }) {
     const where: any = { eventId };
-    if (clubId) where.clubId = clubId;
+
+    if (filters?.clubId) where.clubId = filters.clubId;
+    if (filters?.divisionId) where.divisionId = filters.divisionId;
+    if (filters?.status) where.status = filters.status;
+    if (filters?.entryType) where.entryType = filters.entryType;
+
+    // Search across athlete name, team name, club name
+    if (filters?.searchQuery) {
+      const query = filters.searchQuery.toLowerCase();
+      where.OR = [
+        {
+          athlete: {
+            OR: [
+              { firstName: { contains: query, mode: 'insensitive' } },
+              { lastName: { contains: query, mode: 'insensitive' } }
+            ]
+          }
+        },
+        {
+          team: {
+            name: { contains: query, mode: 'insensitive' }
+          }
+        },
+        {
+          club: {
+            name: { contains: query, mode: 'insensitive' }
+          }
+        }
+      ];
+    }
 
     return prisma.entry.findMany({
       where,
-      include: { athlete: true, team: true, division: true, weightClass: true, club: true },
-      orderBy: { createdAt: "desc" },
+      include: {
+        athlete: {
+          include: {
+            belt: true,
+            club: true
+          }
+        },
+        team: {
+          include: {
+            members: {
+              include: {
+                athlete: true
+              }
+            }
+          }
+        },
+        division: true,
+        weightClass: true,
+        club: true
+      },
+      orderBy: [
+        { division: { category: 'asc' } },
+        { division: { minAge: 'asc' } },
+        { division: { gender: 'asc' } },
+        { entryType: 'asc' },
+        { status: 'asc' },
+        { createdAt: 'desc' }
+      ],
     });
   }
 
@@ -24,10 +85,15 @@ export class EntryService {
       if (!athlete) throw { status: 404, message: "Athlete not found" };
       if (athlete.clubId !== body.clubId) throw { status: 403, message: "Athlete does not belong to club" };
 
+      // Validate age and gender eligibility for division
+      await validateAthleteEligibility(body.athleteId, body.divisionId, body.eventId);
+
       // kumite needs weight class
       if (body.entryType === "KUMITE") {
         if (!body.weightClassId) throw { status: 400, message: "weightClassId required for Kumite" };
         await validateWeightClass(body.weightClassId, body.eventId, body.divisionId, athlete.gender);
+        // Validate athlete's weight is within weight class range
+        await validateAthleteWeight(body.athleteId, body.weightClassId);
       }
 
       await assertNoDuplicateEntry({

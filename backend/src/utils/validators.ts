@@ -4,6 +4,7 @@ export const GenderEnum = z.enum(["Male", "Female"]);
 export const EntryTypeEnum = z.enum(["KATA","KUMITE","TEAM_KATA","TEAM_KUMITE"]);
 export const EntryStatusEnum = z.enum(["DRAFT","SUBMITTED","APPROVED","RETURNED"]);
 export const RoleEnum = z.enum(["SUPERADMIN","ADMIN","CLUB_MANAGER","COACH","ATHLETE"]);
+export const EventStatusEnum = z.enum(["DRAFT","ACTIVE","CLOSED","ARCHIVED"]);
 
 const dateSchema = z.preprocess((value) => {
   if (value === "" || value === null || value === undefined) return value;
@@ -112,5 +113,91 @@ export const CreateClub = z.object({
 
 export const UpdateClub = CreateClub.partial();
 
+// ---------------- Query/Param Schemas ----------------
+export const IdParam = z.object({
+  id: z.string().min(1),
+});
 
+export const ClubIdQuery = z.object({
+  clubId: z.string().min(1),
+});
 
+export const EventEntriesQuery = z.object({
+  eventId: z.string().min(1),
+  clubId: z.string().optional(),
+  divisionId: z.string().optional(),
+  status: z.enum(["DRAFT", "SUBMITTED", "APPROVED", "RETURNED"]).optional(),
+  entryType: z.enum(["KATA", "KUMITE", "TEAM_KATA", "TEAM_KUMITE"]).optional(),
+  searchQuery: z.string().optional(),
+});
+
+export const ClubAthletesQuery = z.object({
+  clubId: z.string().min(1),
+});
+
+// Update schemas with max lengths for security
+export const UpdateAthlete = CreateAthlete.partial();
+
+// ---------------- Events ----------------
+export const CreateEvent = z.object({
+  name: z.string().min(1).max(200),
+  venue: z.string().min(1).max(200),
+  city: z.string().min(1).max(100),
+  country: z.string().min(1).max(100),
+  startDate: dateSchema,
+  regOpen: dateSchema,
+  regClose: dateSchema,
+  status: EventStatusEnum.default("ACTIVE"),
+  configJson: z.string().default("{}"),
+});
+
+export const UpdateEvent = CreateEvent.partial();
+
+export const UpdateEventStatus = z.object({
+  status: EventStatusEnum,
+});
+
+// ---------------- Divisions ----------------
+export const CategoryTypeEnum = z.enum(["KATA", "KUMITE"]);
+
+export const CreateDivision = z.object({
+  eventId: z.string().min(1),
+  key: z.string().min(1).max(50),
+  name: z.string().min(1).max(150),
+  minAge: z.number().int().min(0).max(150),
+  maxAge: z.number().int().min(0).max(150),
+  gender: GenderEnum,
+  category: CategoryTypeEnum, // KATA or KUMITE
+  notes: z.string().optional().nullable(),
+});
+
+export const UpdateDivision = CreateDivision.omit({ eventId: true }).partial();
+
+// ---------------- Weight Classes ----------------
+export const CreateWeightClass = z.object({
+  eventId: z.string().min(1),
+  divisionId: z.string().optional().nullable(),
+  gender: GenderEnum,
+  name: z.string().min(1).max(50),
+  minKg: z.number().optional().nullable(),
+  maxKg: z.number().optional().nullable(),
+});
+
+export const UpdateWeightClass = CreateWeightClass.omit({ eventId: true }).partial();
+
+// ---------------- Query Schemas ----------------
+export const EventIdParam = z.object({
+  eventId: z.string().min(1),
+});
+
+export const DivisionIdParam = z.object({
+  divisionId: z.string().min(1),
+});
+
+export const WeightClassIdParam = z.object({
+  weightClassId: z.string().min(1),
+});
+
+export const EligibleAthletesQuery = z.object({
+  clubId: z.string().optional(),
+});

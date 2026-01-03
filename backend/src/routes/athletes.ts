@@ -1,7 +1,9 @@
 import { Router } from "express";
-import { prisma } from "../server.js";
+import { prisma } from "../lib/prisma.js";
 import { requireRoles } from "../utils/auth.js";
 import { AthleteService } from "../services/athlete.service.js";
+import { validate, validateMultiple } from "../middleware/validate.js";
+import { CreateAthlete, UpdateAthlete, ClubAthletesQuery, IdParam } from "../utils/validators.js";
 import multer from "multer";
 
 export const router = Router();
@@ -18,9 +20,8 @@ router.get("/all", requireRoles("SUPERADMIN"), async (_req, res) => {
 });
 
 // list own club athletes (Club Manager / Coach)
-router.get("/", requireRoles("CLUB_MANAGER","ADMIN","SUPERADMIN"), async (req, res) => {
-  const { clubId } = req.query as { clubId?: string };
-  if (!clubId) return res.status(400).json({ error: "clubId required" });
+router.get("/", requireRoles("CLUB_MANAGER","ADMIN","SUPERADMIN"), validate(ClubAthletesQuery, 'query'), async (req, res) => {
+  const { clubId } = req.query as { clubId: string };
   // authorization: club scoped
   if (req.user?.role === "CLUB_MANAGER") {
     if (req.user.clubId !== clubId) return res.status(403).json({ error: "Forbidden" });
@@ -30,7 +31,7 @@ router.get("/", requireRoles("CLUB_MANAGER","ADMIN","SUPERADMIN"), async (req, r
 });
 
 // get single athlete by id (admin/club scoped)
-router.get("/:id", requireRoles("CLUB_MANAGER","ADMIN","SUPERADMIN"), async (req, res, next) => {
+router.get("/:id", requireRoles("CLUB_MANAGER","ADMIN","SUPERADMIN"), validate(IdParam, 'params'), async (req, res, next) => {
   try {
     const { id } = req.params;
     const row = await AthleteService.getById(id);
@@ -43,10 +44,10 @@ router.get("/:id", requireRoles("CLUB_MANAGER","ADMIN","SUPERADMIN"), async (req
 });
 
 // create athlete (club scoped)
-router.post("/", requireRoles("CLUB_MANAGER","ADMIN","SUPERADMIN"), async (req, res, next) => {
+router.post("/", requireRoles("CLUB_MANAGER","ADMIN","SUPERADMIN"), validate(CreateAthlete), async (req, res, next) => {
   try {
     // We need to peek at the body to check clubId for authz before passing to service
-    const clubId = req.body?.clubId;
+    const clubId = req.body.clubId;
     if (req.user?.role === "CLUB_MANAGER") {
       if (req.user.clubId !== clubId) return res.status(403).json({ error: "Forbidden" });
     }
@@ -56,7 +57,7 @@ router.post("/", requireRoles("CLUB_MANAGER","ADMIN","SUPERADMIN"), async (req, 
 });
 
 // update athlete (club scoped)
-router.put("/:id", requireRoles("CLUB_MANAGER","ADMIN","SUPERADMIN"), async (req, res, next) => {
+router.put("/:id", requireRoles("CLUB_MANAGER","ADMIN","SUPERADMIN"), validateMultiple({ params: IdParam, body: UpdateAthlete }), async (req, res, next) => {
   try {
     const id = req.params.id;
     const existing = await AthleteService.getById(id);
@@ -64,19 +65,14 @@ router.put("/:id", requireRoles("CLUB_MANAGER","ADMIN","SUPERADMIN"), async (req
     if (req.user?.role !== "SUPERADMIN" && req.user?.clubId !== existing.clubId) {
       return res.status(403).json({ error: "Forbidden" });
     }
-    
+
     const row = await AthleteService.update(id, req.body);
     res.json(row);
-  } catch (err: any) { 
-    if (err.message === "Invalid gender value") {
-      return res.status(400).json({ error: err.message });
-    }
-    next(err); 
-  }
+  } catch (err) { next(err); }
 });
 
 // delete athlete (club scoped)
-router.delete("/:id", requireRoles("CLUB_MANAGER","ADMIN","SUPERADMIN"), async (req, res, next) => {
+router.delete("/:id", requireRoles("CLUB_MANAGER","ADMIN","SUPERADMIN"), validate(IdParam, 'params'), async (req, res, next) => {
   try {
     const { id } = req.params;
     const existing = await AthleteService.getById(id);

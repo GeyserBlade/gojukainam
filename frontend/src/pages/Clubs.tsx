@@ -13,6 +13,8 @@ type ClubForm = {
   notes: string;
 };
 
+const formatDate = (value?: string | null) => (value ? new Date(value).toLocaleDateString() : "");
+
 function sanitizePayload(form: ClubForm) {
   const trimOrNull = (value: string) => {
     const trimmed = value.trim();
@@ -79,8 +81,8 @@ const ClubsPage = () => {
 
   if (!canManage) {
     return (
-      <div className="min-h-screen bg-gray-950 text-gray-100 p-6">
-        <div className="max-w-4xl mx-auto">
+      <div className="min-h-screen bg-gray-950 text-gray-100 p-4">
+        <div className="max-w-6xl mx-auto">
           <div className="flex items-center justify-between mb-6">
             <h1 className="text-2xl font-semibold">Clubs</h1>
             <button className="text-sm text-gray-400 hover:text-white" onClick={() => navigate("/dashboard")}>
@@ -162,8 +164,8 @@ const ClubsPage = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gray-950 text-gray-100 p-6">
-      <div className="max-w-5xl mx-auto">
+    <div className="min-h-screen bg-gray-950 text-gray-100 p-4">
+      <div className="max-w-7xl mx-auto">
         <div className="flex items-center justify-between mb-6">
           <h1 className="text-2xl font-semibold">Clubs</h1>
           <button className="text-sm text-gray-400 hover:text-white" onClick={() => navigate("/dashboard")}>
@@ -171,9 +173,9 @@ const ClubsPage = () => {
           </button>
         </div>
 
-        <div className="p-4 rounded-2xl border border-gray-800 bg-gray-900/50 mb-4">
+        <div className="p-3 rounded-xl border border-gray-800 bg-gray-900/50 mb-4">
           <div className="flex items-center justify-between gap-3 flex-wrap">
-            <div className="flex-1 max-w-md">
+            <div className="flex-1 max-w-lg">
               <Input placeholder="Search name, region, contact, email" value={q} onChange={(e) => setQ(e.target.value)} />
             </div>
             <div>
@@ -182,7 +184,7 @@ const ClubsPage = () => {
                   setCreating((c) => !c);
                   setCreateForm(defaultForm);
                 }}
-                className="text-sm px-4 py-2 rounded-md bg-cyan-600/80 hover:bg-cyan-600 text-black font-semibold"
+                className="text-xs px-3 py-1.5 rounded-md bg-cyan-600/80 hover:bg-cyan-600 text-black font-semibold"
               >
                 {creating ? "Close" : "New Club"}
               </button>
@@ -228,7 +230,7 @@ const ClubsPage = () => {
         </div>
 
         {editingId && (
-          <div className="p-4 rounded-2xl border border-gray-800 bg-gray-900/50 mb-4">
+          <div className="p-3 rounded-xl border border-gray-800 bg-gray-900/50 mb-4">
             <h3 className="font-semibold mb-2">Edit Club</h3>
             <form onSubmit={onSaveEdit} className="grid md:grid-cols-2 gap-3">
               <div>
@@ -289,29 +291,37 @@ const ClubsPage = () => {
         {error && <p className="text-sm text-red-400">{error}</p>}
 
         {!loading && !error && (
-          <div className="rounded-2xl border border-gray-800 overflow-hidden">
-            <table className="min-w-full text-sm">
+          <div className="rounded-xl border border-gray-800 overflow-hidden">
+            <table className="min-w-full text-xs">
               <thead className="bg-gray-900/60 text-gray-300">
                 <tr>
-                  <th className="text-left px-4 py-2">Name</th>
-                  <th className="text-left px-4 py-2">Region</th>
-                  <th className="text-left px-4 py-2">Contact</th>
-                  <th className="text-left px-4 py-2">Email</th>
-                  <th className="text-left px-4 py-2">Phone</th>
-                  <th className="text-right px-4 py-2">Athletes</th>
-                  <th className="text-right px-4 py-2">Actions</th>
+                  <th className="text-left px-3 py-2">Name</th>
+                  <th className="text-left px-3 py-2">Region</th>
+                  <th className="text-left px-3 py-2">Contact</th>
+                  <th className="text-left px-3 py-2">Email</th>
+                  <th className="text-left px-3 py-2">Phone</th>
+                  <th className="text-right px-3 py-2">Athletes</th>
+                  <th className="text-right px-3 py-2 hidden lg:table-cell">Users</th>
+                  <th className="text-right px-3 py-2 hidden lg:table-cell">Entries</th>
+                  <th className="text-left px-3 py-2 hidden lg:table-cell">Updated</th>
+                  <th className="text-left px-3 py-2 hidden xl:table-cell">Notes</th>
+                  <th className="text-right px-3 py-2">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-800">
                 {filtered.map((club) => (
                   <tr key={club.id} className="hover:bg-gray-900/40">
-                    <td className="px-4 py-2 text-gray-100">{club.name}</td>
-                    <td className="px-4 py-2 text-gray-300">{club.region ?? ""}</td>
-                    <td className="px-4 py-2 text-gray-300">{club.contactName}</td>
-                    <td className="px-4 py-2 text-gray-300">{club.email}</td>
-                    <td className="px-4 py-2 text-gray-300">{club.phone ?? ""}</td>
-                    <td className="px-4 py-2 text-right text-gray-400">{club._count?.athletes ?? 0}</td>
-                    <td className="px-4 py-2">
+                    <td className="px-3 py-2 text-gray-100">{club.name}</td>
+                    <td className="px-3 py-2 text-gray-300">{club.region ?? ""}</td>
+                    <td className="px-3 py-2 text-gray-300">{club.contactName}</td>
+                    <td className="px-3 py-2 text-gray-300">{club.email}</td>
+                    <td className="px-3 py-2 text-gray-300">{club.phone ?? ""}</td>
+                    <td className="px-3 py-2 text-right text-gray-400">{club._count?.athletes ?? 0}</td>
+                    <td className="px-3 py-2 text-right text-gray-400 hidden lg:table-cell">{club._count?.users ?? 0}</td>
+                    <td className="px-3 py-2 text-right text-gray-400 hidden lg:table-cell">{club._count?.entries ?? 0}</td>
+                    <td className="px-3 py-2 text-gray-400 hidden lg:table-cell">{formatDate(club.updatedAt)}</td>
+                    <td className="px-3 py-2 text-gray-400 hidden xl:table-cell truncate max-w-[16rem]">{club.notes ?? ""}</td>
+                    <td className="px-3 py-2">
                       <div className="text-right space-x-2">
                         {editingId === club.id ? (
                           <button

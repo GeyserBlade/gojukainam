@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { prisma } from "../server.js";
+import { prisma } from "../lib/prisma.js";
 import { requireRoles } from "../utils/auth.js";
 import { BulkUpdateEntryStatus } from "../utils/validators.js";
 

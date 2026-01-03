@@ -1,4 +1,4 @@
-import { prisma } from "../server.js";
+import { prisma } from "../lib/prisma.js";
 import { CreateBelt, UpdateBelt } from "../utils/validators.js";
 
 export class BeltService {

@@ -1,4 +1,4 @@
-import { prisma } from "../server.js";
+import { prisma } from "../lib/prisma.js";
 import { CreateAthlete } from "../utils/validators.js";
 import { parse as parseCsv } from "csv-parse/sync";
 import * as XLSX from "xlsx";

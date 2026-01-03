@@ -6,6 +6,7 @@ import { createUser, deleteUser, listUsers, updateUser, type User, type Role } f
 import { listClubs, type Club } from "../lib/clubs";
 
 const roleOptions: Role[] = ["ADMIN", "CLUB_MANAGER", "COACH", "ATHLETE"]; // exclude SUPERADMIN create/edit
+const formatDate = (value?: string | null) => (value ? new Date(value).toLocaleDateString() : "");
 
 const UsersPage = () => {
   const { role } = useAuth();
@@ -95,8 +96,8 @@ const UsersPage = () => {
 
   if (!canManage) {
     return (
-      <div className="min-h-screen bg-gray-950 text-gray-100 p-6">
-        <div className="max-w-4xl mx-auto">
+      <div className="min-h-screen bg-gray-950 text-gray-100 p-4">
+        <div className="max-w-6xl mx-auto">
           <div className="flex items-center justify-between mb-6">
             <h1 className="text-2xl font-semibold">Users</h1>
             <button className="text-sm text-gray-400 hover:text-white" onClick={() => navigate("/dashboard")}>Back</button>
@@ -108,22 +109,22 @@ const UsersPage = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gray-950 text-gray-100 p-6">
-      <div className="max-w-5xl mx-auto">
+    <div className="min-h-screen bg-gray-950 text-gray-100 p-4">
+      <div className="max-w-7xl mx-auto">
         <div className="flex items-center justify-between mb-6">
           <h1 className="text-2xl font-semibold">Users</h1>
           <button className="text-sm text-gray-400 hover:text-white" onClick={() => navigate("/dashboard")}>Back</button>
         </div>
 
-        <div className="p-4 rounded-2xl border border-gray-800 bg-gray-900/50 mb-4">
+        <div className="p-3 rounded-xl border border-gray-800 bg-gray-900/50 mb-4">
           <div className="flex items-center justify-between">
-            <div className="flex-1 max-w-sm">
+            <div className="flex-1 max-w-md">
               <Input placeholder="Search name, email, role, clubId" value={q} onChange={(e)=>setQ(e.target.value)} />
             </div>
             <div>
               <button
                 onClick={() => setCreating((v)=>!v)}
-                className="ml-3 text-xs px-3 py-2 rounded-md bg-cyan-600/80 hover:bg-cyan-600 text-black font-semibold"
+                className="ml-3 text-xs px-3 py-1.5 rounded-md bg-cyan-600/80 hover:bg-cyan-600 text-black font-semibold"
               >
                 {creating ? "Cancel" : "New User"}
               </button>
@@ -167,7 +168,7 @@ const UsersPage = () => {
         </div>
 
         {editingId && (
-          <div className="p-4 rounded-2xl border border-gray-800 bg-gray-900/50 mb-4">
+          <div className="p-3 rounded-xl border border-gray-800 bg-gray-900/50 mb-4">
             <h3 className="font-semibold mb-2">Edit User</h3>
             <form onSubmit={onSaveEdit} className="mt-1 grid md:grid-cols-4 gap-3">
               <div>
@@ -212,27 +213,31 @@ const UsersPage = () => {
         {loading && <p className="text-sm text-gray-400">Loading users…</p>}
         {error && <p className="text-sm text-red-400">{error}</p>}
         {!loading && !error && (
-          <div className="rounded-2xl border border-gray-800 overflow-hidden">
-            <table className="min-w-full text-sm">
+          <div className="rounded-xl border border-gray-800 overflow-hidden">
+            <table className="min-w-full text-xs">
               <thead className="bg-gray-900/60 text-gray-300">
                 <tr>
-                  <th className="text-left px-4 py-2">Email</th>
-                  <th className="text-left px-4 py-2">Name</th>
-                  <th className="text-left px-4 py-2">Role</th>
-                  <th className="text-left px-4 py-2">Club</th>
-                  <th className="text-right px-4 py-2">Actions</th>
+                  <th className="text-left px-3 py-2">Email</th>
+                  <th className="text-left px-3 py-2">Name</th>
+                  <th className="text-left px-3 py-2">Role</th>
+                  <th className="text-left px-3 py-2">Club</th>
+                  <th className="text-left px-3 py-2 hidden lg:table-cell">Created</th>
+                  <th className="text-left px-3 py-2 hidden lg:table-cell">Updated</th>
+                  <th className="text-right px-3 py-2">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-800">
                 {filtered.map((u) => (
                   <tr key={u.id} className="hover:bg-gray-900/40">
-                    <td className="px-4 py-2 text-gray-100">{u.email}</td>
-                    <td className="px-4 py-2 text-gray-300">{u.name ?? ""}</td>
-                    <td className="px-4 py-2">
+                    <td className="px-3 py-2 text-gray-100">{u.email}</td>
+                    <td className="px-3 py-2 text-gray-300">{u.name ?? ""}</td>
+                    <td className="px-3 py-2">
                       <span className="inline-block text-xs px-2 py-1 rounded bg-gray-800 border border-gray-700 text-gray-200">{u.role}</span>
                     </td>
-                    <td className="px-4 py-2 text-gray-400">{clubs.find(c => c.id === u.clubId)?.name ?? (u.clubId ?? "")}</td>
-                    <td className="px-4 py-2">
+                    <td className="px-3 py-2 text-gray-400">{clubs.find(c => c.id === u.clubId)?.name ?? (u.clubId ?? "")}</td>
+                    <td className="px-3 py-2 text-gray-400 hidden lg:table-cell">{formatDate(u.createdAt)}</td>
+                    <td className="px-3 py-2 text-gray-400 hidden lg:table-cell">{formatDate(u.updatedAt)}</td>
+                    <td className="px-3 py-2">
                       <div className="text-right space-x-2">
                         {u.role !== "SUPERADMIN" && (
                           <>

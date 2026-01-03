@@ -57,6 +57,13 @@ enum InvoiceStatus {
   CANCELLED
 }
 
+enum EventStatus {
+  DRAFT       // Event being set up
+  ACTIVE      // Open for entries
+  CLOSED      // Entries closed, event in progress or completed
+  ARCHIVED    // Historical event
+}
+
 // ---------------- Models ----------------
 model User {
   id     String  @id @default(cuid())
@@ -72,6 +79,18 @@ model User {
   updatedAt DateTime @updatedAt
 
   AuditLogs AuditLog[]
+}
+
+model MagicLink {
+  id        String   @id @default(cuid())
+  email     String
+  token     String   @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([token])
+  @@index([email])
 }
 
 model Club {
@@ -96,7 +115,7 @@ model Club {
 }
 
 model Event {
-  id         String   @id @default(cuid())
+  id         String      @id @default(cuid())
   name       String
   venue      String
   city       String
@@ -104,6 +123,7 @@ model Event {
   startDate  DateTime
   regOpen    DateTime
   regClose   DateTime
+  status     EventStatus @default(ACTIVE)
   /// JSON string of your YAML config (persisted snapshot)
   configJson String
 
@@ -119,22 +139,29 @@ model Event {
   @@index([startDate])
 }
 
+enum CategoryType {
+  KATA
+  KUMITE
+}
+
 model Division {
-  id      String  @id @default(cuid())
-  eventId String
-  event   Event   @relation(fields: [eventId], references: [id])
-  key     String // e.g., "CADET"
-  name    String // e.g., "Cadet (14–15)"
-  minAge  Int
-  maxAge  Int
-  gender  Gender
-  notes   String?
+  id        String       @id @default(cuid())
+  eventId   String
+  event     Event        @relation(fields: [eventId], references: [id])
+  key       String       // e.g., "CADET_M", "SENIOR_F"
+  name      String       // e.g., "Cadet Male (14-15)", "Senior Female"
+  minAge    Int
+  maxAge    Int
+  gender    Gender
+  category  CategoryType // KATA or KUMITE
+  notes     String?
 
   entries       Entry[]
   teams         Team[]
-  weightClasses WeightClass[] // optional linkage
+  weightClasses WeightClass[] // Only populated for KUMITE divisions
 
   @@index([eventId, key, gender])
+  @@index([eventId, category, gender])
 }
 
 model WeightClass {
@@ -307,4 +334,5 @@ model AuditLog {
 
   @@index([entityType, entityId])
   @@index([createdAt])
+  @@index([userId])
 }
