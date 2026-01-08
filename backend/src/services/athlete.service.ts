@@ -17,8 +17,9 @@ function scrubEmptyStrings<T extends Record<string, any>>(obj: T): T {
 }
 
 export class AthleteService {
-  static async getAll() {
+  static async getAll(includeInactive = false) {
     return prisma.athlete.findMany({
+      where: includeInactive ? undefined : { isActive: true },
       include: {
         club: { select: { id: true, name: true } },
         belt: { select: { id: true, name: true, colour: true } },
@@ -27,9 +28,9 @@ export class AthleteService {
     });
   }
 
-  static async getByClubId(clubId: string) {
+  static async getByClubId(clubId: string, includeInactive = false) {
     return prisma.athlete.findMany({
-      where: { clubId },
+      where: includeInactive ? { clubId } : { clubId, isActive: true },
       include: {
         club: { select: { id: true, name: true } },
         belt: { select: { id: true, name: true, colour: true } },
@@ -50,10 +51,11 @@ export class AthleteService {
 
   static async create(data: any) {
     const parsed = CreateAthlete.parse(scrubEmptyStrings(data));
-    const athleteData = { 
-      ...parsed, 
+    const athleteData = {
+      ...parsed,
       gender: parsed.gender as "Male" | "Female",
-      isInstructor: parsed.isInstructor ?? undefined 
+      isInstructor: parsed.isInstructor ?? undefined,
+      isActive: parsed.isActive ?? undefined
     };
     return prisma.athlete.create({ data: athleteData });
   }
@@ -120,6 +122,7 @@ export class AthleteService {
       "joinDate",
       "lastGraded",
       "isInstructor",
+      "isActive",
       "medicalNotes",
       "contactEmail",
       "contactPhone",
@@ -151,6 +154,10 @@ export class AthleteService {
     if (mapped.isInstructor !== undefined) {
       const val = String(mapped.isInstructor).trim().toLowerCase();
       mapped.isInstructor = val === "true" || val === "1" || val === "yes";
+    }
+    if (mapped.isActive !== undefined) {
+      const val = String(mapped.isActive).trim().toLowerCase();
+      mapped.isActive = val === "true" || val === "1" || val === "yes";
     }
     return scrubEmptyStrings(mapped);
   }

@@ -18,6 +18,7 @@ export type Athlete = {
   joinDate?: string | null;
   lastGraded?: string | null;
   isInstructor?: boolean | null;
+  isActive?: boolean | null;
   medicalNotes?: string | null;
   contactEmail?: string | null;
   contactPhone?: string | null;
@@ -30,13 +31,13 @@ export type Athlete = {
   belt?: { id: string; name?: string | null; colour?: string | null };
 };
 
-export async function listAthletes(clubId: string): Promise<Athlete[]> {
-  const { data } = await api.get("/athletes", { params: { clubId } });
+export async function listAthletes(clubId: string, includeInactive = false): Promise<Athlete[]> {
+  const { data } = await api.get("/athletes", { params: { clubId, includeInactive } });
   return data;
 }
 
-export async function listAllAthletes(): Promise<Athlete[]> {
-  const { data } = await api.get("/athletes/all");
+export async function listAllAthletes(includeInactive = false): Promise<Athlete[]> {
+  const { data } = await api.get("/athletes/all", { params: { includeInactive } });
   return data;
 }
 

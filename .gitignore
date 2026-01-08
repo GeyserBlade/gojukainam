@@ -23,7 +23,8 @@ build/
 # Prisma
 /prisma/dev.db
 /prisma/dev.db-journal
-prisma/migrations/
+# Keep migrations for production deployment - DO NOT ignore
+# prisma/migrations/
 
 # Logs
 logs/

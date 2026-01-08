@@ -27,6 +27,7 @@ const AthletesListPage = () => {
 
   const [q, setQ] = useState("");
   const [filterClub, setFilterClub] = useState<string>(clubId || "");
+  const [showInactive, setShowInactive] = useState(false);
 
   // Fetch clubs for filtering (if user can view multiple clubs)
   const { data: clubs = [] } = useQuery({
@@ -41,14 +42,14 @@ const AthletesListPage = () => {
     isLoading: loading,
     error: queryError
   } = useQuery({
-    queryKey: ['athletes', filterClub, role],
+    queryKey: ['athletes', filterClub, role, showInactive],
     queryFn: async () => {
       if (role === "SUPERADMIN" && !filterClub) {
-        return listAllAthletes();
+        return listAllAthletes(showInactive);
       } else {
         const cid = filterClub || clubId || "";
         if (!cid) return [];
-        return listAthletes(cid);
+        return listAthletes(cid, showInactive);
       }
     },
     enabled: canManage,
@@ -120,6 +121,16 @@ const AthletesListPage = () => {
           <div className="flex-1 max-w-lg">
             <Input placeholder="Search name, club, belt, nationality" value={q} onChange={(e)=>setQ(e.target.value)} />
           </div>
+          <div className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              id="showInactive"
+              checked={showInactive}
+              onChange={(e)=> setShowInactive(e.target.checked)}
+              className="h-4 w-4 rounded border-gray-700 bg-gray-900 text-blue-600 focus:ring-blue-500"
+            />
+            <label htmlFor="showInactive" className="text-sm text-gray-300 whitespace-nowrap">Show inactive</label>
+          </div>
         </div>
         {loading && <p className="text-sm text-gray-400">Loading…</p>}
         {error && <p className="text-sm text-red-400">{error}</p>}
@@ -142,8 +153,11 @@ const AthletesListPage = () => {
               </thead>
               <tbody className="divide-y divide-gray-800">
                 {filtered.map((a) => (
-                  <tr key={a.id} className="hover:bg-gray-900/40">
-                    <td className="px-3 py-2 text-gray-100">{a.firstName} {a.lastName}</td>
+                  <tr key={a.id} className={`hover:bg-gray-900/40 ${a.isActive === false ? "opacity-50" : ""}`}>
+                    <td className="px-3 py-2 text-gray-100">
+                      {a.firstName} {a.lastName}
+                      {a.isActive === false && <span className="ml-2 text-xs px-2 py-0.5 rounded bg-gray-700 text-gray-400">Inactive</span>}
+                    </td>
                     <td className="px-3 py-2 text-gray-300">{formatDate(a.dob)}</td>
                     <td className="px-3 py-2 text-gray-300">{calculateAge(a.dob) ?? ""}</td>
                     <td className="px-3 py-2 text-gray-300">{a.gender}</td>

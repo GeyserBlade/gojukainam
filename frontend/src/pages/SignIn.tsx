@@ -12,9 +12,9 @@ import { Select } from "../components/Input";
 const roles: Role[] = ["SUPERADMIN", "ADMIN", "CLUB_MANAGER", "COACH", "ATHLETE"];
 
 export const SignInPage = () => {
-  const { loginDev, login, requestMagicLink } = useAuth();
+  const { loginDev, login } = useAuth();
   const nav = useNavigate();
-  const [mode, setMode] = useState<"dev" | "magic" | "password">("password");
+  const [mode, setMode] = useState<"dev" | "password">("password");
   
   // Dev State
   const [devRole, setDevRole] = useState<Role>("CLUB_MANAGER");
@@ -26,7 +26,6 @@ export const SignInPage = () => {
   
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [info, setInfo] = useState<string | null>(null);
 
   async function onDevSignIn(e: FormEvent) {
     e.preventDefault();
@@ -51,26 +50,6 @@ export const SignInPage = () => {
       }
   }
 
-  async function onMagicLink(e: FormEvent) {
-    e.preventDefault();
-    setError(null); setInfo(null); setSending(true);
-    try {
-      const res = await requestMagicLink(email);
-      setInfo(res.message || "Check your email for the sign-in link.");
-      if (res.devToken) {
-          console.log("Dev Token:", res.devToken);
-          // Auto-redirect convenience in dev
-          // window.location.href = `/magic-login?token=${res.devToken}`;
-          setInfo(prev => prev + " (See console for dev token)");
-      }
-    } catch (err: any) {
-      console.error(err);
-      setError(err?.response?.data?.error || err?.message || "Failed to send magic link");
-    } finally {
-      setSending(false);
-    }
-  }
-
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-900 to-black text-gray-100 flex items-center justify-center px-4">
       <div className="w-full max-w-md">
@@ -80,7 +59,6 @@ export const SignInPage = () => {
 
           <div className="flex gap-2 mb-6">
             <button onClick={() => setMode("password")} className={`flex-1 rounded-xl px-2 py-2 text-sm border ${mode === "password" ? "bg-cyan-500 text-black border-cyan-400" : "border-gray-700 hover:bg-gray-800"}`}>Password</button>
-            <button onClick={() => setMode("magic")} className={`flex-1 rounded-xl px-2 py-2 text-sm border ${mode === "magic" ? "bg-cyan-500 text-black border-cyan-400" : "border-gray-700 hover:bg-gray-800"}`}>Link</button>
             <button onClick={() => setMode("dev")} className={`flex-1 rounded-xl px-2 py-2 text-sm border ${mode === "dev" ? "bg-cyan-500 text-black border-cyan-400" : "border-gray-700 hover:bg-gray-800"}`}>Dev</button>
           </div>
 
@@ -110,22 +88,19 @@ export const SignInPage = () => {
                <div>
                  <Label htmlFor="password">Password</Label>
                  <Input id="password" type="password" value={password} onChange={(e)=>setPassword(e.target.value)} required />
+                 <div className="mt-1 text-right">
+                   <button
+                     type="button"
+                     onClick={() => nav("/forgot-password")}
+                     className="text-xs text-cyan-400 hover:text-cyan-300"
+                   >
+                     Forgot password?
+                   </button>
+                 </div>
                </div>
                {error && <p className="text-red-400 text-sm">{error}</p>}
                <Button disabled={sending} type="submit">{sending ? "Signing in..." : "Sign in"}</Button>
              </form>
-          )}
-
-          {mode === "magic" && (
-            <form onSubmit={onMagicLink} className="space-y-4">
-              <div>
-                <Label htmlFor="email">Email</Label>
-                <Input id="email" placeholder="you@dojo.org" value={email} onChange={(e)=>setEmail(e.target.value)} type="email" required />
-              </div>
-              {error && <p className="text-red-400 text-sm">{error}</p>}
-              {info && <p className="text-emerald-400 text-sm">{info}</p>}
-              <Button disabled={sending} type="submit">{sending ? "Sending..." : "Send magic link"}</Button>
-            </form>
           )}
         </div>
         <p className="text-center text-xs text-gray-500 mt-4">v0.1 · Express · Prisma · React · Tailwind</p>

@@ -14,19 +14,21 @@ const upload = multer({
 });
 
 // list all athletes (Superadmin)
-router.get("/all", requireRoles("SUPERADMIN"), async (_req, res) => {
-  const rows = await AthleteService.getAll();
+router.get("/all", requireRoles("SUPERADMIN"), async (req, res) => {
+  const includeInactive = req.query.includeInactive === "true";
+  const rows = await AthleteService.getAll(includeInactive);
   res.json(rows);
 });
 
 // list own club athletes (Club Manager / Coach)
 router.get("/", requireRoles("CLUB_MANAGER","ADMIN","SUPERADMIN"), validate(ClubAthletesQuery, 'query'), async (req, res) => {
   const { clubId } = req.query as { clubId: string };
+  const includeInactive = req.query.includeInactive === "true";
   // authorization: club scoped
   if (req.user?.role === "CLUB_MANAGER") {
     if (req.user.clubId !== clubId) return res.status(403).json({ error: "Forbidden" });
   }
-  const rows = await AthleteService.getByClubId(clubId);
+  const rows = await AthleteService.getByClubId(clubId, includeInactive);
   res.json(rows);
 });
 

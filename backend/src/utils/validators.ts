@@ -28,6 +28,7 @@ export const CreateAthlete = z.object({
   joinDate: dateSchema.optional().nullable(),
   lastGraded: dateSchema.optional().nullable(),
   isInstructor: z.boolean().optional().nullable(),
+  isActive: z.boolean().optional().nullable(),
   medicalNotes: z.string().optional().nullable(),
   contactEmail: z.string().email().optional().nullable(),
   contactPhone: z.string().optional().nullable(),

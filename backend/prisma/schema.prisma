@@ -78,7 +78,8 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  AuditLogs AuditLog[]
+  AuditLogs      AuditLog[]
+  PasswordResets PasswordReset[]
 }
 
 model MagicLink {
@@ -91,6 +92,19 @@ model MagicLink {
 
   @@index([token])
   @@index([email])
+}
+
+model PasswordReset {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token     String   @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([token])
+  @@index([userId])
 }
 
 model Club {
@@ -212,6 +226,7 @@ model Athlete {
   joinDate       DateTime?
   lastGraded     DateTime?
   isInstructor   Boolean   @default(false)
+  isActive       Boolean   @default(true)
   medicalNotes   String?
   contactEmail   String?
   contactPhone   String?

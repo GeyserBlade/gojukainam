@@ -17,7 +17,27 @@ import { router as belts } from "./routes/belts.js";
 
 const app = express();
 
-app.use(cors({ origin: "http://localhost:5173", credentials: true }));
+// Allow multiple origins for development (Vite dev server and serve)
+// In production (Railway), FRONTEND_URL will be set to the single production domain
+// In development, allow both dev server (5173) and production build (3000)
+const IS_PRODUCTION = process.env.NODE_ENV === "production";
+const ALLOWED_ORIGINS = IS_PRODUCTION && process.env.FRONTEND_URL
+  ? [process.env.FRONTEND_URL]
+  : ["http://localhost:5173", "http://localhost:3000"];
+
+app.use(cors({
+  origin: (origin, callback) => {
+    // Allow requests with no origin (like mobile apps or curl)
+    if (!origin) return callback(null, true);
+
+    if (ALLOWED_ORIGINS.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true
+}));
 app.use(express.json());
 app.use(cookieParser());
 

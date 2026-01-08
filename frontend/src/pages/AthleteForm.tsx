@@ -168,6 +168,16 @@ const AthleteFormPage = () => {
               <Input type="date" value={form.lastGraded ? String(form.lastGraded).slice(0,10) : ""} onChange={(e)=> setForm({ ...form, lastGraded: e.target.value as any })} />
             </div>
           </div>
+          <div className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              id="isActive"
+              checked={form.isActive !== false}
+              onChange={(e)=> setForm({ ...form, isActive: e.target.checked })}
+              className="h-4 w-4 rounded border-gray-700 bg-gray-900 text-blue-600 focus:ring-blue-500"
+            />
+            <label htmlFor="isActive" className="text-sm text-gray-300">Active (inactive athletes cannot be entered in events)</label>
+          </div>
           <div>
             <Label>Medical Notes</Label>
             <Textarea rows={3} value={form.medicalNotes || ""} onChange={(e)=> setForm({ ...form, medicalNotes: e.target.value })} />

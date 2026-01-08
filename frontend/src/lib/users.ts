@@ -31,3 +31,12 @@ export async function deleteUser(id: string): Promise<void> {
   await api.delete(`/users/${id}`);
 }
 
+export async function setUserPassword(id: string, password: string): Promise<{ success: boolean; message: string }> {
+  const r = await api.post(`/users/${id}/set-password`, { password });
+  return r.data;
+}
+
+export async function requestPasswordReset(id: string): Promise<{ success: boolean; message: string; devToken?: string }> {
+  const r = await api.post(`/users/${id}/reset-password`);
+  return r.data;
+}

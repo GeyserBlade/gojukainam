@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { Button, Input, Label, Select } from "../components/Input";
-import { createUser, deleteUser, listUsers, updateUser, type User, type Role } from "../lib/users";
+import { createUser, deleteUser, listUsers, updateUser, setUserPassword, requestPasswordReset, type User, type Role } from "../lib/users";
 import { listClubs, type Club } from "../lib/clubs";
 
 const roleOptions: Role[] = ["ADMIN", "CLUB_MANAGER", "COACH", "ATHLETE"]; // exclude SUPERADMIN create/edit
@@ -22,6 +22,13 @@ const UsersPage = () => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<Partial<{ name: string; email: string; role: Role; clubId: string | null }>>({});
   const [clubs, setClubs] = useState<Club[]>([]);
+
+  // Password management state
+  const [passwordUserId, setPasswordUserId] = useState<string | null>(null);
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [settingPassword, setSettingPassword] = useState(false);
 
   const canManage = role === "ADMIN" || role === "SUPERADMIN";
   const canCreateAdmin = role === "SUPERADMIN";
@@ -91,6 +98,64 @@ const UsersPage = () => {
     } catch (err: any) {
       alert(err?.response?.data?.error || err.message || "Failed to delete user");
       setUsers(prev);
+    }
+  }
+
+  function openPasswordModal(userId: string) {
+    setPasswordUserId(userId);
+    setNewPassword("");
+    setConfirmPassword("");
+    setPasswordError(null);
+  }
+
+  function closePasswordModal() {
+    setPasswordUserId(null);
+    setNewPassword("");
+    setConfirmPassword("");
+    setPasswordError(null);
+  }
+
+  async function onSetPassword(e: React.FormEvent) {
+    e.preventDefault();
+    if (!passwordUserId) return;
+
+    setPasswordError(null);
+
+    if (newPassword !== confirmPassword) {
+      setPasswordError("Passwords do not match");
+      return;
+    }
+
+    if (newPassword.length < 8) {
+      setPasswordError("Password must be at least 8 characters long");
+      return;
+    }
+
+    setSettingPassword(true);
+
+    try {
+      await setUserPassword(passwordUserId, newPassword);
+      alert("Password set successfully!");
+      closePasswordModal();
+    } catch (err: any) {
+      setPasswordError(err?.response?.data?.error || err.message || "Failed to set password");
+    } finally {
+      setSettingPassword(false);
+    }
+  }
+
+  async function onResetPassword(id: string) {
+    if (!confirm("Generate password reset link for this user?")) return;
+
+    try {
+      const result = await requestPasswordReset(id);
+      if (result.devToken) {
+        alert(`Password reset link generated!\n\nDev Token: ${result.devToken}\n\nLink: ${window.location.origin}/reset-password?token=${result.devToken}`);
+      } else {
+        alert(result.message || "Password reset link sent!");
+      }
+    } catch (err: any) {
+      alert(err?.response?.data?.error || err.message || "Failed to request password reset");
     }
   }
 
@@ -246,6 +311,8 @@ const UsersPage = () => {
                             ) : (
                               <button onClick={()=>startEdit(u)} disabled={!!editingId} className="text-xs px-3 py-1 rounded bg-cyan-600/80 hover:bg-cyan-600 text-black font-semibold disabled:opacity-50">Edit</button>
                             )}
+                            <button onClick={()=>openPasswordModal(u.id)} disabled={!!editingId} className="text-xs px-3 py-1 rounded bg-blue-600/80 hover:bg-blue-600 text-white disabled:opacity-50">Set Password</button>
+                            <button onClick={()=>onResetPassword(u.id)} disabled={!!editingId} className="text-xs px-3 py-1 rounded bg-yellow-600/80 hover:bg-yellow-600 text-black font-semibold disabled:opacity-50">Reset Link</button>
                             <button onClick={()=>onDelete(u.id, u)} disabled={!!editingId} className="text-xs px-3 py-1 rounded bg-red-600/80 hover:bg-red-600 text-white disabled:opacity-50">Delete</button>
                           </>
                         )}
@@ -255,6 +322,69 @@ const UsersPage = () => {
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {/* Password Management Modal */}
+        {passwordUserId && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50" onClick={closePasswordModal}>
+            <div className="bg-gray-900 rounded-xl border border-gray-800 p-6 max-w-md w-full" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-semibold">Set Password</h2>
+                <button onClick={closePasswordModal} className="text-gray-400 hover:text-white">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              <form onSubmit={onSetPassword} className="space-y-4">
+                <div>
+                  <Label required>New Password</Label>
+                  <Input
+                    type="password"
+                    required
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    placeholder="Enter new password"
+                    autoFocus
+                  />
+                  <p className="text-xs text-gray-400 mt-1">
+                    Must be at least 8 characters with uppercase, lowercase, number, and special character
+                  </p>
+                </div>
+
+                <div>
+                  <Label required>Confirm Password</Label>
+                  <Input
+                    type="password"
+                    required
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    placeholder="Confirm new password"
+                  />
+                </div>
+
+                {passwordError && (
+                  <div className="p-3 rounded-lg bg-red-600/10 border border-red-600/20">
+                    <p className="text-sm text-red-400">{passwordError}</p>
+                  </div>
+                )}
+
+                <div className="flex gap-2">
+                  <Button type="submit" disabled={settingPassword} className="flex-1">
+                    {settingPassword ? "Setting..." : "Set Password"}
+                  </Button>
+                  <button
+                    type="button"
+                    onClick={closePasswordModal}
+                    className="flex-1 rounded-xl bg-gray-700 hover:bg-gray-600 text-white font-semibold px-4 py-2"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            </div>
           </div>
         )}
       </div>

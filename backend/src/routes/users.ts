@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { requireRoles } from "../utils/auth.js";
 import { UserService } from "../services/user.service.js";
+import { AuthService } from "../services/auth.service.js";
 
 export const router = Router();
 
@@ -57,11 +58,57 @@ router.delete("/:id", requireRoles("ADMIN", "SUPERADMIN"), async (req, res, next
     const { id } = req.params;
     await UserService.delete(id);
     res.status(204).send();
-  } catch (err: any) { 
+  } catch (err: any) {
     if (err.status && err.message) {
       return res.status(err.status).json({ error: err.message });
     }
-    next(err); 
+    next(err);
+  }
+});
+
+// Admin: Set password for a user (creates or resets password)
+router.post("/:id/set-password", requireRoles("ADMIN", "SUPERADMIN"), async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { password } = req.body;
+
+    if (!password) {
+      return res.status(400).json({ error: "Password required" });
+    }
+
+    // Verify user exists
+    const user = await UserService.getById(id);
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    // Set the password
+    await AuthService.setPassword(id, password);
+
+    res.json({ success: true, message: "Password set successfully" });
+  } catch (err: any) {
+    const status = err.status || 400;
+    res.status(status).json({ error: err.message || "Failed to set password" });
+  }
+});
+
+// Admin: Request password reset for a user (generates reset token)
+router.post("/:id/reset-password", requireRoles("ADMIN", "SUPERADMIN"), async (req, res, next) => {
+  try {
+    const { id } = req.params;
+
+    // Get user
+    const user = await UserService.getById(id);
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    // Request password reset for this user
+    const result = await AuthService.requestPasswordReset(user.email);
+
+    res.json(result);
+  } catch (err: any) {
+    next(err);
   }
 });
 

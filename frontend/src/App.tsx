@@ -3,6 +3,8 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import SignInPage from "./pages/SignIn";
 import MagicLoginPage from "./pages/MagicLogin";
+import ForgotPasswordPage from "./pages/ForgotPassword";
+import ResetPasswordPage from "./pages/ResetPassword";
 import { Dashboard } from "./pages/Dashboard";
 import UsersPage from "./pages/Users";
 import BeltsPage from "./pages/Belts";
@@ -26,6 +28,8 @@ const AppRoutes: React.FC = () => (
   <Routes>
     <Route path="/signin" element={<SignInPage />} />
     <Route path="/magic-login" element={<MagicLoginPage />} />
+    <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+    <Route path="/reset-password" element={<ResetPasswordPage />} />
     <Route path="/dashboard" element={<Protected><Dashboard /></Protected>} />
     <Route path="/users" element={<Protected><UsersPage /></Protected>} />
     <Route path="/clubs" element={<Protected><ClubsPage /></Protected>} />

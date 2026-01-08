@@ -81,9 +81,17 @@ export async function validateAthleteEligibility(
 ) {
   const athlete = await prisma.athlete.findUnique({
     where: { id: athleteId },
-    select: { dob: true, gender: true, firstName: true, lastName: true }
+    select: { dob: true, gender: true, firstName: true, lastName: true, isActive: true }
   });
   if (!athlete) throw { status: 404, message: "Athlete not found" };
+
+  // Check if athlete is active
+  if (!athlete.isActive) {
+    throw {
+      status: 400,
+      message: `Athlete ${athlete.firstName} ${athlete.lastName} is inactive and cannot be entered`
+    };
+  }
 
   const division = await prisma.division.findUnique({
     where: { id: divisionId },
