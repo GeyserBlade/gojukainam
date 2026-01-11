@@ -2,6 +2,7 @@ import { Router } from "express";
 import { requireRoles } from "../utils/auth.js";
 import { EventService } from "../services/event.service.js";
 import { validate, validateMultiple } from "../middleware/validate.js";
+import { getParam } from "../utils/params.js";
 import {
   CreateEvent,
   UpdateEvent,
@@ -36,7 +37,7 @@ router.get("/", async (req, res, next) => {
 // get single event by id
 router.get("/:id", validate(IdParam, "params"), async (req, res, next) => {
   try {
-    const event = await EventService.getById(req.params.id);
+    const event = await EventService.getById(getParam(req.params.id));
     if (!event) return res.status(404).json({ error: "Event not found" });
     res.json(event);
   } catch (err) {
@@ -57,7 +58,7 @@ router.post("/", requireRoles("SUPERADMIN", "ADMIN"), validate(CreateEvent), asy
 // update event (admin only)
 router.put("/:id", requireRoles("SUPERADMIN", "ADMIN"), validateMultiple({ params: IdParam, body: UpdateEvent }), async (req, res, next) => {
   try {
-    const event = await EventService.update(req.params.id, req.body);
+    const event = await EventService.update(getParam(req.params.id), req.body);
     res.json(event);
   } catch (err) {
     next(err);
@@ -67,7 +68,7 @@ router.put("/:id", requireRoles("SUPERADMIN", "ADMIN"), validateMultiple({ param
 // update event status (admin only)
 router.patch("/:id/status", requireRoles("SUPERADMIN", "ADMIN"), validateMultiple({ params: IdParam, body: UpdateEventStatus }), async (req, res, next) => {
   try {
-    const event = await EventService.updateStatus(req.params.id, req.body.status);
+    const event = await EventService.updateStatus(getParam(req.params.id), req.body.status);
     res.json(event);
   } catch (err) {
     next(err);
@@ -77,7 +78,7 @@ router.patch("/:id/status", requireRoles("SUPERADMIN", "ADMIN"), validateMultipl
 // delete event (admin only)
 router.delete("/:id", requireRoles("SUPERADMIN", "ADMIN"), validate(IdParam, "params"), async (req, res, next) => {
   try {
-    await EventService.delete(req.params.id);
+    await EventService.delete(getParam(req.params.id));
     res.status(204).send();
   } catch (err: any) {
     if (err.status && err.message) {
@@ -92,7 +93,7 @@ router.delete("/:id", requireRoles("SUPERADMIN", "ADMIN"), validate(IdParam, "pa
 // get divisions for an event
 router.get("/:id/divisions", validate(IdParam, "params"), async (req, res, next) => {
   try {
-    const rows = await EventService.getDivisions(req.params.id);
+    const rows = await EventService.getDivisions(getParam(req.params.id));
     res.json(rows);
   } catch (err) {
     next(err);
@@ -112,7 +113,7 @@ router.post("/:id/divisions", requireRoles("SUPERADMIN", "ADMIN"), validate(Crea
 // update division (admin only)
 router.put("/divisions/:divisionId", requireRoles("SUPERADMIN", "ADMIN"), validateMultiple({ params: DivisionIdParam, body: UpdateDivision }), async (req, res, next) => {
   try {
-    const division = await EventService.updateDivision(req.params.divisionId, req.body);
+    const division = await EventService.updateDivision(getParam(req.params.divisionId), req.body);
     res.json(division);
   } catch (err) {
     next(err);
@@ -122,7 +123,7 @@ router.put("/divisions/:divisionId", requireRoles("SUPERADMIN", "ADMIN"), valida
 // delete division (admin only)
 router.delete("/divisions/:divisionId", requireRoles("SUPERADMIN", "ADMIN"), validate(DivisionIdParam, "params"), async (req, res, next) => {
   try {
-    await EventService.deleteDivision(req.params.divisionId);
+    await EventService.deleteDivision(getParam(req.params.divisionId));
     res.status(204).send();
   } catch (err: any) {
     if (err.status && err.message) {
@@ -137,7 +138,7 @@ router.delete("/divisions/:divisionId", requireRoles("SUPERADMIN", "ADMIN"), val
 // get weight classes for an event
 router.get("/:id/weights", validate(IdParam, "params"), async (req, res, next) => {
   try {
-    const rows = await EventService.getWeightClasses(req.params.id);
+    const rows = await EventService.getWeightClasses(getParam(req.params.id));
     res.json(rows);
   } catch (err) {
     next(err);
@@ -157,7 +158,7 @@ router.post("/:id/weights", requireRoles("SUPERADMIN", "ADMIN"), validate(Create
 // update weight class (admin only)
 router.put("/weights/:weightClassId", requireRoles("SUPERADMIN", "ADMIN"), validateMultiple({ params: WeightClassIdParam, body: UpdateWeightClass }), async (req, res, next) => {
   try {
-    const weightClass = await EventService.updateWeightClass(req.params.weightClassId, req.body);
+    const weightClass = await EventService.updateWeightClass(getParam(req.params.weightClassId), req.body);
     res.json(weightClass);
   } catch (err) {
     next(err);
@@ -167,7 +168,7 @@ router.put("/weights/:weightClassId", requireRoles("SUPERADMIN", "ADMIN"), valid
 // delete weight class (admin only)
 router.delete("/weights/:weightClassId", requireRoles("SUPERADMIN", "ADMIN"), validate(WeightClassIdParam, "params"), async (req, res, next) => {
   try {
-    await EventService.deleteWeightClass(req.params.weightClassId);
+    await EventService.deleteWeightClass(getParam(req.params.weightClassId));
     res.status(204).send();
   } catch (err: any) {
     if (err.status && err.message) {
@@ -182,7 +183,8 @@ router.delete("/weights/:weightClassId", requireRoles("SUPERADMIN", "ADMIN"), va
 // get eligible athletes for a division
 router.get("/:id/divisions/:divisionId/eligible-athletes", validate(EligibleAthletesQuery, "query"), async (req, res, next) => {
   try {
-    const { id: eventId, divisionId } = req.params;
+    const eventId = getParam(req.params.id);
+    const divisionId = getParam(req.params.divisionId);
     const { clubId } = req.query as { clubId?: string };
 
     const athletes = await EventService.getEligibleAthletes(eventId, divisionId, clubId);
@@ -200,7 +202,7 @@ router.get("/:id/divisions/:divisionId/eligible-athletes", validate(EligibleAthl
 // update config snapshot (admins)
 router.put("/:id/config", requireRoles("SUPERADMIN", "ADMIN"), async (req, res, next) => {
   try {
-    const event = await EventService.updateConfig(req.params.id, req.body);
+    const event = await EventService.updateConfig(getParam(req.params.id), req.body);
     res.json(event);
   } catch (err) {
     next(err);

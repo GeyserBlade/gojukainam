@@ -2,6 +2,7 @@ import { Router } from "express";
 import { requireRoles } from "../utils/auth.js";
 import { UserService } from "../services/user.service.js";
 import { AuthService } from "../services/auth.service.js";
+import { getParam } from "../utils/params.js";
 
 export const router = Router();
 
@@ -16,7 +17,7 @@ router.get("/", requireRoles("ADMIN", "SUPERADMIN"), async (_req, res, next) => 
 // Get single user
 router.get("/:id", requireRoles("ADMIN", "SUPERADMIN"), async (req, res, next) => {
   try {
-    const { id } = req.params;
+    const id = getParam(req.params.id);
     const user = await UserService.getById(id);
     if (!user) return res.status(404).json({ error: "Not found" });
     res.json(user);
@@ -40,7 +41,7 @@ router.post("/", requireRoles("ADMIN", "SUPERADMIN"), async (req, res, next) => 
 // Update user
 router.put("/:id", requireRoles("ADMIN", "SUPERADMIN"), async (req, res, next) => {
   try {
-    const { id } = req.params;
+    const id = getParam(req.params.id);
     const requester = req.user!; // ensured by requireRoles
     const updated = await UserService.update(id, req.body, requester.role);
     res.json(updated);
@@ -55,7 +56,7 @@ router.put("/:id", requireRoles("ADMIN", "SUPERADMIN"), async (req, res, next) =
 // Delete user
 router.delete("/:id", requireRoles("ADMIN", "SUPERADMIN"), async (req, res, next) => {
   try {
-    const { id } = req.params;
+    const id = getParam(req.params.id);
     await UserService.delete(id);
     res.status(204).send();
   } catch (err: any) {
@@ -69,7 +70,7 @@ router.delete("/:id", requireRoles("ADMIN", "SUPERADMIN"), async (req, res, next
 // Admin: Set password for a user (creates or resets password)
 router.post("/:id/set-password", requireRoles("ADMIN", "SUPERADMIN"), async (req, res, next) => {
   try {
-    const { id } = req.params;
+    const id = getParam(req.params.id);
     const { password } = req.body;
 
     if (!password) {
@@ -95,7 +96,7 @@ router.post("/:id/set-password", requireRoles("ADMIN", "SUPERADMIN"), async (req
 // Admin: Request password reset for a user (generates reset token)
 router.post("/:id/reset-password", requireRoles("ADMIN", "SUPERADMIN"), async (req, res, next) => {
   try {
-    const { id } = req.params;
+    const id = getParam(req.params.id);
 
     // Get user
     const user = await UserService.getById(id);

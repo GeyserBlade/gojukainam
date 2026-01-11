@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { requireRoles } from "../utils/auth.js";
 import { BeltService } from "../services/belt.service.js";
+import { getParam } from "../utils/params.js";
 
 export const router = Router();
 
@@ -15,7 +16,7 @@ router.get("/", requireRoles("CLUB_MANAGER", "ADMIN", "SUPERADMIN"), async (_req
 // Get a single belt
 router.get("/:id", requireRoles("CLUB_MANAGER", "ADMIN", "SUPERADMIN"), async (req, res, next) => {
   try {
-    const { id } = req.params;
+    const id = getParam(req.params.id);
     const row = await BeltService.getById(id);
     if (!row) return res.status(404).json({ error: "Not found" });
     res.json(row);
@@ -33,7 +34,7 @@ router.post("/", requireRoles("ADMIN", "SUPERADMIN"), async (req, res, next) => 
 // Update belt
 router.put("/:id", requireRoles("ADMIN", "SUPERADMIN"), async (req, res, next) => {
   try {
-    const { id } = req.params;
+    const id = getParam(req.params.id);
     const existing = await BeltService.getById(id);
     if (!existing) return res.status(404).json({ error: "Not found" });
     const updated = await BeltService.update(id, req.body);
@@ -44,7 +45,7 @@ router.put("/:id", requireRoles("ADMIN", "SUPERADMIN"), async (req, res, next) =
 // Delete belt
 router.delete("/:id", requireRoles("ADMIN", "SUPERADMIN"), async (req, res, next) => {
   try {
-    const { id } = req.params;
+    const id = getParam(req.params.id);
     await BeltService.delete(id);
     res.status(204).send();
   } catch (err: any) {

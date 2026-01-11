@@ -3,6 +3,7 @@ import { requireRoles } from "../utils/auth.js";
 import { EntryService } from "../services/entry.service.js";
 import { validate, validateMultiple } from "../middleware/validate.js";
 import { CreateEntry, UpdateEntryStatus, EventEntriesQuery, IdParam } from "../utils/validators.js";
+import { getParam } from "../utils/params.js";
 
 export const router = Router();
 
@@ -64,7 +65,7 @@ router.post("/", requireRoles("CLUB_MANAGER", "ADMIN", "SUPERADMIN"), validate(C
 // change status (submit/approve/return)
 router.put("/:id/status", requireRoles("CLUB_MANAGER", "COACH", "ADMIN", "SUPERADMIN"), validateMultiple({ params: IdParam, body: UpdateEntryStatus }), async (req, res, next) => {
   try {
-    const { id } = req.params;
+    const id = getParam(req.params.id);
     const user = {
       id: req.user!.id,
       role: req.user!.role,

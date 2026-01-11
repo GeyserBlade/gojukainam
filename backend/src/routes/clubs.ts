@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { requireRoles } from "../utils/auth.js";
 import { ClubService } from "../services/club.service.js";
+import { getParam } from "../utils/params.js";
 
 export const router = Router();
 
@@ -15,7 +16,7 @@ router.get("/", requireRoles("SUPERADMIN", "ADMIN"), async (_req, res, next) => 
 // get club by id
 router.get("/:id", requireRoles("SUPERADMIN", "ADMIN", "CLUB_MANAGER", "COACH", "ATHLETE"), async (req, res, next) => {
   try {
-    const { id } = req.params;
+    const id = getParam(req.params.id);
     const club = await ClubService.getById(id);
     if (!club) return res.status(404).json({ error: "Not found" });
 
@@ -40,7 +41,7 @@ router.post("/", requireRoles("SUPERADMIN", "ADMIN"), async (req, res, next) => 
 // update club
 router.put("/:id", requireRoles("SUPERADMIN", "ADMIN"), async (req, res, next) => {
   try {
-    const { id } = req.params;
+    const id = getParam(req.params.id);
     const existing = await ClubService.getById(id);
     if (!existing) return res.status(404).json({ error: "Not found" });
 
@@ -52,7 +53,7 @@ router.put("/:id", requireRoles("SUPERADMIN", "ADMIN"), async (req, res, next) =
 // delete club
 router.delete("/:id", requireRoles("SUPERADMIN", "ADMIN"), async (req, res, next) => {
   try {
-    const { id } = req.params;
+    const id = getParam(req.params.id);
     await ClubService.delete(id);
     res.status(204).send();
   } catch (err: any) {

@@ -4,6 +4,7 @@ import { requireRoles } from "../utils/auth.js";
 import { AthleteService } from "../services/athlete.service.js";
 import { validate, validateMultiple } from "../middleware/validate.js";
 import { CreateAthlete, UpdateAthlete, ClubAthletesQuery, IdParam } from "../utils/validators.js";
+import { getParam } from "../utils/params.js";
 import multer from "multer";
 
 export const router = Router();
@@ -35,7 +36,7 @@ router.get("/", requireRoles("CLUB_MANAGER","ADMIN","SUPERADMIN"), validate(Club
 // get single athlete by id (admin/club scoped)
 router.get("/:id", requireRoles("CLUB_MANAGER","ADMIN","SUPERADMIN"), validate(IdParam, 'params'), async (req, res, next) => {
   try {
-    const { id } = req.params;
+    const id = getParam(req.params.id);
     const row = await AthleteService.getById(id);
     if (!row) return res.status(404).json({ error: "Not found" });
     if (req.user?.role !== "SUPERADMIN" && req.user?.clubId !== row.clubId) {
@@ -61,7 +62,7 @@ router.post("/", requireRoles("CLUB_MANAGER","ADMIN","SUPERADMIN"), validate(Cre
 // update athlete (club scoped)
 router.put("/:id", requireRoles("CLUB_MANAGER","ADMIN","SUPERADMIN"), validateMultiple({ params: IdParam, body: UpdateAthlete }), async (req, res, next) => {
   try {
-    const id = req.params.id;
+    const id = getParam(req.params.id);
     const existing = await AthleteService.getById(id);
     if (!existing) return res.status(404).json({ error: "Not found" });
     if (req.user?.role !== "SUPERADMIN" && req.user?.clubId !== existing.clubId) {
@@ -76,7 +77,7 @@ router.put("/:id", requireRoles("CLUB_MANAGER","ADMIN","SUPERADMIN"), validateMu
 // delete athlete (club scoped)
 router.delete("/:id", requireRoles("CLUB_MANAGER","ADMIN","SUPERADMIN"), validate(IdParam, 'params'), async (req, res, next) => {
   try {
-    const { id } = req.params;
+    const id = getParam(req.params.id);
     const existing = await AthleteService.getById(id);
     if (!existing) return res.status(404).json({ error: "Not found" });
 
