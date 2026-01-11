@@ -17,7 +17,8 @@
       "Bash(curl:*)",
       "Bash(cat:*)",
       "Bash(npm run check-user:*)",
-      "Bash(npm run create-superuser:*)"
+      "Bash(npm run create-superuser:*)",
+      "Bash(railway status:*)"
     ]
   }
 }

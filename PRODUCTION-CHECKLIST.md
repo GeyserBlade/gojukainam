@@ -117,7 +117,10 @@ Follow the detailed guide in [DEPLOYMENT.md](DEPLOYMENT.md) for complete Railway
 
 2. **Add PostgreSQL Database**
    - Click "+ New" → Database → PostgreSQL
-   - Note the connection details
+   - Note the connection details (postgresql://postgres:soXfNcBEswftwIYlhrrZfnBGvlWbLMuk@postgres.railway.internal:5432/railway)
+   - docker container id: ca271e886764
+   - CMD: docker exec -t ca271e886764 pg_dump -U postgres --clean --no-owner --no-privileges > clean_backup.sql
+   - docker exec -it ca271e886764 psql -U postgres -l
 
 3. **Deploy Backend Service**
    - Click "+ New" → GitHub Repo
