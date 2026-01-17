@@ -18,7 +18,7 @@ router.post("/login", async (req, res, next) => {
     res.cookie(COOKIE_NAME, token, {
       httpOnly: true,
       secure: IS_PROD,
-      sameSite: "lax", // or 'strict' if frontend is same origin
+      sameSite: IS_PROD ? "none" : "lax", // 'none' required for cross-site cookies in production
       maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     });
 
@@ -57,7 +57,7 @@ router.post("/magic-login", async (req, res, next) => {
     res.cookie(COOKIE_NAME, sessionToken, {
       httpOnly: true,
       secure: IS_PROD,
-      sameSite: "lax",
+      sameSite: IS_PROD ? "none" : "lax",
       maxAge: 7 * 24 * 60 * 60 * 1000,
     });
 
@@ -122,7 +122,7 @@ router.post("/password-reset", async (req, res, next) => {
     res.cookie(COOKIE_NAME, sessionToken, {
       httpOnly: true,
       secure: IS_PROD,
-      sameSite: "lax",
+      sameSite: IS_PROD ? "none" : "lax",
       maxAge: 7 * 24 * 60 * 60 * 1000,
     });
 
