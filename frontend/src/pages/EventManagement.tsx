@@ -6,7 +6,7 @@ import { DndContext, closestCenter, DragEndEvent, DragOverlay, DragStartEvent, u
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Input, Select } from "../components/Input";
+import { Input, Select, ActionButton } from "../components/Input";
 import {
   listEvents,
   getEvent,
@@ -19,7 +19,50 @@ import {
 import { EntryService } from "../lib/entries";
 import { listClubs, type Club } from "../lib/clubs";
 
-// ============ Draggable Athlete Card ============
+// ============ Mobile Athlete Card with Add Button ============
+
+interface MobileAthleteCardProps {
+  athlete: EligibleAthlete;
+  onAdd: () => void;
+  isAdding: boolean;
+}
+
+const MobileAthleteCard: React.FC<MobileAthleteCardProps> = ({ athlete, onAdd, isAdding }) => (
+  <div className={`p-4 rounded-xl border border-gray-700 bg-gray-800/80 ${athlete.isEntered ? "opacity-50" : ""}`}>
+    <div className="flex items-start justify-between gap-3">
+      <div className="flex-1 min-w-0">
+        <p className="font-medium text-base text-gray-100">
+          {athlete.firstName} {athlete.lastName}
+        </p>
+        <p className="text-sm text-gray-400 mt-1">
+          {athlete.club.name}
+        </p>
+        <div className="flex flex-wrap gap-x-3 gap-y-1 mt-2 text-sm text-gray-500">
+          <span>Age: {athlete.age}</span>
+          <span>{athlete.belt.name || "No Belt"}</span>
+          {athlete.weightKg && <span>{athlete.weightKg}kg</span>}
+        </div>
+      </div>
+      <div className="flex-shrink-0">
+        {athlete.isEntered ? (
+          <span className="inline-flex items-center text-xs bg-green-900/30 text-green-400 px-3 py-2 rounded-lg">
+            Entered
+          </span>
+        ) : (
+          <ActionButton
+            variant="primary"
+            onClick={onAdd}
+            disabled={isAdding}
+          >
+            {isAdding ? "..." : "+ Add"}
+          </ActionButton>
+        )}
+      </div>
+    </div>
+  </div>
+);
+
+// ============ Desktop Draggable Athlete Card ============
 
 interface AthleteCardProps {
   athlete: EligibleAthlete;
@@ -227,247 +270,307 @@ const EventManagement = () => {
     }
   };
 
+  // Handle mobile add entry
+  const handleMobileAddEntry = (athleteId: string) => {
+    const athlete = eligibleAthletes.find((a) => a.id === athleteId);
+    if (athlete && !athlete.isEntered) {
+      createEntryMutation.mutate(athleteId);
+    }
+  };
+
   if (!isAdmin && !clubId) {
     return (
-      <div className="min-h-screen bg-gray-950 text-gray-100 p-4">
-        <div className="max-w-7xl mx-auto">
+      <div className="min-h-screen bg-gray-950 text-gray-100">
+        <header className="sticky top-0 z-50 bg-gray-950/95 backdrop-blur border-b border-gray-800 px-4 py-3">
+          <div className="max-w-7xl mx-auto flex items-center justify-between">
+            <h1 className="text-xl md:text-2xl font-semibold">Entry Management</h1>
+            <button className="px-3 py-2 text-sm text-gray-400 hover:text-white" onClick={() => navigate("/dashboard")}>Back</button>
+          </div>
+        </header>
+        <main className="p-4">
           <p className="text-sm text-gray-400">You do not have permission to access this page.</p>
-        </div>
+        </main>
       </div>
     );
   }
 
   return (
     <DndContext collisionDetection={closestCenter} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-      <div className="min-h-screen bg-gray-950 text-gray-100 p-4">
-        <div className="max-w-7xl mx-auto">
-          {/* Header */}
-          <div className="flex items-center justify-between mb-6">
-            <h1 className="text-2xl font-semibold">Event Management</h1>
-            <button className="text-sm text-gray-400 hover:text-white" onClick={() => navigate("/dashboard")}>
-              Back to Dashboard
+      <div className="min-h-screen bg-gray-950 text-gray-100">
+        {/* Sticky Header */}
+        <header className="sticky top-0 z-50 bg-gray-950/95 backdrop-blur border-b border-gray-800 px-4 py-3">
+          <div className="max-w-7xl mx-auto flex items-center justify-between">
+            <h1 className="text-xl md:text-2xl font-semibold">Entry Management</h1>
+            <button className="px-3 py-2 text-sm text-gray-400 hover:text-white active:text-gray-300" onClick={() => navigate("/dashboard")}>
+              Back
             </button>
           </div>
+        </header>
 
-          {/* Event Selection */}
-          <div className="bg-gray-900 rounded-lg p-4 mb-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm text-gray-400 mb-1">Select Event</label>
-                <Select value={selectedEventId} onChange={(e) => {
-                  setSelectedEventId(e.target.value);
-                  setSelectedDivisionId("");
-                }}>
-                  <option value="">-- Select Event --</option>
-                  {events.map((event) => (
-                    <option key={event.id} value={event.id}>
-                      {event.name} - {new Date(event.startDate).toLocaleDateString()}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-
-              {isAdmin && (
+        <main className="p-4 pb-8">
+          <div className="max-w-7xl mx-auto">
+            {/* Event Selection */}
+            <div className="bg-gray-900 rounded-xl p-4 mb-4">
+              <div className="space-y-4">
                 <div>
-                  <label className="block text-sm text-gray-400 mb-1">Filter by Club (Optional)</label>
-                  <Select value={filterClubId} onChange={(e) => setFilterClubId(e.target.value)}>
-                    <option value="">All Clubs</option>
-                    {clubs.map((club) => (
-                      <option key={club.id} value={club.id}>
-                        {club.name}
+                  <label className="block text-sm text-gray-400 mb-2">Select Event</label>
+                  <Select value={selectedEventId} onChange={(e) => {
+                    setSelectedEventId(e.target.value);
+                    setSelectedDivisionId("");
+                  }}>
+                    <option value="">-- Select Event --</option>
+                    {events.map((event) => (
+                      <option key={event.id} value={event.id}>
+                        {event.name} - {new Date(event.startDate).toLocaleDateString()}
                       </option>
                     ))}
                   </Select>
                 </div>
-              )}
+
+                {isAdmin && (
+                  <div>
+                    <label className="block text-sm text-gray-400 mb-2">Filter by Club (Optional)</label>
+                    <Select value={filterClubId} onChange={(e) => setFilterClubId(e.target.value)}>
+                      <option value="">All Clubs</option>
+                      {clubs.map((club) => (
+                        <option key={club.id} value={club.id}>
+                          {club.name}
+                        </option>
+                      ))}
+                    </Select>
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
 
-          {selectedEventId && (
-            <>
-              {/* Division and Entry Type Selection */}
-              <div className="bg-gray-900 rounded-lg p-4 mb-6">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div>
-                    <label className="block text-sm text-gray-400 mb-1">Select Division</label>
-                    <Select
-                      value={selectedDivisionId}
-                      onChange={(e) => {
-                        setSelectedDivisionId(e.target.value);
-                        setSelectedWeightClassId("");
-                        // Auto-set entry type based on division category
-                        const div = divisions.find(d => d.id === e.target.value);
-                        if (div) {
-                          // Default to individual entries
-                          if (div.category === 'KATA') {
-                            setEntryType('KATA');
-                          } else if (div.category === 'KUMITE') {
-                            setEntryType('KUMITE');
-                          }
-                        }
-                      }}
-                    >
-                      <option value="">-- Select Division --</option>
-                      {divisions.map((division) => {
-                        const categoryLabel = division.category === 'KATA' ? 'Kata' : 'Kumite';
-                        return (
-                          <option key={division.id} value={division.id}>
-                            {division.name} ({categoryLabel})
-                          </option>
-                        );
-                      })}
-                    </Select>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm text-gray-400 mb-1">Entry Type</label>
-                    <Select
-                      value={entryType}
-                      onChange={(e) => setEntryType(e.target.value as "KATA" | "KUMITE" | "TEAM_KATA" | "TEAM_KUMITE")}
-                      disabled={!selectedDivisionId}
-                    >
-                      {!selectedDivision ? (
-                        <option value="">Select division first</option>
-                      ) : (
-                        <>
-                          {selectedDivision.category === 'KATA' && (
-                            <>
-                              <option value="KATA">Kata (Individual)</option>
-                              <option value="TEAM_KATA">Kata (Team)</option>
-                            </>
-                          )}
-                          {selectedDivision.category === 'KUMITE' && (
-                            <>
-                              <option value="KUMITE">Kumite (Individual)</option>
-                              <option value="TEAM_KUMITE">Kumite (Team)</option>
-                            </>
-                          )}
-                        </>
-                      )}
-                    </Select>
-                  </div>
-
-                  {entryType === "KUMITE" && selectedEvent && (
+            {selectedEventId && (
+              <>
+                {/* Division and Entry Type Selection */}
+                <div className="bg-gray-900 rounded-xl p-4 mb-4">
+                  <div className="space-y-4">
                     <div>
-                      <label className="block text-sm text-gray-400 mb-1">Weight Class (Individual Kumite)</label>
-                      <Select value={selectedWeightClassId} onChange={(e) => setSelectedWeightClassId(e.target.value)}>
-                        <option value="">-- Select Weight Class --</option>
-                        {(selectedEvent.weightClasses || [])
-                          .filter(
-                            (wc) =>
-                              wc.gender === selectedDivision?.gender &&
-                              (!wc.divisionId || wc.divisionId === selectedDivisionId)
-                          )
-                          .map((wc) => (
-                            <option key={wc.id} value={wc.id}>
-                              {wc.name}
+                      <label className="block text-sm text-gray-400 mb-2">Select Division</label>
+                      <Select
+                        value={selectedDivisionId}
+                        onChange={(e) => {
+                          setSelectedDivisionId(e.target.value);
+                          setSelectedWeightClassId("");
+                          const div = divisions.find(d => d.id === e.target.value);
+                          if (div) {
+                            if (div.category === 'KATA') {
+                              setEntryType('KATA');
+                            } else if (div.category === 'KUMITE') {
+                              setEntryType('KUMITE');
+                            }
+                          }
+                        }}
+                      >
+                        <option value="">-- Select Division --</option>
+                        {divisions.map((division) => {
+                          const categoryLabel = division.category === 'KATA' ? 'Kata' : 'Kumite';
+                          return (
+                            <option key={division.id} value={division.id}>
+                              {division.name} ({categoryLabel})
                             </option>
-                          ))}
+                          );
+                        })}
                       </Select>
                     </div>
-                  )}
-                </div>
-              </div>
 
-              {/* Drag and Drop Interface */}
-              {selectedDivisionId && (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                  {/* Left Panel: Eligible Athletes */}
-                  <div className="bg-gray-900 rounded-lg p-4">
-                    <div className="mb-4">
-                      <h2 className="text-lg font-semibold mb-2">
-                        Eligible Athletes
-                        {(entryType === 'TEAM_KATA' || entryType === 'TEAM_KUMITE') && (
-                          <span className="ml-2 text-xs text-yellow-400">(Individual entries for team division)</span>
+                    <div>
+                      <label className="block text-sm text-gray-400 mb-2">Entry Type</label>
+                      <Select
+                        value={entryType}
+                        onChange={(e) => setEntryType(e.target.value as "KATA" | "KUMITE" | "TEAM_KATA" | "TEAM_KUMITE")}
+                        disabled={!selectedDivisionId}
+                      >
+                        {!selectedDivision ? (
+                          <option value="">Select division first</option>
+                        ) : (
+                          <>
+                            {selectedDivision.category === 'KATA' && (
+                              <>
+                                <option value="KATA">Kata (Individual)</option>
+                                <option value="TEAM_KATA">Kata (Team)</option>
+                              </>
+                            )}
+                            {selectedDivision.category === 'KUMITE' && (
+                              <>
+                                <option value="KUMITE">Kumite (Individual)</option>
+                                <option value="TEAM_KUMITE">Kumite (Team)</option>
+                              </>
+                            )}
+                          </>
                         )}
-                      </h2>
-                      <Input
-                        type="text"
-                        placeholder="Search athletes..."
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                      />
+                      </Select>
                     </div>
 
-                    {loadingAthletes ? (
-                      <p className="text-sm text-gray-400">Loading athletes...</p>
-                    ) : filteredAthletes.length === 0 ? (
-                      <p className="text-sm text-gray-400">No eligible athletes found</p>
-                    ) : (
-                      <div className="space-y-2 max-h-[600px] overflow-y-auto">
-                        <SortableContext items={filteredAthletes.map((a) => a.id)} strategy={verticalListSortingStrategy}>
-                          {filteredAthletes.map((athlete) => (
-                            <DraggableAthleteCard key={athlete.id} athlete={athlete} />
-                          ))}
-                        </SortableContext>
+                    {entryType === "KUMITE" && selectedEvent && (
+                      <div>
+                        <label className="block text-sm text-gray-400 mb-2">Weight Class</label>
+                        <Select value={selectedWeightClassId} onChange={(e) => setSelectedWeightClassId(e.target.value)}>
+                          <option value="">-- Select Weight Class --</option>
+                          {(selectedEvent.weightClasses || [])
+                            .filter(
+                              (wc) =>
+                                wc.gender === selectedDivision?.gender &&
+                                (!wc.divisionId || wc.divisionId === selectedDivisionId)
+                            )
+                            .map((wc) => (
+                              <option key={wc.id} value={wc.id}>
+                                {wc.name}
+                              </option>
+                            ))}
+                        </Select>
                       </div>
                     )}
                   </div>
+                </div>
 
-                  {/* Right Panel: Drop Zone */}
-                  <div className="bg-gray-900 rounded-lg p-4">
-                    <h2 className="text-lg font-semibold mb-4">
-                      Drop Athletes Here to Create{' '}
-                      {entryType === 'KATA' ? 'Kata (Individual)' :
-                       entryType === 'KUMITE' ? 'Kumite (Individual)' :
-                       entryType === 'TEAM_KATA' ? 'Kata (Team)' :
-                       'Kumite (Team)'} Entry
-                    </h2>
+                {/* Mobile: Simple list with add buttons */}
+                {selectedDivisionId && (
+                  <>
+                    {/* Current selection summary */}
+                    <div className="bg-cyan-900/20 border border-cyan-700/50 rounded-xl p-4 mb-4">
+                      <p className="text-sm text-cyan-300">
+                        <strong>Adding entries to:</strong> {selectedDivision?.name} •{' '}
+                        {entryType === 'KATA' ? 'Kata (Individual)' :
+                         entryType === 'KUMITE' ? 'Kumite (Individual)' :
+                         entryType === 'TEAM_KATA' ? 'Kata (Team)' :
+                         'Kumite (Team)'}
+                        {entryType === "KUMITE" && selectedWeightClassId && (
+                          <> • {selectedEvent?.weightClasses?.find((wc) => wc.id === selectedWeightClassId)?.name}</>
+                        )}
+                      </p>
+                    </div>
 
-                    <DroppableZone>
-                      <div
-                        id="drop-zone"
-                        className="border-2 border-dashed border-gray-700 rounded-lg p-8 min-h-[400px] flex flex-col items-center justify-center text-center bg-gray-800/30"
-                      >
-                        {draggedAthlete ? (
-                          <>
-                            <p className="text-blue-400 mb-2">Drop to create entry for:</p>
-                            <div className="w-full max-w-sm">
-                              <AthleteCard athlete={draggedAthlete} isDragging={true} />
-                            </div>
-                          </>
+                    {/* Mobile View: Simple List */}
+                    <div className="lg:hidden">
+                      <div className="mb-4">
+                        <Input
+                          type="text"
+                          placeholder="Search athletes..."
+                          value={searchQuery}
+                          onChange={(e) => setSearchQuery(e.target.value)}
+                        />
+                      </div>
+
+                      {loadingAthletes ? (
+                        <p className="text-sm text-gray-400 py-8 text-center">Loading athletes...</p>
+                      ) : filteredAthletes.length === 0 ? (
+                        <p className="text-sm text-gray-400 py-8 text-center">No eligible athletes found</p>
+                      ) : (
+                        <div className="space-y-3">
+                          <p className="text-sm text-gray-500">
+                            {filteredAthletes.filter(a => !a.isEntered).length} available • {filteredAthletes.filter(a => a.isEntered).length} already entered
+                          </p>
+                          {filteredAthletes.map((athlete) => (
+                            <MobileAthleteCard
+                              key={athlete.id}
+                              athlete={athlete}
+                              onAdd={() => handleMobileAddEntry(athlete.id)}
+                              isAdding={createEntryMutation.isPending}
+                            />
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Desktop View: Drag and Drop Interface */}
+                    <div className="hidden lg:grid grid-cols-2 gap-6">
+                      {/* Left Panel: Eligible Athletes */}
+                      <div className="bg-gray-900 rounded-xl p-4">
+                        <div className="mb-4">
+                          <h2 className="text-lg font-semibold mb-3">
+                            Eligible Athletes
+                            {(entryType === 'TEAM_KATA' || entryType === 'TEAM_KUMITE') && (
+                              <span className="ml-2 text-xs text-yellow-400">(Individual entries for team division)</span>
+                            )}
+                          </h2>
+                          <Input
+                            type="text"
+                            placeholder="Search athletes..."
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                          />
+                        </div>
+
+                        {loadingAthletes ? (
+                          <p className="text-sm text-gray-400">Loading athletes...</p>
+                        ) : filteredAthletes.length === 0 ? (
+                          <p className="text-sm text-gray-400">No eligible athletes found</p>
                         ) : (
-                          <>
-                            <svg
-                              className="w-16 h-16 text-gray-600 mb-4"
-                              fill="none"
-                              stroke="currentColor"
-                              viewBox="0 0 24 24"
-                            >
-                              <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                strokeWidth={2}
-                                d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"
-                              />
-                            </svg>
-                            <p className="text-gray-400">Drag and drop athletes here</p>
-                            <p className="text-sm text-gray-500 mt-2">
-                              Division: {selectedDivision?.name} • Type: {entryType}
-                              {entryType === "KUMITE" && selectedWeightClassId && (
-                                <span> • Weight Class: {selectedEvent?.weightClasses?.find((wc) => wc.id === selectedWeightClassId)?.name}</span>
-                              )}
-                            </p>
-                          </>
+                          <div className="space-y-2 max-h-[600px] overflow-y-auto pr-2">
+                            <SortableContext items={filteredAthletes.map((a) => a.id)} strategy={verticalListSortingStrategy}>
+                              {filteredAthletes.map((athlete) => (
+                                <DraggableAthleteCard key={athlete.id} athlete={athlete} />
+                              ))}
+                            </SortableContext>
+                          </div>
                         )}
                       </div>
-                    </DroppableZone>
 
-                    <div className="mt-4 p-3 bg-blue-900/20 border border-blue-800 rounded text-sm text-blue-300">
-                      <p className="font-medium mb-1">How to use:</p>
-                      <ul className="list-disc list-inside space-y-1 text-xs">
-                        <li>Select event, division, and entry type above</li>
-                        <li>Athletes shown on the left are eligible for the selected division</li>
-                        <li>Drag an athlete card and drop it here to create an entry</li>
-                        <li>Already entered athletes are grayed out</li>
-                      </ul>
+                      {/* Right Panel: Drop Zone */}
+                      <div className="bg-gray-900 rounded-xl p-4">
+                        <h2 className="text-lg font-semibold mb-4">
+                          Drop Athletes Here to Create Entry
+                        </h2>
+
+                        <DroppableZone>
+                          <div
+                            id="drop-zone"
+                            className="border-2 border-dashed border-gray-700 rounded-lg p-8 min-h-[400px] flex flex-col items-center justify-center text-center bg-gray-800/30"
+                          >
+                            {draggedAthlete ? (
+                              <>
+                                <p className="text-blue-400 mb-2">Drop to create entry for:</p>
+                                <div className="w-full max-w-sm">
+                                  <AthleteCard athlete={draggedAthlete} isDragging={true} />
+                                </div>
+                              </>
+                            ) : (
+                              <>
+                                <svg
+                                  className="w-16 h-16 text-gray-600 mb-4"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  viewBox="0 0 24 24"
+                                >
+                                  <path
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    strokeWidth={2}
+                                    d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"
+                                  />
+                                </svg>
+                                <p className="text-gray-400">Drag and drop athletes here</p>
+                                <p className="text-sm text-gray-500 mt-2">
+                                  Division: {selectedDivision?.name} • Type: {entryType}
+                                  {entryType === "KUMITE" && selectedWeightClassId && (
+                                    <span> • Weight: {selectedEvent?.weightClasses?.find((wc) => wc.id === selectedWeightClassId)?.name}</span>
+                                  )}
+                                </p>
+                              </>
+                            )}
+                          </div>
+                        </DroppableZone>
+
+                        <div className="mt-4 p-3 bg-blue-900/20 border border-blue-800 rounded-lg text-sm text-blue-300">
+                          <p className="font-medium mb-1">How to use:</p>
+                          <ul className="list-disc list-inside space-y-1 text-xs">
+                            <li>Athletes shown on the left are eligible for the selected division</li>
+                            <li>Drag an athlete card and drop it here to create an entry</li>
+                            <li>Already entered athletes are grayed out</li>
+                          </ul>
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                </div>
-              )}
-            </>
-          )}
-        </div>
+                  </>
+                )}
+              </>
+            )}
+          </div>
+        </main>
       </div>
 
       <DragOverlay>

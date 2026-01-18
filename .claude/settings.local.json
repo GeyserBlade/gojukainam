@@ -18,7 +18,12 @@
       "Bash(cat:*)",
       "Bash(npm run check-user:*)",
       "Bash(npm run create-superuser:*)",
-      "Bash(railway status:*)"
+      "Bash(railway status:*)",
+      "Bash(nslookup:*)",
+      "Bash(xargs -I {} curl -s \"https://www.gojukainam.com{}\")",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push)"
     ]
   }
 }

@@ -3,11 +3,11 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { api } from "../lib/api";
 import { listAthletes, listAllAthletes, deleteAthlete, type Athlete } from "../lib/athletes";
-import { Input, Select } from "../components/Input";
+import { Input, Select, ActionButton } from "../components/Input";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 
 /***************************************
- * src/pages/Dashboard.tsx (placeholder)
+ * src/pages/Dashboard.tsx (mobile-optimized)
  ***************************************/
 function calculateAge(dob: string) {
   const birth = new Date(dob);
@@ -19,6 +19,31 @@ function calculateAge(dob: string) {
   return age >= 0 ? age : null;
 }
 
+// Mobile navigation menu item
+const NavMenuItem = ({ onClick, icon, label, color = "cyan" }: {
+  onClick: () => void;
+  icon: React.ReactNode;
+  label: string;
+  color?: "cyan" | "purple" | "green" | "blue";
+}) => {
+  const colorClasses = {
+    cyan: "bg-cyan-600/20 text-cyan-400 border-cyan-600/30",
+    purple: "bg-purple-600/20 text-purple-400 border-purple-600/30",
+    green: "bg-green-600/20 text-green-400 border-green-600/30",
+    blue: "bg-blue-600/20 text-blue-400 border-blue-600/30",
+  };
+
+  return (
+    <button
+      onClick={onClick}
+      className={`flex items-center gap-3 w-full p-4 rounded-xl border ${colorClasses[color]} active:opacity-70 transition-all`}
+    >
+      <span className="text-xl">{icon}</span>
+      <span className="font-medium text-sm">{label}</span>
+    </button>
+  );
+};
+
 const Dashboard = () => {
   const { role, clubId, logout } = useAuth();
   const navigate = useNavigate();
@@ -27,6 +52,7 @@ const Dashboard = () => {
   const [query, setQuery] = useState("");
   const [sortBy, setSortBy] = useState<"name"|"dob"|"gender"|"belt"|"club">("name");
   const [sortDir, setSortDir] = useState<"asc"|"desc">("asc");
+  const [showMenu, setShowMenu] = useState(false);
 
   // 1. Fetch Events
   const { data: events = [] } = useQuery({
@@ -48,17 +74,17 @@ const Dashboard = () => {
   });
 
   // 3. Fetch Athletes
-  const { 
-    data: athletes = [], 
-    isLoading: loadingAthletes, 
-    error: errorAthletes 
+  const {
+    data: athletes = [],
+    isLoading: loadingAthletes,
+    error: errorAthletes
   } = useQuery({
     queryKey: ['athletes', clubId, role],
     queryFn: async () => {
       // SUPERADMIN/ADMIN without clubId -> list all
       const canListAll = role === "SUPERADMIN";
       if (!clubId && !canListAll) return [];
-      
+
       if (clubId) {
         return listAthletes(clubId);
       } else {
@@ -125,167 +151,240 @@ const Dashboard = () => {
     return [...rows].sort(cmp);
   }, [athletes, query, sortBy, sortDir]);
 
+  const canManage = role === "ADMIN" || role === "SUPERADMIN" || role === "CLUB_MANAGER";
+
   return (
-    <div className="min-h-screen bg-gray-950 text-gray-100 p-4">
-      <div className="max-w-7xl mx-auto">
-        <div className="flex items-center justify-between mb-6">
-          <h1 className="text-2xl font-semibold">Dashboard</h1>
-          <button onClick={logout} className="text-sm text-gray-400 hover:text-white">Sign out</button>
-        </div>
-        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-3">
-          <div className="p-3 rounded-xl border border-gray-800 bg-gray-900/50">
-            <h2 className="font-semibold mb-2">Session</h2>
-            <div className="space-y-1 text-xs text-gray-400">
-              <p>Role: <span className="text-gray-200">{role ?? "(none)"}</span></p>
-              <p>
-                Club:&nbsp;
-                <span className="text-gray-200">{club ? `${club.name ?? "(no name)"} (${club.id})` : (clubId ?? "(none)")}</span>
-              </p>
-              {club?.region && <p>Region: <span className="text-gray-200">{club.region}</span></p>}
-              {club?.contactName && <p>Contact: <span className="text-gray-200">{club.contactName}</span></p>}
-              {club?.email && <p>Email: <span className="text-gray-200">{club.email}</span></p>}
-            </div>
-          </div>
-          <div className="p-3 rounded-xl border border-gray-800 bg-gray-900/50">
-            <h2 className="font-semibold mb-2">Events</h2>
-            <p className="text-xs text-gray-500 mb-2">Total: {events.length}</p>
-            <ul className="text-xs text-gray-300 list-disc pl-5">
-              {events.map((ev: any) => (
-                <li key={ev.id}>{ev.name} - {new Date(ev.startDate).toLocaleDateString()}</li>
-              ))}
-            </ul>
-          </div>
-          {(role === "ADMIN" || role === "SUPERADMIN" || role === "CLUB_MANAGER") && (
-            <div className="p-3 rounded-xl border border-gray-800 bg-gray-900/50">
-              <h2 className="font-semibold mb-2">Administration</h2>
-              <div className="flex gap-2 flex-wrap">
-                <button
-                  onClick={() => navigate("/athletes")}
-                  className="text-xs px-3 py-1.5 rounded-md bg-cyan-600/80 hover:bg-cyan-600 text-black font-semibold"
-                >
-                  Manage Athletes
-                </button>
-                <button
-                  onClick={() => navigate("/athletes/extract")}
-                  className="text-xs px-3 py-1.5 rounded-md bg-cyan-600/80 hover:bg-cyan-600 text-black font-semibold"
-                >
-                  Athlete Extract
-                </button>
-                <button
-                  onClick={() => navigate("/events/manage")}
-                  className="text-xs px-3 py-1.5 rounded-md bg-purple-600/80 hover:bg-purple-600 text-black font-semibold"
-                >
-                  Event Admin
-                </button>
-                <button
-                  onClick={() => navigate("/events")}
-                  className="text-xs px-3 py-1.5 rounded-md bg-green-600/80 hover:bg-green-600 text-black font-semibold"
-                >
-                  Entry Management
-                </button>
-                <button
-                  onClick={() => navigate("/entries/view")}
-                  className="text-xs px-3 py-1.5 rounded-md bg-blue-600/80 hover:bg-blue-600 text-black font-semibold"
-                >
-                  View All Entries
-                </button>
-                {role === "SUPERADMIN" && (
-                  <button
-                    onClick={() => navigate("/athletes/import")}
-                    className="text-xs px-3 py-1.5 rounded-md bg-cyan-600/80 hover:bg-cyan-600 text-black font-semibold"
-                  >
-                    Import Athletes
-                  </button>
-                )}
-                <button
-                  onClick={() => navigate("/users")}
-                  className="text-xs px-3 py-1.5 rounded-md bg-cyan-600/80 hover:bg-cyan-600 text-black font-semibold"
-                >
-                  Manage Users
-                </button>
-                <button
-                  onClick={() => navigate("/clubs")}
-                  className="text-xs px-3 py-1.5 rounded-md bg-cyan-600/80 hover:bg-cyan-600 text-black font-semibold"
-                >
-                  Manage Clubs
-                </button>
-                <button
-                  onClick={() => navigate("/belts")}
-                  className="text-xs px-3 py-1.5 rounded-md bg-cyan-600/80 hover:bg-cyan-600 text-black font-semibold"
-                >
-                  Manage Belts
-                </button>
-              </div>
-            </div>
-          )}
-          <div className="p-3 rounded-xl border border-gray-800 bg-gray-900/50 md:col-span-2 lg:col-span-3">
-            <div className="flex items-center justify-between mb-2">
-              <h2 className="font-semibold">Athletes</h2>
-              {!clubId && role !== "SUPERADMIN" && (
-                <span className="text-xs text-gray-400">Set a club to view athletes</span>
-              )}
-            </div>
-            {(clubId || role === "SUPERADMIN") && (
-              <p className="text-xs text-gray-500 mb-2">Total: {athletes.length} | Showing: {filteredSorted.length}</p>
+    <div className="min-h-screen bg-gray-950 text-gray-100">
+      {/* Mobile-friendly header */}
+      <header className="sticky top-0 z-50 bg-gray-950/95 backdrop-blur border-b border-gray-800 px-4 py-3">
+        <div className="max-w-7xl mx-auto flex items-center justify-between">
+          <h1 className="text-xl md:text-2xl font-semibold">Dashboard</h1>
+          <div className="flex items-center gap-2">
+            {canManage && (
+              <button
+                onClick={() => setShowMenu(!showMenu)}
+                className="md:hidden p-2 rounded-lg bg-gray-800 hover:bg-gray-700 active:bg-gray-600 transition-colors"
+                aria-label="Menu"
+              >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  {showMenu ? (
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  ) : (
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                  )}
+                </svg>
+              </button>
             )}
-            <div className="flex flex-col md:flex-row md:items-center gap-2 mb-3">
-              <div className="flex-1">
-                <Input placeholder="Search name, club, nationality, belt..." value={query} onChange={(e)=>setQuery(e.target.value)} />
-              </div>
-              <div className="flex items-center gap-2 md:min-w-[300px]">
-                <Select value={sortBy} onChange={(e)=>setSortBy(e.target.value as any)}>
-                  <option value="name">Sort: Name</option>
-                  <option value="dob">Sort: DOB</option>
-                  <option value="gender">Sort: Gender</option>
-                  <option value="belt">Sort: Belt</option>
-                  <option value="club">Sort: Club</option>
-                </Select>
-                <Select value={sortDir} onChange={(e)=>setSortDir(e.target.value as any)}>
-                  <option value="asc">Asc</option>
-                  <option value="desc">Desc</option>
-                </Select>
+            <button
+              onClick={logout}
+              className="px-3 py-2 text-sm text-gray-400 hover:text-white active:text-gray-300 transition-colors"
+            >
+              Sign out
+            </button>
+          </div>
+        </div>
+      </header>
+
+      {/* Mobile slide-down menu */}
+      {showMenu && canManage && (
+        <div className="md:hidden fixed inset-0 top-[57px] z-40 bg-gray-950/95 backdrop-blur overflow-y-auto">
+          <div className="p-4 space-y-3">
+            <NavMenuItem onClick={() => { navigate("/athletes"); setShowMenu(false); }} icon="👥" label="Manage Athletes" />
+            <NavMenuItem onClick={() => { navigate("/athletes/extract"); setShowMenu(false); }} icon="📋" label="Athlete Extract" />
+            <NavMenuItem onClick={() => { navigate("/events/manage"); setShowMenu(false); }} icon="📅" label="Event Admin" color="purple" />
+            <NavMenuItem onClick={() => { navigate("/events"); setShowMenu(false); }} icon="✅" label="Entry Management" color="green" />
+            <NavMenuItem onClick={() => { navigate("/entries/view"); setShowMenu(false); }} icon="👁️" label="View All Entries" color="blue" />
+            {role === "SUPERADMIN" && (
+              <NavMenuItem onClick={() => { navigate("/athletes/import"); setShowMenu(false); }} icon="📥" label="Import Athletes" />
+            )}
+            <NavMenuItem onClick={() => { navigate("/users"); setShowMenu(false); }} icon="👤" label="Manage Users" />
+            <NavMenuItem onClick={() => { navigate("/clubs"); setShowMenu(false); }} icon="🏛️" label="Manage Clubs" />
+            <NavMenuItem onClick={() => { navigate("/belts"); setShowMenu(false); }} icon="🥋" label="Manage Belts" />
+          </div>
+        </div>
+      )}
+
+      <main className="p-4 pb-8">
+        <div className="max-w-7xl mx-auto">
+          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {/* Session Card */}
+            <div className="p-4 rounded-xl border border-gray-800 bg-gray-900/50">
+              <h2 className="font-semibold mb-3 text-base">Session</h2>
+              <div className="space-y-2 text-sm text-gray-400">
+                <p>Role: <span className="text-gray-200">{role ?? "(none)"}</span></p>
+                <p>
+                  Club:&nbsp;
+                  <span className="text-gray-200">{club ? `${club.name ?? "(no name)"}` : (clubId ?? "(none)")}</span>
+                </p>
+                {club?.region && <p>Region: <span className="text-gray-200">{club.region}</span></p>}
+                {club?.contactName && <p>Contact: <span className="text-gray-200">{club.contactName}</span></p>}
+                {club?.email && <p>Email: <span className="text-gray-200 break-all">{club.email}</span></p>}
               </div>
             </div>
-            {loadingAthletes && <p className="text-sm text-gray-400">Loading athletes...</p>}
-            {errorAthletes && <p className="text-sm text-red-400">{errorAthletes instanceof Error ? errorAthletes.message : "Error loading athletes"}</p>}
-            {!!filteredSorted.length && (
-              <ul className="divide-y divide-gray-800">
-                {filteredSorted.map((a) => (
-                  <li key={a.id} className="py-2 flex items-center justify-between">
-                    <div className="min-w-0">
-                      <p className="text-sm text-gray-200 truncate">{a.firstName} {a.lastName} <span className="text-xs text-gray-500">({a.gender})</span></p>
-                      <p className="text-xs text-gray-500 truncate">
-                        {[
-                          new Date(a.dob).toLocaleDateString(),
-                          (() => {
-                            const age = calculateAge(a.dob);
-                            return age !== null ? `${age} yrs` : null;
-                          })(),
-                          a.nationality || null,
-                          a.belt?.name || null,
-                          a.weightKg ? `${a.weightKg}kg` : null,
-                          a.club?.name || null,
-                          a.idNumber ? `ID ${a.idNumber}` : null
-                        ].filter(Boolean).join(" - ")}
-                      </p>
-                    </div>
-                    <button
-                      onClick={() => onDeleteAthlete(a.id)}
-                      className="text-xs px-3 py-1 rounded-md bg-red-600/80 hover:bg-red-600 text-white"
-                      disabled={deleteMutation.isPending}
-                    >
-                      {deleteMutation.isPending ? "..." : "Delete"}
-                    </button>
+
+            {/* Events Card */}
+            <div className="p-4 rounded-xl border border-gray-800 bg-gray-900/50">
+              <h2 className="font-semibold mb-3 text-base">Events</h2>
+              <p className="text-sm text-gray-500 mb-3">Total: {events.length}</p>
+              <ul className="text-sm text-gray-300 space-y-2">
+                {events.map((ev: any) => (
+                  <li key={ev.id} className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-cyan-500 flex-shrink-0"></span>
+                    <span className="truncate">{ev.name}</span>
+                    <span className="text-gray-500 text-xs ml-auto flex-shrink-0">{new Date(ev.startDate).toLocaleDateString()}</span>
                   </li>
                 ))}
               </ul>
+            </div>
+
+            {/* Desktop-only Administration Card */}
+            {canManage && (
+              <div className="hidden md:block p-4 rounded-xl border border-gray-800 bg-gray-900/50">
+                <h2 className="font-semibold mb-3 text-base">Administration</h2>
+                <div className="flex gap-2 flex-wrap">
+                  <button
+                    onClick={() => navigate("/athletes")}
+                    className="text-sm px-3 py-2 rounded-md bg-cyan-600/80 hover:bg-cyan-600 text-black font-semibold"
+                  >
+                    Manage Athletes
+                  </button>
+                  <button
+                    onClick={() => navigate("/athletes/extract")}
+                    className="text-sm px-3 py-2 rounded-md bg-cyan-600/80 hover:bg-cyan-600 text-black font-semibold"
+                  >
+                    Athlete Extract
+                  </button>
+                  <button
+                    onClick={() => navigate("/events/manage")}
+                    className="text-sm px-3 py-2 rounded-md bg-purple-600/80 hover:bg-purple-600 text-black font-semibold"
+                  >
+                    Event Admin
+                  </button>
+                  <button
+                    onClick={() => navigate("/events")}
+                    className="text-sm px-3 py-2 rounded-md bg-green-600/80 hover:bg-green-600 text-black font-semibold"
+                  >
+                    Entry Management
+                  </button>
+                  <button
+                    onClick={() => navigate("/entries/view")}
+                    className="text-sm px-3 py-2 rounded-md bg-blue-600/80 hover:bg-blue-600 text-black font-semibold"
+                  >
+                    View All Entries
+                  </button>
+                  {role === "SUPERADMIN" && (
+                    <button
+                      onClick={() => navigate("/athletes/import")}
+                      className="text-sm px-3 py-2 rounded-md bg-cyan-600/80 hover:bg-cyan-600 text-black font-semibold"
+                    >
+                      Import Athletes
+                    </button>
+                  )}
+                  <button
+                    onClick={() => navigate("/users")}
+                    className="text-sm px-3 py-2 rounded-md bg-cyan-600/80 hover:bg-cyan-600 text-black font-semibold"
+                  >
+                    Manage Users
+                  </button>
+                  <button
+                    onClick={() => navigate("/clubs")}
+                    className="text-sm px-3 py-2 rounded-md bg-cyan-600/80 hover:bg-cyan-600 text-black font-semibold"
+                  >
+                    Manage Clubs
+                  </button>
+                  <button
+                    onClick={() => navigate("/belts")}
+                    className="text-sm px-3 py-2 rounded-md bg-cyan-600/80 hover:bg-cyan-600 text-black font-semibold"
+                  >
+                    Manage Belts
+                  </button>
+                </div>
+              </div>
             )}
-            {!loadingAthletes && !errorAthletes && (clubId || role === "SUPERADMIN") && filteredSorted.length === 0 && (
-              <p className="text-sm text-gray-400">No athletes yet.</p>
-            )}
+
+            {/* Athletes Section - Full width */}
+            <div className="p-4 rounded-xl border border-gray-800 bg-gray-900/50 md:col-span-2 lg:col-span-3">
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="font-semibold text-base">Athletes</h2>
+                {!clubId && role !== "SUPERADMIN" && (
+                  <span className="text-sm text-gray-400">Set a club to view athletes</span>
+                )}
+              </div>
+              {(clubId || role === "SUPERADMIN") && (
+                <p className="text-sm text-gray-500 mb-3">Total: {athletes.length} | Showing: {filteredSorted.length}</p>
+              )}
+
+              {/* Search and filters */}
+              <div className="space-y-3 mb-4">
+                <Input placeholder="Search name, club, nationality, belt..." value={query} onChange={(e)=>setQuery(e.target.value)} />
+                <div className="flex gap-2">
+                  <div className="flex-1">
+                    <Select value={sortBy} onChange={(e)=>setSortBy(e.target.value as any)}>
+                      <option value="name">Sort: Name</option>
+                      <option value="dob">Sort: DOB</option>
+                      <option value="gender">Sort: Gender</option>
+                      <option value="belt">Sort: Belt</option>
+                      <option value="club">Sort: Club</option>
+                    </Select>
+                  </div>
+                  <div className="w-24">
+                    <Select value={sortDir} onChange={(e)=>setSortDir(e.target.value as any)}>
+                      <option value="asc">Asc</option>
+                      <option value="desc">Desc</option>
+                    </Select>
+                  </div>
+                </div>
+              </div>
+
+              {loadingAthletes && <p className="text-sm text-gray-400 py-4">Loading athletes...</p>}
+              {errorAthletes && <p className="text-sm text-red-400 py-4">{errorAthletes instanceof Error ? errorAthletes.message : "Error loading athletes"}</p>}
+
+              {/* Mobile-friendly athlete list */}
+              {!!filteredSorted.length && (
+                <ul className="divide-y divide-gray-800 -mx-4 md:mx-0">
+                  {filteredSorted.map((a) => (
+                    <li key={a.id} className="py-3 px-4 md:px-0 flex items-start justify-between gap-3 active:bg-gray-800/50 md:active:bg-transparent transition-colors">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-base md:text-sm text-gray-200">
+                          {a.firstName} {a.lastName}
+                          <span className="text-sm md:text-xs text-gray-500 ml-2">({a.gender})</span>
+                        </p>
+                        <p className="text-sm md:text-xs text-gray-500 mt-1">
+                          {[
+                            new Date(a.dob).toLocaleDateString(),
+                            (() => {
+                              const age = calculateAge(a.dob);
+                              return age !== null ? `${age} yrs` : null;
+                            })(),
+                            a.belt?.name || null,
+                          ].filter(Boolean).join(" • ")}
+                        </p>
+                        <p className="text-sm md:text-xs text-gray-600 mt-0.5 truncate">
+                          {[
+                            a.nationality || null,
+                            a.weightKg ? `${a.weightKg}kg` : null,
+                            a.club?.name || null,
+                          ].filter(Boolean).join(" • ")}
+                        </p>
+                      </div>
+                      <ActionButton
+                        variant="danger"
+                        onClick={() => onDeleteAthlete(a.id)}
+                        disabled={deleteMutation.isPending}
+                      >
+                        {deleteMutation.isPending ? "..." : "Delete"}
+                      </ActionButton>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {!loadingAthletes && !errorAthletes && (clubId || role === "SUPERADMIN") && filteredSorted.length === 0 && (
+                <p className="text-sm text-gray-400 py-4">No athletes yet.</p>
+              )}
+            </div>
           </div>
         </div>
-      </div>
+      </main>
     </div>
   );
 };
