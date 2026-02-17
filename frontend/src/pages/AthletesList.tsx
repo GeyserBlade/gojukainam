@@ -156,7 +156,7 @@ const AthletesListPage = () => {
         <header className="sticky top-0 z-50 bg-gray-950/95 backdrop-blur border-b border-gray-800 px-4 py-3">
           <div className="max-w-7xl mx-auto flex items-center justify-between">
             <h1 className="text-xl md:text-2xl font-semibold">Athletes</h1>
-            <button className="px-3 py-2 text-sm text-gray-400 hover:text-white" onClick={() => nav("/dashboard")}>Back</button>
+            <button className="px-3 py-2 text-sm text-gray-400 hover:text-white" onClick={() => nav("/dashboard")}>Back to Dashboard</button>
           </div>
         </header>
         <main className="p-4">

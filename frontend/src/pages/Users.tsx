@@ -165,7 +165,7 @@ const UsersPage = () => {
         <div className="max-w-6xl mx-auto">
           <div className="flex items-center justify-between mb-6">
             <h1 className="text-2xl font-semibold">Users</h1>
-            <button className="text-sm text-gray-400 hover:text-white" onClick={() => navigate("/dashboard")}>Back</button>
+            <button className="text-sm text-gray-400 hover:text-white" onClick={() => navigate("/dashboard")}>Back to Dashboard</button>
           </div>
           <p className="text-sm text-gray-400">You do not have permission to manage users.</p>
         </div>

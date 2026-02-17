@@ -286,6 +286,12 @@ const EntriesView = () => {
     return (
       <div className="min-h-screen bg-gray-950 text-gray-100 p-4">
         <div className="max-w-7xl mx-auto">
+          <div className="flex items-center justify-between mb-6">
+            <h1 className="text-2xl font-semibold">View Entries</h1>
+            <button className="text-sm text-gray-400 hover:text-white" onClick={() => navigate("/dashboard")}>
+              Back to Dashboard
+            </button>
+          </div>
           <p className="text-sm text-gray-400">You do not have permission to access this page.</p>
         </div>
       </div>

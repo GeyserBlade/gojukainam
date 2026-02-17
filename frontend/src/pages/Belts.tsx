@@ -61,7 +61,7 @@ const BeltsPage = () => {
         <div className="max-w-6xl mx-auto">
           <div className="flex items-center justify-between mb-6">
             <h1 className="text-2xl font-semibold">Belts</h1>
-            <button className="text-sm text-gray-400 hover:text-white" onClick={() => nav("/dashboard")}>Back</button>
+            <button className="text-sm text-gray-400 hover:text-white" onClick={() => nav("/dashboard")}>Back to Dashboard</button>
           </div>
           <p className="text-sm text-gray-400">You do not have permission to manage belts.</p>
         </div>
