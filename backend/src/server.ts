@@ -1,6 +1,8 @@
 import express from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
+import helmet from "helmet";
+import rateLimit from "express-rate-limit";
 import { prisma } from "./lib/prisma.js";
 import { errorHandler } from "./utils/error-handler.js";
 import { authMiddleware } from "./utils/auth.js";
@@ -16,6 +18,33 @@ import { router as users } from "./routes/users.js";
 import { router as belts } from "./routes/belts.js";
 
 const app = express();
+
+// Security headers
+app.use(helmet());
+
+// Rate limiting
+// General API limiter — prevents broad abuse and DoS
+const apiLimiter = rateLimit({
+  windowMs: 60 * 1000,       // 1 minute
+  max: 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many requests, please slow down" },
+});
+app.use("/api", apiLimiter);
+
+// Strict limiter for auth endpoints — prevents brute force and credential stuffing
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,  // 15 minutes
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many attempts, please try again later" },
+});
+app.use("/api/auth/login", authLimiter);
+app.use("/api/auth/magic-link", authLimiter);
+app.use("/api/auth/magic-login", authLimiter);
+app.use("/api/auth/password-reset-request", authLimiter);
 
 // Allow multiple origins for development (Vite dev server and serve)
 // In production (Railway), FRONTEND_URL will be set to the single production domain

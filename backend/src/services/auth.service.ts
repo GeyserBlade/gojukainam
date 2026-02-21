@@ -5,8 +5,17 @@ import { prisma } from "../lib/prisma.js";
 import { Role } from "@prisma/client";
 import { validatePassword } from "../utils/password.js";
 
-const JWT_SECRET = process.env.JWT_SECRET || "super-secret-dev-key";
 const JWT_EXPIRES_IN = "7d";
+
+// Fail hard if JWT_SECRET is missing or too weak — prevents silent fallback to a known value
+const _rawJwtSecret = process.env.JWT_SECRET;
+if (!_rawJwtSecret || _rawJwtSecret.length < 32) {
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("FATAL: JWT_SECRET must be set to at least 32 characters in production");
+  }
+  console.warn("[SECURITY] JWT_SECRET is missing or too short — using dev fallback. NEVER deploy this way.");
+}
+const JWT_SECRET = _rawJwtSecret ?? "dev-fallback-NOT-for-production-use-change-me!!";
 
 export class AuthService {
   static async login(email: string, password: string) {
@@ -23,12 +32,11 @@ export class AuthService {
     return this.generateSessionToken(user);
   }
 
-  static async requestMagicLink(email: string) {
+  static async requestMagicLink(email: string): Promise<string | null> {
     const user = await prisma.user.findUnique({ where: { email } });
     if (!user) {
-      // Don't reveal user existence? Or maybe we strictly manage users so it's fine.
-      // Instructions said "users registered by SUPER_ADMIN", so we can be strict.
-      throw new Error("User not found");
+      // Return null silently — never reveal whether an email is registered
+      return null;
     }
 
     // Create a random token
@@ -44,8 +52,11 @@ export class AuthService {
       },
     });
 
-    // In a real app, send email. Here, return it to be logged or shown in dev.
-    console.log(`[MagicLink] Login link for ${email}: http://localhost:5173/magic-login?token=${token}`);
+    // TODO: send token via email in production (e.g. Resend, SendGrid)
+    // NEVER log raw tokens in production — they are equivalent to passwords
+    if (process.env.NODE_ENV !== "production") {
+      console.log(`[MagicLink] Login link for ${email}: http://localhost:5173/magic-login?token=${token}`);
+    }
     return token;
   }
 
@@ -121,8 +132,11 @@ export class AuthService {
       },
     });
 
-    // In production, send email. For dev, log it
-    console.log(`[PasswordReset] Reset link for ${email}: http://localhost:5173/reset-password?token=${token}`);
+    // TODO: send token via email in production (e.g. Resend, SendGrid)
+    // NEVER log raw tokens in production — they are equivalent to passwords
+    if (process.env.NODE_ENV !== "production") {
+      console.log(`[PasswordReset] Reset link for ${email}: http://localhost:5173/reset-password?token=${token}`);
+    }
 
     return {
       success: true,

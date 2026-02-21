@@ -23,7 +23,11 @@
       "Bash(xargs -I {} curl -s \"https://www.gojukainam.com{}\")",
       "Bash(git add:*)",
       "Bash(git commit:*)",
-      "Bash(git push)"
+      "Bash(git push)",
+      "Bash(cd backend && npm install helmet express-rate-limit exceljs && npm uninstall xlsx 2>&1)",
+      "Bash(node:*)",
+      "Bash(head:*)",
+      "Bash(tail:*)"
     ]
   }
 }

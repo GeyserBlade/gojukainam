@@ -1,11 +1,24 @@
 import { prisma } from "../lib/prisma.js";
 import { CreateAthlete } from "../utils/validators.js";
 import { parse as parseCsv } from "csv-parse/sync";
-import * as XLSX from "xlsx";
+import ExcelJS from "exceljs";
 import { ZodError } from "zod";
 import { Athlete, Prisma } from "@prisma/client";
 
 type RawRow = Record<string, any> & { __rowNum__?: number };
+
+function cellToString(value: ExcelJS.CellValue): string {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (value instanceof Date) return value.toISOString().split("T")[0];
+  if (typeof value === "object") {
+    if ("richText" in value) return (value as ExcelJS.CellRichTextValue).richText.map(r => r.text).join("");
+    if ("result" in value) return cellToString((value as ExcelJS.CellFormulaValue).result as ExcelJS.CellValue);
+    if ("text" in value) return String((value as any).text);
+  }
+  return String(value);
+}
 
 function scrubEmptyStrings<T extends Record<string, any>>(obj: T): T {
   const copy: any = Array.isArray(obj) ? [] : { ...obj };
@@ -87,7 +100,7 @@ export class AthleteService {
     });
   }
 
-  static parseImportFile(buffer: Buffer, filename: string): RawRow[] {
+  static async parseImportFile(buffer: Buffer, filename: string): Promise<RawRow[]> {
     const lower = filename.toLowerCase();
     if (lower.endsWith(".csv")) {
       const text = buffer.toString("utf8");
@@ -97,14 +110,36 @@ export class AthleteService {
         trim: true,
       }) as RawRow[];
     }
-    if (lower.endsWith(".xlsx") || lower.endsWith(".xls") || lower.endsWith(".xlsm") || lower.endsWith(".xlsb")) {
-      const workbook = XLSX.read(buffer, { type: "buffer" });
-      const sheetName = workbook.SheetNames[0];
-      if (!sheetName) return [];
-      const sheet = workbook.Sheets[sheetName];
-      return XLSX.utils.sheet_to_json<RawRow>(sheet, { defval: "", raw: false });
+    if (lower.endsWith(".xlsx")) {
+      const workbook = new ExcelJS.Workbook();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- ExcelJS Buffer type differs from Node's in TS 5+
+      await workbook.xlsx.load(buffer as any);
+      const worksheet = workbook.worksheets[0];
+      if (!worksheet) return [];
+
+      const headers: Record<number, string> = {};
+      const rows: RawRow[] = [];
+      let isFirstRow = true;
+
+      worksheet.eachRow((row, rowNumber) => {
+        if (isFirstRow) {
+          row.eachCell({ includeEmpty: false }, (cell, colNumber) => {
+            headers[colNumber] = String(cell.value ?? "").trim();
+          });
+          isFirstRow = false;
+          return;
+        }
+        const rowData: RawRow = { __rowNum__: rowNumber - 1 }; // keep xlsx-compatible 0-indexed convention
+        row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+          const header = headers[colNumber];
+          if (header) rowData[header] = cellToString(cell.value);
+        });
+        rows.push(rowData);
+      });
+
+      return rows;
     }
-    throw { status: 400, message: "Unsupported file type. Upload CSV or Excel." };
+    throw { status: 400, message: "Unsupported file type. Upload CSV or XLSX." };
   }
 
   static mapImportRow(row: RawRow, clubId: string) {
@@ -163,7 +198,7 @@ export class AthleteService {
   }
 
   static async importAthletes(clubId: string, fileBuffer: Buffer, filename: string) {
-    const rows = this.parseImportFile(fileBuffer, filename);
+    const rows = await this.parseImportFile(fileBuffer, filename);
     if (rows.length === 0) throw { status: 400, message: "No rows found in file" };
 
     const belts = await prisma.belt.findMany({ select: { id: true } });

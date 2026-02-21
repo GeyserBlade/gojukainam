@@ -28,8 +28,8 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction) 
     // But let's fall through to see if dev auth catches it or we 401.
   }
 
-  // 2. Try Dev Auth (Headers)
-  const allowDevAuth = process.env.ALLOW_DEV_AUTH === "true" || process.env.NODE_ENV !== "production";
+  // 2. Try Dev Auth (Headers) — only when explicitly enabled via env var
+  const allowDevAuth = process.env.ALLOW_DEV_AUTH === "true";
   if (allowDevAuth && req.header("x-role")) {
     const role = (req.header("x-role") as AuthUser["role"]) || "SUPERADMIN";
     const clubId = req.header("x-club-id") || undefined;

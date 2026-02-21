@@ -34,16 +34,16 @@ router.post("/magic-link", async (req, res, next) => {
     if (!email) return res.status(400).json({ error: "Email required" });
 
     const token = await AuthService.requestMagicLink(email);
-    
-    // In dev, we return the token/link for convenience
-    if (!IS_PROD) {
-      return res.json({ success: true, message: "Magic link sent (check console)", devToken: token });
+
+    // Always return the same generic message — never reveal whether the email exists
+    if (IS_PROD) {
+      return res.json({ success: true, message: "If that email exists, we sent a link." });
     }
-    
-    res.json({ success: true, message: "If that email exists, we sent a link." });
+
+    // In dev only, return the token for convenience (token is null if user not found)
+    res.json({ success: true, message: "Magic link processed (check console)", devToken: token });
   } catch (error: any) {
-    // Avoid leaking user existence in prod errors ideally, but for now:
-    res.status(400).json({ error: error.message });
+    next(error);
   }
 });
 
