@@ -1,6 +1,7 @@
 import { prisma } from "../lib/prisma.js";
 import { CreateEvent, UpdateEvent, CreateDivision, UpdateDivision, CreateWeightClass, UpdateWeightClass } from "../utils/validators.js";
 import { ageOn } from "../utils/eligibility.js";
+import { TEMPLATES, type TemplateName } from "../data/wkf-template.js";
 import type { Gender } from "@prisma/client";
 
 export class EventService {
@@ -242,5 +243,69 @@ export class EventService {
       where: { id: eventId },
       data: { configJson: JSON.stringify(config) }
     });
+  }
+
+  // ============ Template ============
+
+  static async applyTemplate(eventId: string, templateName: TemplateName) {
+    const event = await prisma.event.findUnique({ where: { id: eventId } });
+    if (!event) throw { status: 404, message: "Event not found" };
+
+    const template = TEMPLATES[templateName];
+
+    // Build a set of already-existing division keys to skip duplicates
+    const existingDivisions = await prisma.division.findMany({
+      where: { eventId },
+      select: { key: true, gender: true },
+    });
+    const existingKeys = new Set(existingDivisions.map(d => `${d.key}:${d.gender}`));
+
+    let divisionsCreated = 0;
+    let divisionsSkipped = 0;
+    let weightClassesCreated = 0;
+
+    for (const def of template) {
+      const compositeKey = `${def.key}:${def.gender}`;
+
+      if (existingKeys.has(compositeKey)) {
+        divisionsSkipped++;
+        continue;
+      }
+
+      const division = await prisma.division.create({
+        data: {
+          eventId,
+          key: def.key,
+          name: def.name,
+          minAge: def.minAge,
+          maxAge: def.maxAge,
+          gender: def.gender,
+          category: def.category,
+          notes: def.notes ?? null,
+        },
+      });
+      divisionsCreated++;
+
+      if (def.weightClasses && def.weightClasses.length > 0) {
+        await prisma.weightClass.createMany({
+          data: def.weightClasses.map(wc => ({
+            eventId,
+            divisionId: division.id,
+            gender: def.gender,
+            name: wc.name,
+            minKg: wc.minKg,
+            maxKg: wc.maxKg,
+          })),
+        });
+        weightClassesCreated += def.weightClasses.length;
+      }
+    }
+
+    return {
+      divisionsCreated,
+      divisionsSkipped,
+      weightClassesCreated,
+      message: `Applied ${templateName}: ${divisionsCreated} divisions and ${weightClassesCreated} weight classes created${divisionsSkipped > 0 ? `, ${divisionsSkipped} already existed and were skipped` : ""}.`,
+    };
   }
 }

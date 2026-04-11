@@ -202,3 +202,8 @@ export const WeightClassIdParam = z.object({
 export const EligibleAthletesQuery = z.object({
   clubId: z.string().optional(),
 });
+
+// ---------------- Event Templates ----------------
+export const ApplyTemplate = z.object({
+  template: z.enum(["WKF_2024"]),
+});

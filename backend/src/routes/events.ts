@@ -15,6 +15,7 @@ import {
   DivisionIdParam,
   WeightClassIdParam,
   EligibleAthletesQuery,
+  ApplyTemplate,
 } from "../utils/validators.js";
 
 export const router = Router();
@@ -189,6 +190,21 @@ router.get("/:id/divisions/:divisionId/eligible-athletes", validate(EligibleAthl
 
     const athletes = await EventService.getEligibleAthletes(eventId, divisionId, clubId);
     res.json(athletes);
+  } catch (err: any) {
+    if (err.status && err.message) {
+      return res.status(err.status).json({ error: err.message });
+    }
+    next(err);
+  }
+});
+
+// ============ Templates ============
+
+// apply a WKF division template to an event (admin only)
+router.post("/:id/apply-template", requireRoles("SUPERADMIN", "ADMIN"), validateMultiple({ params: IdParam, body: ApplyTemplate }), async (req, res, next) => {
+  try {
+    const result = await EventService.applyTemplate(getParam(req.params.id), req.body.template);
+    res.json(result);
   } catch (err: any) {
     if (err.status && err.message) {
       return res.status(err.status).json({ error: err.message });

@@ -27,7 +27,10 @@
       "Bash(cd backend && npm install helmet express-rate-limit exceljs && npm uninstall xlsx 2>&1)",
       "Bash(node:*)",
       "Bash(head:*)",
-      "Bash(tail:*)"
+      "Bash(tail:*)",
+      "Bash(find /c/Users/Geyse/OneDrive/Documents/Dev/gojukainam -type f -name *.prisma)",
+      "Bash(find /c/Users/Geyse/OneDrive/Documents/Dev/gojukainam -type f -name *.seed* -o -name *migration*)",
+      "Bash(find /c/Users/Geyse/OneDrive/Documents/Dev/gojukainam/frontend -type f -name *.tsx)"
     ]
   }
 }
