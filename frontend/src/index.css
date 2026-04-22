@@ -1,5 +1,57 @@
 @import "tailwindcss";
 
+/* ===== Theme tokens ===== */
+:root {
+  color-scheme: dark;
+
+  --surface-0: #030712; /* gray-950 */
+  --surface-1: #111827; /* gray-900 */
+  --surface-2: #1f2937; /* gray-800 */
+  --border-subtle: #374151; /* gray-700 */
+  --text-primary: #f3f4f6; /* gray-100 */
+  --text-secondary: #9ca3af; /* gray-400 */
+  --text-muted: #6b7280; /* gray-500 */
+}
+
+html.light {
+  color-scheme: light;
+
+  --surface-0: #f9fafb;
+  --surface-1: #ffffff;
+  --surface-2: #f3f4f6;
+  --border-subtle: #e5e7eb;
+  --text-primary: #111827;
+  --text-secondary: #4b5563;
+  --text-muted: #6b7280;
+}
+
+/*
+ * Light-mode palette overrides. The app is dark-by-default; when <html> has
+ * `light`, we remap the common surface/text colors to their light equivalents.
+ * This keeps existing Tailwind utilities working without rewriting every page.
+ */
+html.light .bg-gray-950 { background-color: var(--surface-0) !important; }
+html.light .bg-gray-900,
+html.light .bg-gray-900\/50,
+html.light .bg-gray-900\/60,
+html.light .bg-gray-900\/95 { background-color: var(--surface-1) !important; }
+html.light .bg-gray-800,
+html.light .bg-gray-800\/60 { background-color: var(--surface-2) !important; }
+html.light .bg-gray-950\/95 { background-color: color-mix(in srgb, var(--surface-0) 95%, transparent) !important; }
+
+html.light .text-gray-100,
+html.light .text-gray-200 { color: var(--text-primary) !important; }
+html.light .text-gray-300,
+html.light .text-gray-400 { color: var(--text-secondary) !important; }
+html.light .text-gray-500,
+html.light .text-gray-600 { color: var(--text-muted) !important; }
+
+html.light .border-gray-700,
+html.light .border-gray-800 { border-color: var(--border-subtle) !important; }
+html.light .divide-gray-800 > * + * { border-color: var(--border-subtle) !important; }
+
+html.light .text-black { color: #0b1220 !important; }
+
 /* ===== Mobile-First Global Styles ===== */
 
 /* iOS Safe Area Support */

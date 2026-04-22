@@ -6,6 +6,7 @@ import { listAthletes, listAllAthletes, deleteAthlete, type Athlete } from "../l
 import { Input, Select, ActionButton } from "../components/Input";
 import { SkeletonList, EmptyState, ErrorState } from "../components/UIState";
 import { useToast, useApiErrorToast } from "../components/Toast";
+import { ThemeToggle } from "../contexts/ThemeContext";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 
 /***************************************
@@ -166,6 +167,7 @@ const Dashboard = () => {
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <h1 className="text-xl md:text-2xl font-semibold">Dashboard</h1>
           <div className="flex items-center gap-2">
+            <ThemeToggle />
             {canManage && (
               <button
                 onClick={() => setShowMenu(!showMenu)}
