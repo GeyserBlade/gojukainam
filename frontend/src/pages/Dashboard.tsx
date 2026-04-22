@@ -7,6 +7,7 @@ import { Input, Select, ActionButton } from "../components/Input";
 import { SkeletonList, EmptyState, ErrorState } from "../components/UIState";
 import { useToast, useApiErrorToast } from "../components/Toast";
 import { ThemeToggle } from "../contexts/ThemeContext";
+import { useHoverPrefetch } from "../lib/prefetch";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 
 /***************************************
@@ -160,6 +161,14 @@ const Dashboard = () => {
 
   const canManage = role === "ADMIN" || role === "SUPERADMIN" || role === "CLUB_MANAGER";
 
+  // Prefetch handlers: warm the cache on hover/focus so the target page renders instantly.
+  // Wired on admin buttons that land on pages that read from the same TanStack Query cache
+  // (AthletesList uses ['athletes', clubId, role], EntriesView uses ['events']).
+  const prefetchAthletesAll = useHoverPrefetch({
+    queryKey: ["athletes", "", role, false],
+    queryFn: () => (role === "SUPERADMIN" ? listAllAthletes() : Promise.resolve([])),
+  });
+
   return (
     <div className="min-h-screen bg-gray-950 text-gray-100">
       {/* Mobile-friendly header */}
@@ -252,6 +261,7 @@ const Dashboard = () => {
                 <div className="flex gap-2 flex-wrap">
                   <button
                     onClick={() => navigate("/athletes")}
+                    {...prefetchAthletesAll}
                     className="text-sm px-3 py-2 rounded-md bg-cyan-600/80 hover:bg-cyan-600 text-black font-semibold"
                   >
                     Manage Athletes
