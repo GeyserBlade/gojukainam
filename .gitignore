@@ -42,6 +42,7 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+.claude/settings.local.json
 
 # TypeScript build outputs
 *.tsbuildinfo
