@@ -2,6 +2,8 @@ import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { Input, Select, ActionButton } from "../components/Input";
+import { SkeletonList, EmptyState, ErrorState } from "../components/UIState";
+import { useToast, useApiErrorToast } from "../components/Toast";
 import { Athlete, deleteAthlete, listAllAthletes, listAthletes } from "../lib/athletes";
 import { listClubs, type Club } from "../lib/clubs";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -89,6 +91,8 @@ const AthletesListPage = () => {
   const { role, clubId } = useAuth();
   const nav = useNavigate();
   const queryClient = useQueryClient();
+  const toast = useToast();
+  const showApiError = useApiErrorToast();
   const canManage = role === "CLUB_MANAGER" || role === "ADMIN" || role === "SUPERADMIN";
 
   const [q, setQ] = useState("");
@@ -106,7 +110,8 @@ const AthletesListPage = () => {
   const {
     data: athletes = [],
     isLoading: loading,
-    error: queryError
+    error: queryError,
+    refetch: refetchAthletes,
   } = useQuery({
     queryKey: ['athletes', filterClub, role, showInactive],
     queryFn: async () => {
@@ -139,9 +144,10 @@ const AthletesListPage = () => {
     mutationFn: deleteAthlete,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['athletes'] });
+      toast.success("Athlete deleted");
     },
-    onError: (error: any) => {
-      alert(error?.response?.data?.error || error.message || "Failed to delete athlete");
+    onError: (error) => {
+      showApiError(error, "Failed to delete athlete");
     }
   });
 
@@ -220,8 +226,14 @@ const AthletesListPage = () => {
             </p>
           )}
 
-          {loading && <p className="text-sm text-gray-400 py-8 text-center">Loading...</p>}
-          {error && <p className="text-sm text-red-400 py-8 text-center">{error}</p>}
+          {loading && <SkeletonList count={6} />}
+          {error && !loading && (
+            <ErrorState
+              title="Couldn't load athletes"
+              message={error}
+              onRetry={() => refetchAthletes()}
+            />
+          )}
 
           {!loading && !error && (
             <>
@@ -237,7 +249,12 @@ const AthletesListPage = () => {
                   />
                 ))}
                 {filtered.length === 0 && (
-                  <p className="text-sm text-gray-400 py-8 text-center">No athletes found</p>
+                  <EmptyState
+                    icon={q.trim() ? "🔍" : "👥"}
+                    title={q.trim() ? "No matches" : "No athletes yet"}
+                    description={q.trim() ? `No athletes match "${q}".` : "Add your first athlete to get started."}
+                    action={!q.trim() ? <ActionButton onClick={() => nav("/athletes/new")}>Add athlete</ActionButton> : undefined}
+                  />
                 )}
               </div>
 
@@ -286,7 +303,12 @@ const AthletesListPage = () => {
                   </table>
                 </div>
                 {filtered.length === 0 && (
-                  <p className="text-sm text-gray-400 py-8 text-center">No athletes found</p>
+                  <EmptyState
+                    icon={q.trim() ? "🔍" : "👥"}
+                    title={q.trim() ? "No matches" : "No athletes yet"}
+                    description={q.trim() ? `No athletes match "${q}".` : "Add your first athlete to get started."}
+                    action={!q.trim() ? <ActionButton onClick={() => nav("/athletes/new")}>Add athlete</ActionButton> : undefined}
+                  />
                 )}
               </div>
             </>

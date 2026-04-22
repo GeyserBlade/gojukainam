@@ -7,6 +7,8 @@ import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable"
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { Input, Select, ActionButton } from "../components/Input";
+import { SkeletonList } from "../components/UIState";
+import { useToast, useApiErrorToast } from "../components/Toast";
 import {
   listEvents,
   getEvent,
@@ -134,6 +136,8 @@ const EventManagement = () => {
   const { role, clubId } = useAuth();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const toast = useToast();
+  const showApiError = useApiErrorToast();
   const isAdmin = role === "SUPERADMIN" || role === "ADMIN";
 
   const [selectedEventId, setSelectedEventId] = useState<string>("");
@@ -221,9 +225,10 @@ const EventManagement = () => {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["eligibleAthletes"] });
       queryClient.invalidateQueries({ queryKey: ["entries"] });
+      toast.success("Entry created");
     },
-    onError: (error: any) => {
-      alert(error?.response?.data?.error || error.message || "Failed to create entry");
+    onError: (error) => {
+      showApiError(error, "Failed to create entry");
     },
   });
 
@@ -456,7 +461,7 @@ const EventManagement = () => {
                       </div>
 
                       {loadingAthletes ? (
-                        <p className="text-sm text-gray-400 py-8 text-center">Loading athletes...</p>
+                        <SkeletonList count={4} />
                       ) : filteredAthletes.length === 0 ? (
                         <p className="text-sm text-gray-400 py-8 text-center">No eligible athletes found</p>
                       ) : (
@@ -496,7 +501,7 @@ const EventManagement = () => {
                         </div>
 
                         {loadingAthletes ? (
-                          <p className="text-sm text-gray-400">Loading athletes...</p>
+                          <SkeletonList count={4} />
                         ) : filteredAthletes.length === 0 ? (
                           <p className="text-sm text-gray-400">No eligible athletes found</p>
                         ) : (

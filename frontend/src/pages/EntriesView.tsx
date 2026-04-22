@@ -3,6 +3,8 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Input, Select } from "../components/Input";
+import { SkeletonList } from "../components/UIState";
+import { useToast, useApiErrorToast } from "../components/Toast";
 import { EntryService, type Entry, type EntryFilters } from "../lib/entries";
 import { listEvents, getDivisions, type Event, type Division } from "../lib/events";
 import { listClubs, type Club } from "../lib/clubs";
@@ -168,6 +170,8 @@ const EntriesView = () => {
   const { role, clubId } = useAuth();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const toast = useToast();
+  const showApiError = useApiErrorToast();
   const isAdmin = role === "SUPERADMIN" || role === "ADMIN";
 
   // State
@@ -218,8 +222,9 @@ const EntriesView = () => {
     try {
       await EntryService.updateStatus(entryId, newStatus);
       queryClient.invalidateQueries({ queryKey: ["entries"] });
-    } catch (error: any) {
-      alert(error?.response?.data?.error || "Failed to update status");
+      toast.success("Entry status updated");
+    } catch (error) {
+      showApiError(error, "Failed to update status");
     }
   };
 
@@ -456,7 +461,9 @@ const EntriesView = () => {
 
             {/* Entries Display */}
             {loadingEntries ? (
-              <div className="bg-gray-900 rounded-lg p-8 text-center text-gray-400">Loading entries...</div>
+              <div className="bg-gray-900 rounded-lg p-4">
+                <SkeletonList count={5} />
+              </div>
             ) : entries.length === 0 ? (
               <div className="bg-gray-900 rounded-lg p-8 text-center text-gray-400">
                 No entries found. Try adjusting your filters or create entries from the Event Management page.

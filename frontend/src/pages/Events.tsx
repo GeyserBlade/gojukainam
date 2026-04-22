@@ -3,6 +3,8 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Input, Select } from "../components/Input";
+import { SkeletonList } from "../components/UIState";
+import { useToast, useApiErrorToast } from "../components/Toast";
 import {
   listEvents,
   createEvent,
@@ -39,6 +41,8 @@ const Events = () => {
   const { role } = useAuth();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const toast = useToast();
+  const showApiError = useApiErrorToast();
   const isAdmin = role === "SUPERADMIN" || role === "ADMIN";
 
   const [activeTab, setActiveTab] = useState<Tab>("events");
@@ -108,9 +112,10 @@ const Events = () => {
       queryClient.invalidateQueries({ queryKey: ["events"] });
       setShowEventModal(false);
       resetEventForm();
+      toast.success("Event created");
     },
-    onError: (error: any) => {
-      alert(error?.response?.data?.error || error.message || "Failed to create event");
+    onError: (error) => {
+      showApiError(error, "Failed to create event");
     },
   });
 
@@ -122,8 +127,8 @@ const Events = () => {
       setEditingEvent(null);
       resetEventForm();
     },
-    onError: (error: any) => {
-      alert(error?.response?.data?.error || error.message || "Failed to update event");
+    onError: (error) => {
+      showApiError(error, "Failed to update event");
     },
   });
 
@@ -132,8 +137,8 @@ const Events = () => {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["events"] });
     },
-    onError: (error: any) => {
-      alert(error?.response?.data?.error || error.message || "Failed to update event status");
+    onError: (error) => {
+      showApiError(error, "Failed to update event status");
     },
   });
 
@@ -145,8 +150,8 @@ const Events = () => {
         setSelectedEventId("");
       }
     },
-    onError: (error: any) => {
-      alert(error?.response?.data?.error || error.message || "Failed to delete event");
+    onError: (error) => {
+      showApiError(error, "Failed to delete event");
     },
   });
 
@@ -159,8 +164,8 @@ const Events = () => {
       setShowDivisionModal(false);
       resetDivisionForm();
     },
-    onError: (error: any) => {
-      alert(error?.response?.data?.error || error.message || "Failed to create division");
+    onError: (error) => {
+      showApiError(error, "Failed to create division");
     },
   });
 
@@ -174,8 +179,8 @@ const Events = () => {
       setEditingDivision(null);
       resetDivisionForm();
     },
-    onError: (error: any) => {
-      alert(error?.response?.data?.error || error.message || "Failed to update division");
+    onError: (error) => {
+      showApiError(error, "Failed to update division");
     },
   });
 
@@ -185,8 +190,8 @@ const Events = () => {
       queryClient.invalidateQueries({ queryKey: ["divisions"] });
       queryClient.invalidateQueries({ queryKey: ["event"] });
     },
-    onError: (error: any) => {
-      alert(error?.response?.data?.error || error.message || "Failed to delete division");
+    onError: (error) => {
+      showApiError(error, "Failed to delete division");
     },
   });
 
@@ -199,8 +204,8 @@ const Events = () => {
       setShowWeightModal(false);
       resetWeightForm();
     },
-    onError: (error: any) => {
-      alert(error?.response?.data?.error || error.message || "Failed to create weight class");
+    onError: (error) => {
+      showApiError(error, "Failed to create weight class");
     },
   });
 
@@ -214,8 +219,8 @@ const Events = () => {
       setEditingWeight(null);
       resetWeightForm();
     },
-    onError: (error: any) => {
-      alert(error?.response?.data?.error || error.message || "Failed to update weight class");
+    onError: (error) => {
+      showApiError(error, "Failed to update weight class");
     },
   });
 
@@ -225,8 +230,8 @@ const Events = () => {
       queryClient.invalidateQueries({ queryKey: ["weightClasses"] });
       queryClient.invalidateQueries({ queryKey: ["event"] });
     },
-    onError: (error: any) => {
-      alert(error?.response?.data?.error || error.message || "Failed to delete weight class");
+    onError: (error) => {
+      showApiError(error, "Failed to delete weight class");
     },
   });
 
@@ -453,7 +458,7 @@ const Events = () => {
                 </div>
 
                 {loadingEvents ? (
-                  <p className="text-sm text-gray-400">Loading events...</p>
+                  <SkeletonList count={3} />
                 ) : events.length === 0 ? (
                   <p className="text-sm text-gray-400">No events found. Create your first event!</p>
                 ) : (
@@ -550,7 +555,7 @@ const Events = () => {
                 </div>
 
                 {loadingDivisions ? (
-                  <p className="text-sm text-gray-400">Loading divisions...</p>
+                  <SkeletonList count={3} />
                 ) : divisions.length === 0 ? (
                   <p className="text-sm text-gray-400">No divisions found. Add your first division!</p>
                 ) : (
@@ -612,7 +617,7 @@ const Events = () => {
                 </div>
 
                 {loadingWeights ? (
-                  <p className="text-sm text-gray-400">Loading weight classes...</p>
+                  <SkeletonList count={3} />
                 ) : weightClasses.length === 0 ? (
                   <p className="text-sm text-gray-400">No weight classes found. Add your first weight class!</p>
                 ) : (

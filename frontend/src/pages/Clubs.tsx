@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { Button, Input, Label, Textarea } from "../components/Input";
+import { SkeletonList, EmptyState, ErrorState } from "../components/UIState";
+import { useToast, useApiErrorToast } from "../components/Toast";
 import { createClub, deleteClub, listClubs, updateClub, type Club } from "../lib/clubs";
 
 type ClubForm = {
@@ -42,6 +44,8 @@ const defaultForm: ClubForm = {
 const ClubsPage = () => {
   const { role } = useAuth();
   const navigate = useNavigate();
+  const toast = useToast();
+  const showApiError = useApiErrorToast();
   const canManage = role === "ADMIN" || role === "SUPERADMIN";
 
   const [clubs, setClubs] = useState<Club[]>([]);
@@ -55,14 +59,18 @@ const ClubsPage = () => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<ClubForm>(defaultForm);
 
-  useEffect(() => {
-    if (!canManage) return;
+  const loadClubs = () => {
     setLoading(true);
     setError(null);
-    listClubs()
+    return listClubs()
       .then(setClubs)
       .catch((e: any) => setError(e?.response?.data?.error || e.message || "Failed to load clubs"))
       .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    if (!canManage) return;
+    loadClubs();
   }, [canManage]);
 
   const filtered = useMemo(() => {
@@ -106,8 +114,9 @@ const ClubsPage = () => {
       setClubs((list) => [created, ...list].sort((a, b) => a.name.localeCompare(b.name)));
       setCreateForm(defaultForm);
       setCreating(false);
-    } catch (err: any) {
-      alert(err?.response?.data?.error || err.message || "Failed to create club");
+      toast.success("Club created");
+    } catch (err) {
+      showApiError(err, "Failed to create club");
     }
   }
 
@@ -139,8 +148,9 @@ const ClubsPage = () => {
       );
       setEditingId(null);
       setEditForm(defaultForm);
-    } catch (err: any) {
-      alert(err?.response?.data?.error || err.message || "Failed to update club");
+      toast.success("Club updated");
+    } catch (err) {
+      showApiError(err, "Failed to update club");
     }
   }
 
@@ -157,8 +167,9 @@ const ClubsPage = () => {
     setClubs((list) => list.filter((c) => c.id !== id));
     try {
       await deleteClub(id);
-    } catch (err: any) {
-      alert(err?.response?.data?.error || err.message || "Failed to delete club");
+      toast.success("Club deleted");
+    } catch (err) {
+      showApiError(err, "Failed to delete club");
       setClubs(previous);
     }
   }
@@ -287,8 +298,10 @@ const ClubsPage = () => {
           </div>
         )}
 
-        {loading && <p className="text-sm text-gray-400">Loading clubs…</p>}
-        {error && <p className="text-sm text-red-400">{error}</p>}
+        {loading && <SkeletonList count={4} />}
+        {error && !loading && (
+          <ErrorState title="Couldn't load clubs" message={error} onRetry={loadClubs} />
+        )}
 
         {!loading && !error && (
           <div className="rounded-xl border border-gray-800 overflow-hidden">
@@ -352,8 +365,12 @@ const ClubsPage = () => {
                 ))}
                 {!filtered.length && (
                   <tr>
-                    <td className="px-4 py-6 text-center text-gray-400" colSpan={8}>
-                      No clubs found.
+                    <td className="px-4 py-6" colSpan={11}>
+                      <EmptyState
+                        icon={q.trim() ? "🔍" : "🏛️"}
+                        title={q.trim() ? "No matches" : "No clubs yet"}
+                        description={q.trim() ? `No clubs match "${q}".` : "Create your first club to get started."}
+                      />
                     </td>
                   </tr>
                 )}

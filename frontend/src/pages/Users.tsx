@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { Button, Input, Label, Select } from "../components/Input";
+import { SkeletonList, EmptyState, ErrorState } from "../components/UIState";
+import { useToast, useApiErrorToast } from "../components/Toast";
 import { createUser, deleteUser, listUsers, updateUser, setUserPassword, requestPasswordReset, type User, type Role } from "../lib/users";
 import { listClubs, type Club } from "../lib/clubs";
 
@@ -11,6 +13,8 @@ const formatDate = (value?: string | null) => (value ? new Date(value).toLocaleD
 const UsersPage = () => {
   const { role } = useAuth();
   const navigate = useNavigate();
+  const toast = useToast();
+  const showApiError = useApiErrorToast();
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -33,13 +37,17 @@ const UsersPage = () => {
   const canManage = role === "ADMIN" || role === "SUPERADMIN";
   const canCreateAdmin = role === "SUPERADMIN";
 
-  useEffect(() => {
-    if (!canManage) return;
+  const loadUsers = () => {
     setLoading(true); setError(null);
-    Promise.all([listUsers(), listClubs()])
+    return Promise.all([listUsers(), listClubs()])
       .then(([u, c]) => { setUsers(u); setClubs(c); })
       .catch((e: any) => setError(e?.response?.data?.error || e.message || "Failed to load users"))
       .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    if (!canManage) return;
+    loadUsers();
   }, [canManage]);
 
   const filtered = useMemo(() => {
@@ -62,8 +70,9 @@ const UsersPage = () => {
       setUsers((u) => [created, ...u]);
       setCreateForm({ email: "", role: "ATHLETE" });
       setCreating(false);
-    } catch (err: any) {
-      alert(err?.response?.data?.error || err.message || "Failed to create user");
+      toast.success("User created");
+    } catch (err) {
+      showApiError(err, "Failed to create user");
     }
   }
 
@@ -83,8 +92,9 @@ const UsersPage = () => {
       setUsers((list) => list.map((u) => (u.id === editingId ? updated : u)));
       setEditingId(null);
       setEditForm({});
-    } catch (err: any) {
-      alert(err?.response?.data?.error || err.message || "Failed to update user");
+      toast.success("User updated");
+    } catch (err) {
+      showApiError(err, "Failed to update user");
     }
   }
 
@@ -95,8 +105,9 @@ const UsersPage = () => {
     setUsers((list) => list.filter((x) => x.id !== id));
     try {
       await deleteUser(id);
-    } catch (err: any) {
-      alert(err?.response?.data?.error || err.message || "Failed to delete user");
+      toast.success("User deleted");
+    } catch (err) {
+      showApiError(err, "Failed to delete user");
       setUsers(prev);
     }
   }
@@ -135,7 +146,7 @@ const UsersPage = () => {
 
     try {
       await setUserPassword(passwordUserId, newPassword);
-      alert("Password set successfully!");
+      toast.success("Password set successfully");
       closePasswordModal();
     } catch (err: any) {
       setPasswordError(err?.response?.data?.error || err.message || "Failed to set password");
@@ -150,12 +161,18 @@ const UsersPage = () => {
     try {
       const result = await requestPasswordReset(id);
       if (result.devToken) {
-        alert(`Password reset link generated!\n\nDev Token: ${result.devToken}\n\nLink: ${window.location.origin}/reset-password?token=${result.devToken}`);
+        const link = `${window.location.origin}/reset-password?token=${result.devToken}`;
+        if (navigator.clipboard) {
+          await navigator.clipboard.writeText(link).catch(() => {});
+          toast.info("Dev reset link copied to clipboard");
+        } else {
+          toast.info(`Dev reset link: ${link}`);
+        }
       } else {
-        alert(result.message || "Password reset link sent!");
+        toast.success(result.message || "Password reset link sent");
       }
-    } catch (err: any) {
-      alert(err?.response?.data?.error || err.message || "Failed to request password reset");
+    } catch (err) {
+      showApiError(err, "Failed to request password reset");
     }
   }
 
@@ -275,8 +292,10 @@ const UsersPage = () => {
           </div>
         )}
 
-        {loading && <p className="text-sm text-gray-400">Loading users…</p>}
-        {error && <p className="text-sm text-red-400">{error}</p>}
+        {loading && <SkeletonList count={5} />}
+        {error && !loading && (
+          <ErrorState title="Couldn't load users" message={error} onRetry={loadUsers} />
+        )}
         {!loading && !error && (
           <div className="rounded-xl border border-gray-800 overflow-hidden">
             <table className="min-w-full text-xs">
@@ -292,6 +311,17 @@ const UsersPage = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-800">
+                {filtered.length === 0 && (
+                  <tr>
+                    <td colSpan={7} className="px-4 py-6">
+                      <EmptyState
+                        icon={q.trim() ? "🔍" : "👤"}
+                        title={q.trim() ? "No matches" : "No users yet"}
+                        description={q.trim() ? `No users match "${q}".` : "Add your first user to get started."}
+                      />
+                    </td>
+                  </tr>
+                )}
                 {filtered.map((u) => (
                   <tr key={u.id} className="hover:bg-gray-900/40">
                     <td className="px-3 py-2 text-gray-100">{u.email}</td>

@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
-import { Button, Input, Label, Select, Textarea } from "../components/Input";
+import { Button, Input, Label, Textarea } from "../components/Input";
+import { SkeletonList, EmptyState, ErrorState } from "../components/UIState";
+import { useToast, useApiErrorToast } from "../components/Toast";
 import { Belt, createBelt, deleteBelt, listBelts, updateBelt } from "../lib/belts";
 
 const formatDate = (value?: string | null) => (value ? new Date(value).toLocaleDateString() : "");
@@ -9,6 +11,8 @@ const formatDate = (value?: string | null) => (value ? new Date(value).toLocaleD
 const BeltsPage = () => {
   const { role } = useAuth();
   const nav = useNavigate();
+  const toast = useToast();
+  const showApiError = useApiErrorToast();
   const canManage = role === "ADMIN" || role === "SUPERADMIN";
 
   const [belts, setBelts] = useState<Belt[]>([]);
@@ -36,13 +40,17 @@ const BeltsPage = () => {
     order: number;
   }>>({});
 
-  useEffect(() => {
-    if (!canManage) return;
+  const loadBelts = () => {
     setLoading(true); setError(null);
-    listBelts()
+    return listBelts()
       .then(setBelts)
       .catch((e: any) => setError(e?.response?.data?.error || e.message || "Failed to load belts"))
       .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    if (!canManage) return;
+    loadBelts();
   }, [canManage]);
 
   const filtered = useMemo(() => {
@@ -77,8 +85,9 @@ const BeltsPage = () => {
       setBelts((list) => [...list, created].sort((a,b)=> a.order - b.order || (a.name||"").localeCompare(b.name||"")));
       setCreateForm({ order: 0 });
       setCreating(false);
-    } catch (err: any) {
-      alert(err?.response?.data?.error || err.message || "Failed to create belt");
+      toast.success("Belt created");
+    } catch (err) {
+      showApiError(err, "Failed to create belt");
     }
   }
 
@@ -101,8 +110,9 @@ const BeltsPage = () => {
       setBelts((list) => list.map((x) => (x.id === editingId ? updated : x)).sort((a,b)=> a.order - b.order || (a.name||"").localeCompare(b.name||"")));
       setEditingId(null);
       setEditForm({});
-    } catch (err: any) {
-      alert(err?.response?.data?.error || err.message || "Failed to update belt");
+      toast.success("Belt updated");
+    } catch (err) {
+      showApiError(err, "Failed to update belt");
     }
   }
 
@@ -113,8 +123,9 @@ const BeltsPage = () => {
     setBelts((list) => list.filter((x) => x.id !== id));
     try {
       await deleteBelt(id);
-    } catch (err: any) {
-      alert(err?.response?.data?.error || err.message || "Failed to delete belt");
+      toast.success("Belt deleted");
+    } catch (err) {
+      showApiError(err, "Failed to delete belt");
       setBelts(prev);
     }
   }
@@ -202,8 +213,10 @@ const BeltsPage = () => {
           </div>
         )}
 
-        {loading && <p className="text-sm text-gray-400">Loading belts…</p>}
-        {error && <p className="text-sm text-red-400">{error}</p>}
+        {loading && <SkeletonList count={5} />}
+        {error && !loading && (
+          <ErrorState title="Couldn't load belts" message={error} onRetry={loadBelts} />
+        )}
         {!loading && !error && (
           <div className="rounded-xl border border-gray-800 overflow-hidden">
             <table className="min-w-full text-xs">
@@ -220,6 +233,17 @@ const BeltsPage = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-800">
+                {filtered.length === 0 && (
+                  <tr>
+                    <td colSpan={8} className="px-4 py-6">
+                      <EmptyState
+                        icon={q.trim() ? "🔍" : "🥋"}
+                        title={q.trim() ? "No matches" : "No belts yet"}
+                        description={q.trim() ? `No belts match "${q}".` : "Create your first belt rank."}
+                      />
+                    </td>
+                  </tr>
+                )}
                 {filtered.map((b) => (
                   <tr key={b.id} className="hover:bg-gray-900/40">
                     <td className="px-3 py-2 text-gray-100">{b.order}</td>
