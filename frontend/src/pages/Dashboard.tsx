@@ -60,6 +60,16 @@ const Dashboard = () => {
   const [sortDir, setSortDir] = useState<"asc"|"desc">("asc");
   const [showMenu, setShowMenu] = useState(false);
 
+  // Version info — fetched once per session, staleTime: Infinity prevents refetches
+  const { data: versionInfo } = useQuery({
+    queryKey: ['version'],
+    queryFn: async () => {
+      const res = await api.get("/version");
+      return res.data as { backend: string; db: number };
+    },
+    staleTime: Infinity,
+  });
+
   // 1. Fetch Events
   const { data: events = [] } = useQuery({
     queryKey: ['events'],
@@ -424,6 +434,12 @@ const Dashboard = () => {
           </div>
         </div>
       </main>
+
+      <footer className="pb-6 text-center">
+        <span className="text-xs text-gray-700">
+          fe {__APP_VERSION__} · api {versionInfo?.backend ?? '…'} · db {versionInfo?.db ?? '…'}
+        </span>
+      </footer>
     </div>
   );
 };
