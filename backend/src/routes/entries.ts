@@ -62,6 +62,25 @@ router.post("/", requireRoles("CLUB_MANAGER", "ADMIN", "SUPERADMIN"), validate(C
   }
 });
 
+// delete a DRAFT entry (club-scoped unless admin)
+router.delete("/:id", requireRoles("CLUB_MANAGER", "ADMIN", "SUPERADMIN"), validate(IdParam, "params"), async (req, res, next) => {
+  try {
+    const id = getParam(req.params.id);
+    const user = {
+      id: req.user!.id,
+      role: req.user!.role,
+      clubId: req.user!.clubId,
+    };
+    await EntryService.delete(id, user);
+    res.status(204).send();
+  } catch (err: any) {
+    if (err.status && err.message) {
+      return res.status(err.status).json({ error: err.message });
+    }
+    next(err);
+  }
+});
+
 // change status (submit/approve/return)
 router.put("/:id/status", requireRoles("CLUB_MANAGER", "COACH", "ADMIN", "SUPERADMIN"), validateMultiple({ params: IdParam, body: UpdateEntryStatus }), async (req, res, next) => {
   try {

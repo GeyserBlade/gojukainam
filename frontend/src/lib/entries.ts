@@ -118,4 +118,8 @@ export class EntryService {
     const res = await api.put(`/entries/${id}/status`, { status, reason });
     return res.data;
   }
+
+  static async delete(id: string): Promise<void> {
+    await api.delete(`/entries/${id}`);
+  }
 }

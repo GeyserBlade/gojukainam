@@ -152,9 +152,11 @@ const DraggableAthleteCard: React.FC<DraggableAthleteCardProps> = ({ athlete, on
 
 interface EnteredEntryCardProps {
   entry: Entry;
+  onDelete?: () => void;
+  isDeleting?: boolean;
 }
 
-const EnteredEntryCard: React.FC<EnteredEntryCardProps> = ({ entry }) => {
+const EnteredEntryCard: React.FC<EnteredEntryCardProps> = ({ entry, onDelete, isDeleting }) => {
   const name = entry.athlete
     ? `${entry.athlete.firstName} ${entry.athlete.lastName}`
     : entry.team?.name || "—";
@@ -168,6 +170,8 @@ const EnteredEntryCard: React.FC<EnteredEntryCardProps> = ({ entry }) => {
     RETURNED: "bg-amber-600/30 text-amber-300",
   };
 
+  const canDelete = entry.status === "DRAFT" && !!onDelete;
+
   return (
     <div className="p-3 rounded-lg border border-green-800/40 bg-green-900/10">
       <div className="flex justify-between items-start gap-3">
@@ -179,9 +183,23 @@ const EnteredEntryCard: React.FC<EnteredEntryCardProps> = ({ entry }) => {
             {entry.weightClass && ` • ${entry.weightClass.name}`}
           </p>
         </div>
-        <span className={`text-xs px-2 py-0.5 rounded flex-shrink-0 ${statusStyles[entry.status] || statusStyles.DRAFT}`}>
-          {entry.status}
-        </span>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <span className={`text-xs px-2 py-0.5 rounded ${statusStyles[entry.status] || statusStyles.DRAFT}`}>
+            {entry.status}
+          </span>
+          {canDelete && (
+            <button
+              type="button"
+              onClick={onDelete}
+              disabled={isDeleting}
+              className="text-xs px-2 py-1 rounded bg-red-900/30 hover:bg-red-800/40 text-red-300 hover:text-red-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              aria-label={`Remove ${name}`}
+              title="Remove this draft entry"
+            >
+              {isDeleting ? "…" : "Remove"}
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -312,6 +330,27 @@ const EventManagement = () => {
   const handleDragStart = (event: DragStartEvent) => {
     const athlete = eligibleAthletes.find((a) => a.id === event.active.id);
     setDraggedAthlete(athlete || null);
+  };
+
+  const deleteEntryMutation = useMutation({
+    mutationFn: (entryId: string) => EntryService.delete(entryId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["entries"] });
+      queryClient.invalidateQueries({ queryKey: ["eligibleAthletes"] });
+      toast.success("Entry removed");
+    },
+    onError: (error) => {
+      showApiError(error, "Failed to remove entry");
+    },
+  });
+
+  const handleDeleteEntry = (entry: Entry) => {
+    const label = entry.athlete
+      ? `${entry.athlete.firstName} ${entry.athlete.lastName}`
+      : entry.team?.name || "this entry";
+    if (confirm(`Remove ${label} from this division?`)) {
+      deleteEntryMutation.mutate(entry.id);
+    }
   };
 
   const handleDragEnd = (event: DragEndEvent) => {
@@ -549,7 +588,12 @@ const EventManagement = () => {
                         ) : (
                           <div className="space-y-2">
                             {currentEntries.map((entry) => (
-                              <EnteredEntryCard key={entry.id} entry={entry} />
+                              <EnteredEntryCard
+                                key={entry.id}
+                                entry={entry}
+                                onDelete={() => handleDeleteEntry(entry)}
+                                isDeleting={deleteEntryMutation.isPending && deleteEntryMutation.variables === entry.id}
+                              />
                             ))}
                           </div>
                         )}

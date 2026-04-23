@@ -122,6 +122,40 @@ export class EntryService {
     return prisma.entry.create({ data: body });
   }
 
+  static async delete(id: string, user: { id: string; role: string; clubId?: string | null }) {
+    const existing = await prisma.entry.findUnique({ where: { id } });
+    if (!existing) throw { status: 404, message: "Entry not found" };
+
+    // Only DRAFT entries can be removed. Once submitted/approved/returned,
+    // the entry is part of the audit trail and must go through status changes.
+    if (existing.status !== "DRAFT") {
+      throw { status: 409, message: "Only DRAFT entries can be deleted" };
+    }
+
+    const isAdmin = user.role === "SUPERADMIN" || user.role === "ADMIN";
+    if (!isAdmin && existing.clubId !== user.clubId) {
+      throw { status: 403, message: "Forbidden" };
+    }
+
+    return prisma.$transaction(async (tx) => {
+      await tx.entry.delete({ where: { id } });
+      await tx.auditLog.create({
+        data: {
+          userId: user.id,
+          entityType: "Entry",
+          entityId: id,
+          action: "DELETE",
+          diffJson: JSON.stringify({
+            entryType: existing.entryType,
+            divisionId: existing.divisionId,
+            athleteId: existing.athleteId,
+            teamId: existing.teamId,
+          }),
+        },
+      });
+    });
+  }
+
   static async updateStatus(id: string, data: unknown, user: { id: string; role: string; clubId?: string | null }) {
     const { status, reason } = UpdateEntryStatus.parse({ id, ...(data as any) });
 
