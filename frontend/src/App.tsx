@@ -22,6 +22,7 @@ const EventManagementPage = lazy(() => import("./pages/EventManagement"));
 const EventsPage = lazy(() => import("./pages/Events"));
 const EntriesViewPage = lazy(() => import("./pages/EntriesView"));
 
+
 const Protected: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { role, loading } = useAuth();
   if (loading) return <PageSpinner label="Checking session" />;
