@@ -35,6 +35,11 @@ router.get("/", async (req, res, next) => {
   }
 });
 
+// list available division/weight-class templates (any logged user can read)
+router.get("/templates", (_req, res) => {
+  res.json(EventService.listTemplates());
+});
+
 // get single event by id
 router.get("/:id", validate(IdParam, "params"), async (req, res, next) => {
   try {

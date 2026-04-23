@@ -205,5 +205,5 @@ export const EligibleAthletesQuery = z.object({
 
 // ---------------- Event Templates ----------------
 export const ApplyTemplate = z.object({
-  template: z.enum(["WKF_2024"]),
+  template: z.enum(["NKF_FULL_2026", "NKF_INDIVIDUAL_2026", "NKF_TEAM_2026", "WKF_2024"]),
 });

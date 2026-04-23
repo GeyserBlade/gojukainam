@@ -1,7 +1,7 @@
 import { prisma } from "../lib/prisma.js";
 import { CreateEvent, UpdateEvent, CreateDivision, UpdateDivision, CreateWeightClass, UpdateWeightClass } from "../utils/validators.js";
 import { ageOn } from "../utils/eligibility.js";
-import { TEMPLATES, type TemplateName } from "../data/wkf-template.js";
+import { TEMPLATES, TEMPLATE_META, type TemplateName } from "../data/wkf-template.js";
 import type { Gender } from "@prisma/client";
 
 export class EventService {
@@ -246,6 +246,10 @@ export class EventService {
   }
 
   // ============ Template ============
+
+  static listTemplates() {
+    return TEMPLATE_META;
+  }
 
   static async applyTemplate(eventId: string, templateName: TemplateName) {
     const event = await prisma.event.findUnique({ where: { id: eventId } });

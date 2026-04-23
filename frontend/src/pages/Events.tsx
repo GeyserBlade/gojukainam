@@ -19,6 +19,8 @@ import {
   createWeightClass,
   updateWeightClass,
   deleteWeightClass,
+  listTemplates,
+  applyTemplate,
   type Event,
   type Division,
   type WeightClass,
@@ -26,6 +28,7 @@ import {
   type CreateEventDto,
   type CreateDivisionDto,
   type CreateWeightClassDto,
+  type TemplateId,
 } from "../lib/events";
 
 type Tab = "events" | "divisions" | "weights";
@@ -50,9 +53,15 @@ const Events = () => {
   const [showEventModal, setShowEventModal] = useState(false);
   const [showDivisionModal, setShowDivisionModal] = useState(false);
   const [showWeightModal, setShowWeightModal] = useState(false);
+  const [showTemplateModal, setShowTemplateModal] = useState(false);
   const [editingEvent, setEditingEvent] = useState<Event | null>(null);
   const [editingDivision, setEditingDivision] = useState<Division | null>(null);
   const [editingWeight, setEditingWeight] = useState<WeightClass | null>(null);
+
+  // Template to apply after a new event is created (empty = none)
+  const [templateForNewEvent, setTemplateForNewEvent] = useState<TemplateId | "">("");
+  // Template selected in the standalone "Apply Template" modal
+  const [templateToApply, setTemplateToApply] = useState<TemplateId | "">("");
 
   // Event form state
   const [eventForm, setEventForm] = useState<CreateEventDto>({
@@ -91,6 +100,13 @@ const Events = () => {
     queryFn: listEvents,
   });
 
+  // Fetch available templates (cached for the session — the list rarely changes)
+  const { data: templates = [] } = useQuery({
+    queryKey: ["eventTemplates"],
+    queryFn: listTemplates,
+    staleTime: 1000 * 60 * 60,
+  });
+
   // Fetch divisions for selected event
   const { data: divisions = [], isLoading: loadingDivisions } = useQuery({
     queryKey: ["divisions", selectedEventId],
@@ -108,14 +124,47 @@ const Events = () => {
   // Event mutations
   const createEventMutation = useMutation({
     mutationFn: createEvent,
-    onSuccess: () => {
+    onSuccess: async (event) => {
       queryClient.invalidateQueries({ queryKey: ["events"] });
       setShowEventModal(false);
       resetEventForm();
-      toast.success("Event created");
+
+      // If the user selected a template on the create form, apply it now.
+      if (templateForNewEvent) {
+        const chosen = templateForNewEvent;
+        setTemplateForNewEvent("");
+        try {
+          const result = await applyTemplate(event.id, chosen);
+          queryClient.invalidateQueries({ queryKey: ["events"] });
+          queryClient.invalidateQueries({ queryKey: ["divisions", event.id] });
+          queryClient.invalidateQueries({ queryKey: ["weightClasses", event.id] });
+          toast.success(`Event created. ${result.message}`);
+        } catch (err) {
+          toast.success("Event created");
+          showApiError(err, "Event created, but template failed to apply");
+        }
+      } else {
+        toast.success("Event created");
+      }
     },
     onError: (error) => {
       showApiError(error, "Failed to create event");
+    },
+  });
+
+  const applyTemplateMutation = useMutation({
+    mutationFn: ({ eventId, template }: { eventId: string; template: TemplateId }) =>
+      applyTemplate(eventId, template),
+    onSuccess: (result, { eventId }) => {
+      queryClient.invalidateQueries({ queryKey: ["events"] });
+      queryClient.invalidateQueries({ queryKey: ["divisions", eventId] });
+      queryClient.invalidateQueries({ queryKey: ["weightClasses", eventId] });
+      setShowTemplateModal(false);
+      setTemplateToApply("");
+      toast.success(result.message);
+    },
+    onError: (error) => {
+      showApiError(error, "Failed to apply template");
     },
   });
 
@@ -273,7 +322,13 @@ const Events = () => {
   const handleCreateEvent = () => {
     setEditingEvent(null);
     resetEventForm();
+    setTemplateForNewEvent("");
     setShowEventModal(true);
+  };
+
+  const handleApplyTemplate = () => {
+    if (!selectedEventId || !templateToApply) return;
+    applyTemplateMutation.mutate({ eventId: selectedEventId, template: templateToApply });
   };
 
   const handleEditEvent = (event: Event) => {
@@ -546,12 +601,23 @@ const Events = () => {
               <div>
                 <div className="flex justify-between items-center mb-4">
                   <h2 className="text-lg font-semibold">Divisions for {selectedEvent?.name}</h2>
-                  <button
-                    onClick={handleCreateDivision}
-                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded text-sm font-medium"
-                  >
-                    Add Division
-                  </button>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => {
+                        setTemplateToApply("");
+                        setShowTemplateModal(true);
+                      }}
+                      className="px-4 py-2 bg-purple-600 hover:bg-purple-700 rounded text-sm font-medium"
+                    >
+                      Apply Template
+                    </button>
+                    <button
+                      onClick={handleCreateDivision}
+                      className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded text-sm font-medium"
+                    >
+                      Add Division
+                    </button>
+                  </div>
                 </div>
 
                 {loadingDivisions ? (
@@ -731,6 +797,30 @@ const Events = () => {
                     />
                   </div>
                 </div>
+
+                {!editingEvent && (
+                  <div className="pt-4 border-t border-gray-800">
+                    <label className="block text-sm text-gray-400 mb-1">
+                      Start from Template <span className="text-gray-500">(optional)</span>
+                    </label>
+                    <Select
+                      value={templateForNewEvent}
+                      onChange={(e) => setTemplateForNewEvent(e.target.value as TemplateId | "")}
+                    >
+                      <option value="">None — add divisions manually</option>
+                      {templates.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.name} ({t.divisionCount} divisions, {t.weightClassCount} weight classes)
+                        </option>
+                      ))}
+                    </Select>
+                    {templateForNewEvent && (
+                      <p className="text-xs text-gray-500 mt-1">
+                        {templates.find((t) => t.id === templateForNewEvent)?.description}
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
 
               <div className="flex gap-3 mt-6">
@@ -850,6 +940,70 @@ const Events = () => {
                     resetDivisionForm();
                   }}
                   className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Apply Template Modal */}
+        {showTemplateModal && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div className="bg-gray-900 rounded-lg p-6 w-full max-w-xl">
+              <h2 className="text-xl font-semibold mb-2">Apply Division Template</h2>
+              <p className="text-sm text-gray-400 mb-4">
+                Populate {selectedEvent?.name} with divisions and weight classes from a preset.
+                Existing divisions with matching keys are skipped, so you can safely re-apply or layer templates.
+              </p>
+
+              <div className="space-y-3">
+                {templates.map((t) => (
+                  <label
+                    key={t.id}
+                    className={`block p-3 rounded border cursor-pointer transition ${
+                      templateToApply === t.id
+                        ? "border-purple-500 bg-purple-900/20"
+                        : "border-gray-700 bg-gray-800 hover:border-gray-600"
+                    }`}
+                  >
+                    <div className="flex items-start gap-3">
+                      <input
+                        type="radio"
+                        name="template"
+                        value={t.id}
+                        checked={templateToApply === t.id}
+                        onChange={() => setTemplateToApply(t.id)}
+                        className="mt-1"
+                      />
+                      <div className="flex-1">
+                        <div className="font-medium">{t.name}</div>
+                        <div className="text-sm text-gray-400">{t.description}</div>
+                        <div className="text-xs text-gray-500 mt-1">
+                          {t.divisionCount} divisions · {t.weightClassCount} weight classes
+                        </div>
+                      </div>
+                    </div>
+                  </label>
+                ))}
+              </div>
+
+              <div className="flex gap-3 mt-6">
+                <button
+                  onClick={handleApplyTemplate}
+                  className="flex-1 px-4 py-2 bg-purple-600 hover:bg-purple-700 rounded font-medium disabled:opacity-50"
+                  disabled={!templateToApply || applyTemplateMutation.isPending}
+                >
+                  {applyTemplateMutation.isPending ? "Applying..." : "Apply Template"}
+                </button>
+                <button
+                  onClick={() => {
+                    setShowTemplateModal(false);
+                    setTemplateToApply("");
+                  }}
+                  className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded"
+                  disabled={applyTemplateMutation.isPending}
                 >
                   Cancel
                 </button>

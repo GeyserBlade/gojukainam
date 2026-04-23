@@ -181,6 +181,35 @@ export async function deleteWeightClass(id: string): Promise<void> {
   await api.delete(`/events/weights/${id}`);
 }
 
+// ============ Templates ============
+
+export type TemplateId = "NKF_FULL_2026" | "NKF_INDIVIDUAL_2026" | "NKF_TEAM_2026" | "WKF_2024";
+
+export interface TemplateMeta {
+  id: TemplateId;
+  name: string;
+  description: string;
+  divisionCount: number;
+  weightClassCount: number;
+}
+
+export interface ApplyTemplateResult {
+  divisionsCreated: number;
+  divisionsSkipped: number;
+  weightClassesCreated: number;
+  message: string;
+}
+
+export async function listTemplates(): Promise<TemplateMeta[]> {
+  const res = await api.get("/events/templates");
+  return res.data;
+}
+
+export async function applyTemplate(eventId: string, template: TemplateId): Promise<ApplyTemplateResult> {
+  const res = await api.post(`/events/${eventId}/apply-template`, { template });
+  return res.data;
+}
+
 // ============ Eligible Athletes ============
 
 export async function getEligibleAthletes(eventId: string, divisionId: string, clubId?: string): Promise<EligibleAthlete[]> {
