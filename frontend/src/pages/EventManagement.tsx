@@ -695,7 +695,12 @@ const EventManagement = () => {
                             ) : (
                               <div className="space-y-2">
                                 {currentEntries.map((entry) => (
-                                  <EnteredEntryCard key={entry.id} entry={entry} />
+                                  <EnteredEntryCard
+                                    key={entry.id}
+                                    entry={entry}
+                                    onDelete={() => handleDeleteEntry(entry)}
+                                    isDeleting={deleteEntryMutation.isPending && deleteEntryMutation.variables === entry.id}
+                                  />
                                 ))}
                               </div>
                             )}
