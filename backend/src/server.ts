@@ -19,6 +19,7 @@ import { router as reports } from "./routes/reports.js";
 import { router as clubs } from "./routes/clubs.js";
 import { router as users } from "./routes/users.js";
 import { router as belts } from "./routes/belts.js";
+import { router as documents } from "./routes/documents.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const { version: BACKEND_VERSION } = JSON.parse(
@@ -101,6 +102,7 @@ app.use("/api/reports", reports);
 app.use("/api/clubs", clubs);
 app.use("/api/users", users);
 app.use("/api/belts", belts);
+app.use("/api/documents", documents);
 
 app.use(errorHandler);
 

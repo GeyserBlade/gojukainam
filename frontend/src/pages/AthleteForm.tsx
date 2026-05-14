@@ -5,6 +5,7 @@ import { Button, Input, Label, Select, Textarea } from "../components/Input";
 import { Athlete, createAthlete, getAthlete, updateAthlete, Gender } from "../lib/athletes";
 import { listClubs, Club } from "../lib/clubs";
 import { listBelts, Belt } from "../lib/belts";
+import { DocumentSection } from "../components/DocumentSection";
 
 type Mode = "create" | "edit";
 
@@ -259,6 +260,15 @@ const AthleteFormPage = () => {
                 <Input type="url" value={form.photoUrl || ""} onChange={(e)=> setForm({ ...form, photoUrl: e.target.value })} />
               </div>
             </div>
+
+            {/* Documents Section */}
+            {mode === "edit" && id && (
+              <DocumentSection
+                entityFilter={{ athleteId: id }}
+                canUpload={canManage}
+                canDelete={role === "SUPERADMIN" || role === "ADMIN"}
+              />
+            )}
 
             {/* Submit Button */}
             <div className="pt-2">

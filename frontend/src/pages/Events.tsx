@@ -5,6 +5,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Input, Select } from "../components/Input";
 import { SkeletonList } from "../components/UIState";
 import { useToast, useApiErrorToast } from "../components/Toast";
+import { DocumentSection } from "../components/DocumentSection";
 import {
   listEvents,
   createEvent,
@@ -50,6 +51,7 @@ const Events = () => {
 
   const [activeTab, setActiveTab] = useState<Tab>("events");
   const [selectedEventId, setSelectedEventId] = useState<string>("");
+  const [docsEventId, setDocsEventId] = useState<string | null>(null);
   const [showEventModal, setShowEventModal] = useState(false);
   const [showDivisionModal, setShowDivisionModal] = useState(false);
   const [showWeightModal, setShowWeightModal] = useState(false);
@@ -547,7 +549,7 @@ const Events = () => {
                               <span>Entries: {event._count?.entries || 0}</span>
                             </div>
                           </div>
-                          <div className="flex gap-2">
+                          <div className="flex gap-2 flex-wrap">
                             <button
                               onClick={() => {
                                 setSelectedEventId(event.id);
@@ -556,6 +558,12 @@ const Events = () => {
                               className="px-3 py-1 bg-green-600/80 hover:bg-green-600 rounded text-xs"
                             >
                               Manage
+                            </button>
+                            <button
+                              onClick={() => setDocsEventId(docsEventId === event.id ? null : event.id)}
+                              className="px-3 py-1 bg-cyan-600/80 hover:bg-cyan-600 rounded text-xs"
+                            >
+                              Docs
                             </button>
                             <button
                               onClick={() => handleEditEvent(event)}
@@ -589,6 +597,15 @@ const Events = () => {
                              "Not available for entries"}
                           </span>
                         </div>
+                        {docsEventId === event.id && (
+                          <div className="mt-3 pt-3 border-t border-gray-700">
+                            <DocumentSection
+                              entityFilter={{ eventId: event.id }}
+                              canUpload={isAdmin}
+                              canDelete={isAdmin}
+                            />
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>

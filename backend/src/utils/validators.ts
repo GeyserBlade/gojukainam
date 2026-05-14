@@ -58,6 +58,27 @@ export const UpdateEntryStatus = z.object({
   reason: z.string().optional(), // stored in AuditLog
 });
 
+export const DocumentTypeEnum = z.enum([
+  "IDENTITY_DOCUMENT",
+  "CLUB_MEMBERSHIP_FORM",
+  "EVENT_ENTRY_FORM",
+  "MEDICAL_CLEARANCE",
+  "GRADING_CERTIFICATE",
+  "PHOTO",
+  "OTHER",
+]);
+
+export const RequestUploadBody = z.object({
+  documentType: DocumentTypeEnum,
+  label:        z.string().max(200).optional().nullable(),
+  filename:     z.string().min(1).max(255),
+  mimeType:     z.string().min(1).max(100),
+  sizeBytes:    z.number().int().positive(),
+  athleteId:    z.string().optional(),
+  eventId:      z.string().optional(),
+  clubId:       z.string().optional(),
+});
+
 export const BulkUpdateEntryStatus = z.object({
   eventId: z.string(),
   ids: z.array(z.string()).min(1),

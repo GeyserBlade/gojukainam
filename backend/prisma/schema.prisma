@@ -64,6 +64,16 @@ enum EventStatus {
   ARCHIVED    // Historical event
 }
 
+enum DocumentType {
+  IDENTITY_DOCUMENT
+  CLUB_MEMBERSHIP_FORM
+  EVENT_ENTRY_FORM
+  MEDICAL_CLEARANCE
+  GRADING_CERTIFICATE
+  PHOTO
+  OTHER
+}
+
 // ---------------- Models ----------------
 model User {
   id     String  @id @default(cuid())
@@ -80,6 +90,7 @@ model User {
 
   AuditLogs      AuditLog[]
   PasswordResets PasswordReset[]
+  documents      Document[]
 }
 
 model MagicLink {
@@ -116,11 +127,12 @@ model Club {
   phone       String?
   notes       String?
 
-  users    User[]
-  athletes Athlete[]
-  teams    Team[]
-  entries  Entry[]
-  invoices Invoice[]
+  users      User[]
+  athletes   Athlete[]
+  teams      Team[]
+  entries    Entry[]
+  invoices   Invoice[]
+  documents  Document[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -146,6 +158,7 @@ model Event {
   entries       Entry[]
   teams         Team[]
   invoices      Invoice[]
+  documents     Document[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -238,6 +251,7 @@ model Athlete {
 
   entries     Entry[]
   teamMembers TeamMember[]
+  documents   Document[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -350,4 +364,31 @@ model AuditLog {
   @@index([entityType, entityId])
   @@index([createdAt])
   @@index([userId])
+}
+
+model Document {
+  id           String       @id @default(cuid())
+  documentType DocumentType
+  label        String?
+  storageKey   String
+  filename     String
+  mimeType     String
+  sizeBytes    Int
+  uploadedById String
+  uploadedBy   User         @relation(fields: [uploadedById], references: [id])
+
+  athleteId    String?
+  athlete      Athlete?     @relation(fields: [athleteId], references: [id], onDelete: Cascade)
+  eventId      String?
+  event        Event?       @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  clubId       String?
+  club         Club?        @relation(fields: [clubId], references: [id], onDelete: Cascade)
+
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  @@index([athleteId])
+  @@index([eventId])
+  @@index([clubId])
+  @@index([uploadedById])
 }

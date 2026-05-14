@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import React, { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { Button, Input, Label, Textarea } from "../components/Input";
 import { SkeletonList, EmptyState, ErrorState } from "../components/UIState";
 import { useToast, useApiErrorToast } from "../components/Toast";
 import { createClub, deleteClub, listClubs, updateClub, type Club } from "../lib/clubs";
+import { DocumentSection } from "../components/DocumentSection";
 
 type ClubForm = {
   name: string;
@@ -58,6 +59,7 @@ const ClubsPage = () => {
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<ClubForm>(defaultForm);
+  const [docsClubId, setDocsClubId] = useState<string | null>(null);
 
   const loadClubs = () => {
     setLoading(true);
@@ -323,7 +325,8 @@ const ClubsPage = () => {
               </thead>
               <tbody className="divide-y divide-gray-800">
                 {filtered.map((club) => (
-                  <tr key={club.id} className="hover:bg-gray-900/40">
+                  <React.Fragment key={club.id}>
+                  <tr className="hover:bg-gray-900/40">
                     <td className="px-3 py-2 text-gray-100">{club.name}</td>
                     <td className="px-3 py-2 text-gray-300">{club.region ?? ""}</td>
                     <td className="px-3 py-2 text-gray-300">{club.contactName}</td>
@@ -336,6 +339,12 @@ const ClubsPage = () => {
                     <td className="px-3 py-2 text-gray-400 hidden xl:table-cell truncate max-w-[16rem]">{club.notes ?? ""}</td>
                     <td className="px-3 py-2">
                       <div className="text-right space-x-2">
+                        <button
+                          onClick={() => setDocsClubId(docsClubId === club.id ? null : club.id)}
+                          className="text-xs px-3 py-1 rounded bg-gray-600/80 hover:bg-gray-600 text-gray-100"
+                        >
+                          Docs
+                        </button>
                         {editingId === club.id ? (
                           <button
                             disabled
@@ -362,6 +371,18 @@ const ClubsPage = () => {
                       </div>
                     </td>
                   </tr>
+                  {docsClubId === club.id && (
+                    <tr>
+                      <td colSpan={11} className="px-4 pb-4">
+                        <DocumentSection
+                          entityFilter={{ clubId: club.id }}
+                          canUpload={canManage}
+                          canDelete={canManage}
+                        />
+                      </td>
+                    </tr>
+                  )}
+                  </React.Fragment>
                 ))}
                 {!filtered.length && (
                   <tr>
