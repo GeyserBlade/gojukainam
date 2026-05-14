@@ -71,11 +71,11 @@ function DocumentRow({
         </div>
       </div>
       <div className="flex items-center gap-2 shrink-0">
-        <ActionButton variant="secondary" onClick={handleView} disabled={loading}>
+        <ActionButton type="button" variant="secondary" onClick={handleView} disabled={loading}>
           {loading ? <Spinner size={14} /> : "View"}
         </ActionButton>
         {canDelete && (
-          <ActionButton variant="danger" onClick={() => onDelete(doc.id)}>
+          <ActionButton type="button" variant="danger" onClick={() => onDelete(doc.id)}>
             Delete
           </ActionButton>
         )}
@@ -196,6 +196,7 @@ export function DocumentSection({ entityFilter, canUpload, canDelete, title = "D
               disabled={uploading}
             />
             <ActionButton
+              type="button"
               variant="primary"
               onClick={() => fileInputRef.current?.click()}
               disabled={uploading}
