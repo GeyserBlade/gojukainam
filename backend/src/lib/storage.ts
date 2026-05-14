@@ -1,9 +1,13 @@
-import { createClient } from "@supabase/supabase-js";
+import { StorageClient } from "@supabase/storage-js";
 import { randomUUID } from "crypto";
 
-export const supabase = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
+// Use storage-js directly to avoid the realtime/WebSocket dependency in supabase-js
+export const storage = new StorageClient(
+  `${process.env.SUPABASE_URL}/storage/v1`,
+  {
+    apikey: process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY!}`,
+  }
 );
 
 const BUCKET = process.env.SUPABASE_BUCKET_NAME ?? "documents";
@@ -27,18 +31,18 @@ export function buildStorageKey(
 }
 
 export async function createUploadUrl(key: string): Promise<string> {
-  const { data, error } = await supabase.storage.from(BUCKET).createSignedUploadUrl(key);
+  const { data, error } = await storage.from(BUCKET).createSignedUploadUrl(key);
   if (error || !data) throw new Error(`Failed to create upload URL: ${error?.message}`);
   return data.signedUrl;
 }
 
 export async function createDownloadUrl(key: string): Promise<string> {
-  const { data, error } = await supabase.storage.from(BUCKET).createSignedUrl(key, TTL);
+  const { data, error } = await storage.from(BUCKET).createSignedUrl(key, TTL);
   if (error || !data) throw new Error(`Failed to create download URL: ${error?.message}`);
   return data.signedUrl;
 }
 
 export async function deleteObject(key: string): Promise<void> {
-  const { error } = await supabase.storage.from(BUCKET).remove([key]);
+  const { error } = await storage.from(BUCKET).remove([key]);
   if (error) throw new Error(`Failed to delete object: ${error.message}`);
 }
