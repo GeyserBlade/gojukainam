@@ -1,175 +1,192 @@
-import { useState, useEffect } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
-import { Button, Input, Label } from "../components/Input";
-import { api } from "../lib/api";
+import { useState, useEffect } from "react"
+import { useNavigate, useSearchParams } from "react-router-dom"
+import { AlertCircle, ArrowLeft } from "lucide-react"
+
+import { api } from "@/lib/api"
+import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { cn } from "@/lib/utils"
+
+const STRENGTH_LABELS = [
+  { label: "Very weak", color: "text-destructive", bar: "bg-destructive" },
+  { label: "Weak", color: "text-belt-orange", bar: "bg-belt-orange" },
+  { label: "Fair", color: "text-belt-yellow", bar: "bg-belt-yellow" },
+  { label: "Good", color: "text-belt-green", bar: "bg-belt-green" },
+  { label: "Strong", color: "text-belt-green", bar: "bg-belt-green" },
+]
 
 const ResetPasswordPage = () => {
-  const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
-  const token = searchParams.get("token");
+  const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const token = searchParams.get("token")
 
-  const [newPassword, setNewPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [passwordStrength, setPasswordStrength] = useState(0);
+  const [newPassword, setNewPassword] = useState("")
+  const [confirmPassword, setConfirmPassword] = useState("")
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [passwordStrength, setPasswordStrength] = useState(0)
 
   useEffect(() => {
-    if (!token) {
-      setError("Invalid or missing reset token");
-    }
-  }, [token]);
+    if (!token) setError("Invalid or missing reset token")
+  }, [token])
 
-  // Calculate password strength
   useEffect(() => {
     if (!newPassword) {
-      setPasswordStrength(0);
-      return;
+      setPasswordStrength(0)
+      return
     }
-
-    let score = 0;
-    if (newPassword.length >= 8) score++;
-    if (newPassword.length >= 12) score++;
-    if (/[A-Z]/.test(newPassword) && /[a-z]/.test(newPassword)) score++;
-    if (/[0-9]/.test(newPassword)) score++;
-    if (/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(newPassword)) score++;
-
-    setPasswordStrength(Math.min(score, 4));
-  }, [newPassword]);
-
-  const getStrengthLabel = () => {
-    switch (passwordStrength) {
-      case 0: return { label: "Very Weak", color: "text-red-400" };
-      case 1: return { label: "Weak", color: "text-orange-400" };
-      case 2: return { label: "Fair", color: "text-yellow-400" };
-      case 3: return { label: "Good", color: "text-green-400" };
-      case 4: return { label: "Strong", color: "text-green-500" };
-      default: return { label: "", color: "" };
-    }
-  };
+    let score = 0
+    if (newPassword.length >= 8) score++
+    if (newPassword.length >= 12) score++
+    if (/[A-Z]/.test(newPassword) && /[a-z]/.test(newPassword)) score++
+    if (/[0-9]/.test(newPassword)) score++
+    if (/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(newPassword)) score++
+    setPasswordStrength(Math.min(score, 4))
+  }, [newPassword])
 
   async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setError(null);
+    e.preventDefault()
+    setError(null)
 
     if (!token) {
-      setError("Invalid or missing reset token");
-      return;
+      setError("Invalid or missing reset token")
+      return
     }
-
     if (newPassword !== confirmPassword) {
-      setError("Passwords do not match");
-      return;
+      setError("Passwords do not match")
+      return
     }
-
     if (newPassword.length < 8) {
-      setError("Password must be at least 8 characters long");
-      return;
+      setError("Password must be at least 8 characters")
+      return
     }
 
-    setLoading(true);
-
+    setLoading(true)
     try {
-      await api.post("/auth/password-reset", {
-        token,
-        newPassword
-      });
-
-      // Success - redirect to sign in
+      await api.post("/auth/password-reset", { token, newPassword })
       navigate("/signin", {
-        state: { message: "Password reset successfully! You can now sign in with your new password." }
-      });
-    } catch (err: any) {
-      setError(err?.response?.data?.error || err.message || "Failed to reset password");
+        state: { message: "Password reset successfully! You can now sign in." },
+      })
+    } catch (err) {
+      const e = err as { response?: { data?: { error?: string } }; message?: string }
+      setError(e?.response?.data?.error ?? e?.message ?? "Failed to reset password")
     } finally {
-      setLoading(false);
+      setLoading(false)
     }
   }
 
-  const strength = getStrengthLabel();
+  const strength = STRENGTH_LABELS[passwordStrength]
+  const barWidth = ["w-0", "w-1/4", "w-2/4", "w-3/4", "w-full"][passwordStrength]
 
   return (
-    <div className="min-h-screen bg-gray-950 text-gray-100 flex items-center justify-center p-6">
-      <div className="max-w-md w-full">
-        <div className="bg-gray-900 rounded-xl border border-gray-800 p-8">
-          <div className="text-center mb-6">
-            <h1 className="text-2xl font-semibold mb-2">Reset Your Password</h1>
-            <p className="text-sm text-gray-400">
+    <div className="min-h-screen bg-background flex flex-col items-center justify-center px-4 py-8">
+      <div className="w-full max-w-md">
+        <div className="text-center mb-8">
+          <h1 className="font-display text-4xl sm:text-5xl tracking-wider leading-none">
+            GOJU KAI <span className="text-primary">NAMIBIA</span>
+          </h1>
+        </div>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Reset your password</CardTitle>
+            <p className="text-sm text-muted-foreground mt-1">
               Enter your new password below.
             </p>
-          </div>
-
-          {error && (
-            <div className="mb-4 p-3 rounded-lg bg-red-600/10 border border-red-600/20">
-              <p className="text-sm text-red-400">{error}</p>
-            </div>
-          )}
-
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <Label required>New Password</Label>
-              <Input
-                type="password"
-                required
-                value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
-                placeholder="Enter new password"
-                autoFocus
-              />
-              {newPassword && (
-                <div className="mt-2">
-                  <div className="flex items-center gap-2 mb-1">
-                    <div className="flex-1 h-1 rounded-full bg-gray-800 overflow-hidden">
-                      <div
-                        className={`h-full transition-all ${
-                          passwordStrength === 0 ? "w-0" :
-                          passwordStrength === 1 ? "w-1/4 bg-red-500" :
-                          passwordStrength === 2 ? "w-1/2 bg-orange-500" :
-                          passwordStrength === 3 ? "w-3/4 bg-yellow-500" :
-                          "w-full bg-green-500"
-                        }`}
-                      />
-                    </div>
-                    <span className={`text-xs font-medium ${strength.color}`}>
-                      {strength.label}
-                    </span>
-                  </div>
-                  <p className="text-xs text-gray-400">
-                    Password must contain: uppercase, lowercase, number, and special character
-                  </p>
-                </div>
-              )}
-            </div>
-
-            <div>
-              <Label required>Confirm Password</Label>
-              <Input
-                type="password"
-                required
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                placeholder="Confirm new password"
-              />
-            </div>
-
-            <Button type="submit" disabled={loading || !token} className="w-full">
-              {loading ? "Resetting..." : "Reset Password"}
-            </Button>
-
-            <div className="text-center">
-              <button
-                type="button"
-                onClick={() => navigate("/signin")}
-                className="text-sm text-cyan-400 hover:text-cyan-300"
+          </CardHeader>
+          <CardContent>
+            {error && (
+              <div
+                role="alert"
+                className="mb-4 flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/5 p-3"
               >
-                Back to Sign In
-              </button>
-            </div>
-          </form>
-        </div>
+                <AlertCircle className="size-4 text-destructive shrink-0 mt-0.5" />
+                <p className="text-sm text-destructive">{error}</p>
+              </div>
+            )}
+
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div>
+                <Label htmlFor="newPassword" className="mb-1.5">
+                  New password
+                </Label>
+                <Input
+                  id="newPassword"
+                  type="password"
+                  required
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  placeholder="Enter new password"
+                  autoFocus
+                  autoComplete="new-password"
+                />
+                {newPassword && (
+                  <div className="mt-2">
+                    <div className="flex items-center gap-2 mb-1">
+                      <div className="flex-1 h-1 rounded-full bg-muted overflow-hidden">
+                        <div
+                          className={cn(
+                            "h-full transition-all",
+                            barWidth,
+                            passwordStrength > 0 && strength.bar,
+                          )}
+                        />
+                      </div>
+                      {passwordStrength > 0 && (
+                        <span className={cn("text-xs font-medium", strength.color)}>
+                          {strength.label}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Use uppercase, lowercase, number, and special character.
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <Label htmlFor="confirmPassword" className="mb-1.5">
+                  Confirm password
+                </Label>
+                <Input
+                  id="confirmPassword"
+                  type="password"
+                  required
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  placeholder="Confirm new password"
+                  autoComplete="new-password"
+                />
+              </div>
+
+              <Button
+                type="submit"
+                disabled={loading || !token}
+                className="w-full"
+                size="lg"
+              >
+                {loading ? "Resetting..." : "Reset password"}
+              </Button>
+
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => navigate("/signin")}
+                className="w-full"
+              >
+                <ArrowLeft />
+                Back to sign in
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
       </div>
     </div>
-  );
-};
+  )
+}
 
-export default ResetPasswordPage;
+export default ResetPasswordPage

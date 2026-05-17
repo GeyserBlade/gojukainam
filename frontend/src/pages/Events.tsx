@@ -1,11 +1,62 @@
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { useAuth } from "../contexts/AuthContext";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Input, Select } from "../components/Input";
-import { SkeletonList } from "../components/UIState";
-import { useToast, useApiErrorToast } from "../components/Toast";
-import { DocumentSection } from "../components/DocumentSection";
+import { useState } from "react"
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+import {
+  CalendarDays,
+  FileText,
+  Layers,
+  MoreHorizontal,
+  PlusCircle,
+  Scale,
+  Sparkles,
+} from "lucide-react"
+
+import { useAuth } from "@/contexts/AuthContext"
+import { useToast, useApiErrorToast } from "@/components/Toast"
+import { useConfirm } from "@/components/ConfirmDialog"
+import { AppShell } from "@/components/layout/AppShell"
+import { DocumentSection } from "@/components/DocumentSection"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet"
+import { Skeleton } from "@/components/ui/skeleton"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { cn } from "@/lib/utils"
 import {
   listEvents,
   createEvent,
@@ -30,42 +81,44 @@ import {
   type CreateDivisionDto,
   type CreateWeightClassDto,
   type TemplateId,
-} from "../lib/events";
+} from "@/lib/events"
 
-type Tab = "events" | "divisions" | "weights";
+type Tab = "events" | "divisions" | "weights"
 
-const EVENT_STATUS_STYLES = {
-  DRAFT: { bg: "bg-gray-600/30", text: "text-gray-300", label: "Draft" },
-  ACTIVE: { bg: "bg-green-600/30", text: "text-green-300", label: "Active" },
-  CLOSED: { bg: "bg-amber-600/30", text: "text-amber-300", label: "Closed" },
-  ARCHIVED: { bg: "bg-gray-700/30", text: "text-gray-400", label: "Archived" },
-};
+const STATUS_STYLES: Record<EventStatus, string> = {
+  DRAFT: "bg-muted text-muted-foreground border-border",
+  ACTIVE: "bg-belt-green/15 text-belt-green border-belt-green/30",
+  CLOSED: "bg-belt-orange/15 text-belt-orange border-belt-orange/30",
+  ARCHIVED: "bg-muted/60 text-muted-foreground/70 border-border",
+}
 
-const Events = () => {
-  const { role } = useAuth();
-  const navigate = useNavigate();
-  const queryClient = useQueryClient();
-  const toast = useToast();
-  const showApiError = useApiErrorToast();
-  const isAdmin = role === "SUPERADMIN" || role === "ADMIN";
+const CATEGORY_STYLES = {
+  KATA: "bg-belt-blue/15 text-belt-blue border-belt-blue/30",
+  KUMITE: "bg-flag-red/15 text-flag-red border-flag-red/30",
+}
 
-  const [activeTab, setActiveTab] = useState<Tab>("events");
-  const [selectedEventId, setSelectedEventId] = useState<string>("");
-  const [docsEventId, setDocsEventId] = useState<string | null>(null);
-  const [showEventModal, setShowEventModal] = useState(false);
-  const [showDivisionModal, setShowDivisionModal] = useState(false);
-  const [showWeightModal, setShowWeightModal] = useState(false);
-  const [showTemplateModal, setShowTemplateModal] = useState(false);
-  const [editingEvent, setEditingEvent] = useState<Event | null>(null);
-  const [editingDivision, setEditingDivision] = useState<Division | null>(null);
-  const [editingWeight, setEditingWeight] = useState<WeightClass | null>(null);
+const EventsAdmin = () => {
+  const { role } = useAuth()
+  const queryClient = useQueryClient()
+  const toast = useToast()
+  const showApiError = useApiErrorToast()
+  const confirm = useConfirm()
+  const isAdmin = role === "SUPERADMIN" || role === "ADMIN"
 
-  // Template to apply after a new event is created (empty = none)
-  const [templateForNewEvent, setTemplateForNewEvent] = useState<TemplateId | "">("");
-  // Template selected in the standalone "Apply Template" modal
-  const [templateToApply, setTemplateToApply] = useState<TemplateId | "">("");
+  const [activeTab, setActiveTab] = useState<Tab>("events")
+  const [selectedEventId, setSelectedEventId] = useState<string>("")
+  const [docsEvent, setDocsEvent] = useState<Event | null>(null)
+  const [showEventModal, setShowEventModal] = useState(false)
+  const [showDivisionModal, setShowDivisionModal] = useState(false)
+  const [showWeightModal, setShowWeightModal] = useState(false)
+  const [showTemplateModal, setShowTemplateModal] = useState(false)
+  const [editingEvent, setEditingEvent] = useState<Event | null>(null)
+  const [editingDivision, setEditingDivision] = useState<Division | null>(null)
+  const [editingWeight, setEditingWeight] = useState<WeightClass | null>(null)
 
-  // Event form state
+  const [templateForNewEvent, setTemplateForNewEvent] = useState<TemplateId | "">("")
+  const [templateToApply, setTemplateToApply] = useState<TemplateId | "">("")
+
   const [eventForm, setEventForm] = useState<CreateEventDto>({
     name: "",
     venue: "",
@@ -74,9 +127,8 @@ const Events = () => {
     startDate: "",
     regOpen: "",
     regClose: "",
-  });
+  })
 
-  // Division form state
   const [divisionForm, setDivisionForm] = useState<CreateDivisionDto>({
     eventId: "",
     key: "",
@@ -85,209 +137,40 @@ const Events = () => {
     maxAge: 0,
     gender: "Male",
     category: "KATA",
-  });
+  })
 
-  // Weight class form state
   const [weightForm, setWeightForm] = useState<CreateWeightClassDto>({
     eventId: "",
     gender: "Male",
     name: "",
     minKg: undefined,
     maxKg: undefined,
-  });
+  })
 
-  // Fetch events
   const { data: events = [], isLoading: loadingEvents } = useQuery({
     queryKey: ["events"],
     queryFn: listEvents,
-  });
+  })
 
-  // Fetch available templates (cached for the session — the list rarely changes)
   const { data: templates = [] } = useQuery({
     queryKey: ["eventTemplates"],
     queryFn: listTemplates,
     staleTime: 1000 * 60 * 60,
-  });
+  })
 
-  // Fetch divisions for selected event
   const { data: divisions = [], isLoading: loadingDivisions } = useQuery({
     queryKey: ["divisions", selectedEventId],
     queryFn: () => getDivisions(selectedEventId),
     enabled: !!selectedEventId && activeTab === "divisions",
-  });
+  })
 
-  // Fetch weight classes for selected event
   const { data: weightClasses = [], isLoading: loadingWeights } = useQuery({
     queryKey: ["weightClasses", selectedEventId],
     queryFn: () => getWeightClasses(selectedEventId),
     enabled: !!selectedEventId && activeTab === "weights",
-  });
+  })
 
-  // Event mutations
-  const createEventMutation = useMutation({
-    mutationFn: createEvent,
-    onSuccess: async (event) => {
-      queryClient.invalidateQueries({ queryKey: ["events"] });
-      setShowEventModal(false);
-      resetEventForm();
-
-      // If the user selected a template on the create form, apply it now.
-      if (templateForNewEvent) {
-        const chosen = templateForNewEvent;
-        setTemplateForNewEvent("");
-        try {
-          const result = await applyTemplate(event.id, chosen);
-          queryClient.invalidateQueries({ queryKey: ["events"] });
-          queryClient.invalidateQueries({ queryKey: ["divisions", event.id] });
-          queryClient.invalidateQueries({ queryKey: ["weightClasses", event.id] });
-          toast.success(`Event created. ${result.message}`);
-        } catch (err) {
-          toast.success("Event created");
-          showApiError(err, "Event created, but template failed to apply");
-        }
-      } else {
-        toast.success("Event created");
-      }
-    },
-    onError: (error) => {
-      showApiError(error, "Failed to create event");
-    },
-  });
-
-  const applyTemplateMutation = useMutation({
-    mutationFn: ({ eventId, template }: { eventId: string; template: TemplateId }) =>
-      applyTemplate(eventId, template),
-    onSuccess: (result, { eventId }) => {
-      queryClient.invalidateQueries({ queryKey: ["events"] });
-      queryClient.invalidateQueries({ queryKey: ["divisions", eventId] });
-      queryClient.invalidateQueries({ queryKey: ["weightClasses", eventId] });
-      setShowTemplateModal(false);
-      setTemplateToApply("");
-      toast.success(result.message);
-    },
-    onError: (error) => {
-      showApiError(error, "Failed to apply template");
-    },
-  });
-
-  const updateEventMutation = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: Partial<CreateEventDto> }) => updateEvent(id, data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["events"] });
-      setShowEventModal(false);
-      setEditingEvent(null);
-      resetEventForm();
-    },
-    onError: (error) => {
-      showApiError(error, "Failed to update event");
-    },
-  });
-
-  const updateEventStatusMutation = useMutation({
-    mutationFn: ({ id, status }: { id: string; status: EventStatus }) => updateEventStatus(id, status),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["events"] });
-    },
-    onError: (error) => {
-      showApiError(error, "Failed to update event status");
-    },
-  });
-
-  const deleteEventMutation = useMutation({
-    mutationFn: deleteEvent,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["events"] });
-      if (selectedEventId === editingEvent?.id) {
-        setSelectedEventId("");
-      }
-    },
-    onError: (error) => {
-      showApiError(error, "Failed to delete event");
-    },
-  });
-
-  // Division mutations
-  const createDivisionMutation = useMutation({
-    mutationFn: createDivision,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["divisions"] });
-      queryClient.invalidateQueries({ queryKey: ["event"] });
-      setShowDivisionModal(false);
-      resetDivisionForm();
-    },
-    onError: (error) => {
-      showApiError(error, "Failed to create division");
-    },
-  });
-
-  const updateDivisionMutation = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: Partial<Omit<CreateDivisionDto, "eventId">> }) =>
-      updateDivision(id, data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["divisions"] });
-      queryClient.invalidateQueries({ queryKey: ["event"] });
-      setShowDivisionModal(false);
-      setEditingDivision(null);
-      resetDivisionForm();
-    },
-    onError: (error) => {
-      showApiError(error, "Failed to update division");
-    },
-  });
-
-  const deleteDivisionMutation = useMutation({
-    mutationFn: deleteDivision,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["divisions"] });
-      queryClient.invalidateQueries({ queryKey: ["event"] });
-    },
-    onError: (error) => {
-      showApiError(error, "Failed to delete division");
-    },
-  });
-
-  // Weight class mutations
-  const createWeightMutation = useMutation({
-    mutationFn: createWeightClass,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["weightClasses"] });
-      queryClient.invalidateQueries({ queryKey: ["event"] });
-      setShowWeightModal(false);
-      resetWeightForm();
-    },
-    onError: (error) => {
-      showApiError(error, "Failed to create weight class");
-    },
-  });
-
-  const updateWeightMutation = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: Partial<Omit<CreateWeightClassDto, "eventId">> }) =>
-      updateWeightClass(id, data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["weightClasses"] });
-      queryClient.invalidateQueries({ queryKey: ["event"] });
-      setShowWeightModal(false);
-      setEditingWeight(null);
-      resetWeightForm();
-    },
-    onError: (error) => {
-      showApiError(error, "Failed to update weight class");
-    },
-  });
-
-  const deleteWeightMutation = useMutation({
-    mutationFn: deleteWeightClass,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["weightClasses"] });
-      queryClient.invalidateQueries({ queryKey: ["event"] });
-    },
-    onError: (error) => {
-      showApiError(error, "Failed to delete weight class");
-    },
-  });
-
-  // Form handlers
-  const resetEventForm = () => {
+  const resetEventForm = () =>
     setEventForm({
       name: "",
       venue: "",
@@ -296,10 +179,9 @@ const Events = () => {
       startDate: "",
       regOpen: "",
       regClose: "",
-    });
-  };
+    })
 
-  const resetDivisionForm = () => {
+  const resetDivisionForm = () =>
     setDivisionForm({
       eventId: selectedEventId,
       key: "",
@@ -308,33 +190,172 @@ const Events = () => {
       maxAge: 0,
       gender: "Male",
       category: "KATA",
-    });
-  };
+    })
 
-  const resetWeightForm = () => {
+  const resetWeightForm = () =>
     setWeightForm({
       eventId: selectedEventId,
       gender: "Male",
       name: "",
       minKg: undefined,
       maxKg: undefined,
-    });
-  };
+    })
+
+  const createEventMutation = useMutation({
+    mutationFn: createEvent,
+    onSuccess: async (event) => {
+      queryClient.invalidateQueries({ queryKey: ["events"] })
+      setShowEventModal(false)
+      resetEventForm()
+      if (templateForNewEvent) {
+        const chosen = templateForNewEvent
+        setTemplateForNewEvent("")
+        try {
+          const result = await applyTemplate(event.id, chosen)
+          queryClient.invalidateQueries({ queryKey: ["events"] })
+          queryClient.invalidateQueries({ queryKey: ["divisions", event.id] })
+          queryClient.invalidateQueries({ queryKey: ["weightClasses", event.id] })
+          toast.success(`Event created. ${result.message}`)
+        } catch (err) {
+          toast.success("Event created")
+          showApiError(err, "Event created, but template failed to apply")
+        }
+      } else {
+        toast.success("Event created")
+      }
+    },
+    onError: (e) => showApiError(e, "Failed to create event"),
+  })
+
+  const applyTemplateMutation = useMutation({
+    mutationFn: ({ eventId, template }: { eventId: string; template: TemplateId }) =>
+      applyTemplate(eventId, template),
+    onSuccess: (result, { eventId }) => {
+      queryClient.invalidateQueries({ queryKey: ["events"] })
+      queryClient.invalidateQueries({ queryKey: ["divisions", eventId] })
+      queryClient.invalidateQueries({ queryKey: ["weightClasses", eventId] })
+      setShowTemplateModal(false)
+      setTemplateToApply("")
+      toast.success(result.message)
+    },
+    onError: (e) => showApiError(e, "Failed to apply template"),
+  })
+
+  const updateEventMutation = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: Partial<CreateEventDto> }) =>
+      updateEvent(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["events"] })
+      setShowEventModal(false)
+      setEditingEvent(null)
+      resetEventForm()
+      toast.success("Event updated")
+    },
+    onError: (e) => showApiError(e, "Failed to update event"),
+  })
+
+  const updateEventStatusMutation = useMutation({
+    mutationFn: ({ id, status }: { id: string; status: EventStatus }) =>
+      updateEventStatus(id, status),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["events"] }),
+    onError: (e) => showApiError(e, "Failed to update event status"),
+  })
+
+  const deleteEventMutation = useMutation({
+    mutationFn: deleteEvent,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["events"] })
+      if (selectedEventId === editingEvent?.id) setSelectedEventId("")
+      toast.success("Event deleted")
+    },
+    onError: (e) => showApiError(e, "Failed to delete event"),
+  })
+
+  const createDivisionMutation = useMutation({
+    mutationFn: createDivision,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["divisions"] })
+      setShowDivisionModal(false)
+      resetDivisionForm()
+      toast.success("Division created")
+    },
+    onError: (e) => showApiError(e, "Failed to create division"),
+  })
+
+  const updateDivisionMutation = useMutation({
+    mutationFn: ({
+      id,
+      data,
+    }: {
+      id: string
+      data: Partial<Omit<CreateDivisionDto, "eventId">>
+    }) => updateDivision(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["divisions"] })
+      setShowDivisionModal(false)
+      setEditingDivision(null)
+      resetDivisionForm()
+      toast.success("Division updated")
+    },
+    onError: (e) => showApiError(e, "Failed to update division"),
+  })
+
+  const deleteDivisionMutation = useMutation({
+    mutationFn: deleteDivision,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["divisions"] })
+      toast.success("Division deleted")
+    },
+    onError: (e) => showApiError(e, "Failed to delete division"),
+  })
+
+  const createWeightMutation = useMutation({
+    mutationFn: createWeightClass,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["weightClasses"] })
+      setShowWeightModal(false)
+      resetWeightForm()
+      toast.success("Weight class created")
+    },
+    onError: (e) => showApiError(e, "Failed to create weight class"),
+  })
+
+  const updateWeightMutation = useMutation({
+    mutationFn: ({
+      id,
+      data,
+    }: {
+      id: string
+      data: Partial<Omit<CreateWeightClassDto, "eventId">>
+    }) => updateWeightClass(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["weightClasses"] })
+      setShowWeightModal(false)
+      setEditingWeight(null)
+      resetWeightForm()
+      toast.success("Weight class updated")
+    },
+    onError: (e) => showApiError(e, "Failed to update weight class"),
+  })
+
+  const deleteWeightMutation = useMutation({
+    mutationFn: deleteWeightClass,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["weightClasses"] })
+      toast.success("Weight class deleted")
+    },
+    onError: (e) => showApiError(e, "Failed to delete weight class"),
+  })
 
   const handleCreateEvent = () => {
-    setEditingEvent(null);
-    resetEventForm();
-    setTemplateForNewEvent("");
-    setShowEventModal(true);
-  };
-
-  const handleApplyTemplate = () => {
-    if (!selectedEventId || !templateToApply) return;
-    applyTemplateMutation.mutate({ eventId: selectedEventId, template: templateToApply });
-  };
+    setEditingEvent(null)
+    resetEventForm()
+    setTemplateForNewEvent("")
+    setShowEventModal(true)
+  }
 
   const handleEditEvent = (event: Event) => {
-    setEditingEvent(event);
+    setEditingEvent(event)
     setEventForm({
       name: event.name,
       venue: event.venue,
@@ -343,32 +364,37 @@ const Events = () => {
       startDate: event.startDate.split("T")[0],
       regOpen: event.regOpen.split("T")[0],
       regClose: event.regClose.split("T")[0],
-    });
-    setShowEventModal(true);
-  };
+    })
+    setShowEventModal(true)
+  }
 
-  const handleSaveEvent = () => {
+  const handleSaveEvent = (e: React.FormEvent) => {
+    e.preventDefault()
     if (editingEvent) {
-      updateEventMutation.mutate({ id: editingEvent.id, data: eventForm });
+      updateEventMutation.mutate({ id: editingEvent.id, data: eventForm })
     } else {
-      createEventMutation.mutate(eventForm);
+      createEventMutation.mutate(eventForm)
     }
-  };
+  }
 
-  const handleDeleteEvent = (event: Event) => {
-    if (confirm(`Delete event "${event.name}"? This cannot be undone.`)) {
-      deleteEventMutation.mutate(event.id);
-    }
-  };
+  const handleDeleteEvent = async (event: Event) => {
+    const ok = await confirm({
+      title: `Delete event "${event.name}"?`,
+      description: "This cannot be undone.",
+      confirmText: "Delete",
+      destructive: true,
+    })
+    if (ok) deleteEventMutation.mutate(event.id)
+  }
 
   const handleCreateDivision = () => {
-    setEditingDivision(null);
-    resetDivisionForm();
-    setShowDivisionModal(true);
-  };
+    setEditingDivision(null)
+    resetDivisionForm()
+    setShowDivisionModal(true)
+  }
 
   const handleEditDivision = (division: Division) => {
-    setEditingDivision(division);
+    setEditingDivision(division)
     setDivisionForm({
       eventId: division.eventId,
       key: division.key,
@@ -378,34 +404,40 @@ const Events = () => {
       gender: division.gender,
       category: division.category,
       notes: division.notes || undefined,
-    });
-    setShowDivisionModal(true);
-  };
+    })
+    setShowDivisionModal(true)
+  }
 
-  const handleSaveDivision = () => {
-    const data = { ...divisionForm, eventId: selectedEventId };
+  const handleSaveDivision = (e: React.FormEvent) => {
+    e.preventDefault()
+    const data = { ...divisionForm, eventId: selectedEventId }
     if (editingDivision) {
-      const { eventId, ...updateData } = data;
-      updateDivisionMutation.mutate({ id: editingDivision.id, data: updateData });
+      const { eventId: _ignored, ...updateData } = data
+      void _ignored
+      updateDivisionMutation.mutate({ id: editingDivision.id, data: updateData })
     } else {
-      createDivisionMutation.mutate(data);
+      createDivisionMutation.mutate(data)
     }
-  };
+  }
 
-  const handleDeleteDivision = (division: Division) => {
-    if (confirm(`Delete division "${division.name}"? This cannot be undone.`)) {
-      deleteDivisionMutation.mutate(division.id);
-    }
-  };
+  const handleDeleteDivision = async (division: Division) => {
+    const ok = await confirm({
+      title: `Delete division "${division.name}"?`,
+      description: "This cannot be undone.",
+      confirmText: "Delete",
+      destructive: true,
+    })
+    if (ok) deleteDivisionMutation.mutate(division.id)
+  }
 
   const handleCreateWeight = () => {
-    setEditingWeight(null);
-    resetWeightForm();
-    setShowWeightModal(true);
-  };
+    setEditingWeight(null)
+    resetWeightForm()
+    setShowWeightModal(true)
+  }
 
   const handleEditWeight = (weight: WeightClass) => {
-    setEditingWeight(weight);
+    setEditingWeight(weight)
     setWeightForm({
       eventId: weight.eventId,
       divisionId: weight.divisionId || undefined,
@@ -413,717 +445,865 @@ const Events = () => {
       name: weight.name,
       minKg: weight.minKg || undefined,
       maxKg: weight.maxKg || undefined,
-    });
-    setShowWeightModal(true);
-  };
+    })
+    setShowWeightModal(true)
+  }
 
-  const handleSaveWeight = () => {
-    const data = { ...weightForm, eventId: selectedEventId };
+  const handleSaveWeight = (e: React.FormEvent) => {
+    e.preventDefault()
+    const data = { ...weightForm, eventId: selectedEventId }
     if (editingWeight) {
-      const { eventId, ...updateData } = data;
-      updateWeightMutation.mutate({ id: editingWeight.id, data: updateData });
+      const { eventId: _ignored, ...updateData } = data
+      void _ignored
+      updateWeightMutation.mutate({ id: editingWeight.id, data: updateData })
     } else {
-      createWeightMutation.mutate(data);
+      createWeightMutation.mutate(data)
     }
-  };
+  }
 
-  const handleDeleteWeight = (weight: WeightClass) => {
-    if (confirm(`Delete weight class "${weight.name}"? This cannot be undone.`)) {
-      deleteWeightMutation.mutate(weight.id);
-    }
-  };
+  const handleDeleteWeight = async (weight: WeightClass) => {
+    const ok = await confirm({
+      title: `Delete weight class "${weight.name}"?`,
+      description: "This cannot be undone.",
+      confirmText: "Delete",
+      destructive: true,
+    })
+    if (ok) deleteWeightMutation.mutate(weight.id)
+  }
 
   if (!isAdmin) {
     return (
-      <div className="min-h-screen bg-gray-950 text-gray-100 p-4">
-        <div className="max-w-7xl mx-auto">
-          <div className="flex items-center justify-between mb-6">
-            <h1 className="text-2xl font-semibold">Event Administration</h1>
-            <button className="text-sm text-gray-400 hover:text-white" onClick={() => navigate("/dashboard")}>
-              Back to Dashboard
-            </button>
-          </div>
-          <p className="text-sm text-gray-400">You do not have permission to manage events.</p>
-        </div>
-      </div>
-    );
+      <AppShell title="Event admin">
+        <Card>
+          <CardContent className="py-10 text-center">
+            <p className="text-sm text-muted-foreground">
+              You don't have permission to manage events.
+            </p>
+          </CardContent>
+        </Card>
+      </AppShell>
+    )
   }
 
-  const selectedEvent = events.find((e) => e.id === selectedEventId);
+  const selectedEvent = events.find((e) => e.id === selectedEventId)
 
   return (
-    <div className="min-h-screen bg-gray-950 text-gray-100 p-4">
-      <div className="max-w-7xl mx-auto">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-6">
-          <h1 className="text-2xl font-semibold">Event Administration</h1>
-          <button className="text-sm text-gray-400 hover:text-white" onClick={() => navigate("/dashboard")}>
-            Back to Dashboard
-          </button>
-        </div>
+    <AppShell title="Event admin">
+      <div className="mb-4 sm:mb-6">
+        <h1 className="font-display text-3xl sm:text-4xl tracking-wider">
+          EVENT ADMIN
+        </h1>
+        <p className="text-xs text-muted-foreground mt-1">
+          {events.length} event{events.length === 1 ? "" : "s"}
+        </p>
+      </div>
 
-        {/* Tabs */}
-        <div className="bg-gray-900 rounded-lg mb-6">
-          <div className="flex border-b border-gray-800">
-            <button
-              className={`px-6 py-3 text-sm font-medium ${
-                activeTab === "events"
-                  ? "text-white border-b-2 border-blue-500"
-                  : "text-gray-400 hover:text-gray-200"
-              }`}
-              onClick={() => setActiveTab("events")}
-            >
-              Events
-            </button>
-            <button
-              className={`px-6 py-3 text-sm font-medium ${
-                activeTab === "divisions"
-                  ? "text-white border-b-2 border-blue-500"
-                  : "text-gray-400 hover:text-gray-200"
-              }`}
-              onClick={() => setActiveTab("divisions")}
-              disabled={!selectedEventId}
-            >
-              Divisions {selectedEvent && `(${selectedEvent.name})`}
-            </button>
-            <button
-              className={`px-6 py-3 text-sm font-medium ${
-                activeTab === "weights"
-                  ? "text-white border-b-2 border-blue-500"
-                  : "text-gray-400 hover:text-gray-200"
-              }`}
-              onClick={() => setActiveTab("weights")}
-              disabled={!selectedEventId}
-            >
-              Weight Classes {selectedEvent && `(${selectedEvent.name})`}
-            </button>
+      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as Tab)}>
+        <TabsList>
+          <TabsTrigger value="events">
+            <CalendarDays className="size-4 sm:hidden" />
+            <span className="hidden sm:inline">Events</span>
+          </TabsTrigger>
+          <TabsTrigger value="divisions" disabled={!selectedEventId}>
+            <Layers className="size-4 sm:hidden" />
+            <span className="hidden sm:inline">
+              Divisions{selectedEvent ? ` (${selectedEvent.name})` : ""}
+            </span>
+          </TabsTrigger>
+          <TabsTrigger value="weights" disabled={!selectedEventId}>
+            <Scale className="size-4 sm:hidden" />
+            <span className="hidden sm:inline">
+              Weights{selectedEvent ? ` (${selectedEvent.name})` : ""}
+            </span>
+          </TabsTrigger>
+        </TabsList>
+
+        {/* Events tab */}
+        <TabsContent value="events" className="space-y-3">
+          <div className="flex justify-end">
+            <Button onClick={handleCreateEvent}>
+              <PlusCircle />
+              Create event
+            </Button>
           </div>
 
-          {/* Tab Content */}
-          <div className="p-6">
-            {/* Events Tab */}
-            {activeTab === "events" && (
-              <div>
-                <div className="flex justify-between items-center mb-4">
-                  <h2 className="text-lg font-semibold">Events</h2>
-                  <button
-                    onClick={handleCreateEvent}
-                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded text-sm font-medium"
-                  >
-                    Create Event
-                  </button>
-                </div>
+          {loadingEvents && (
+            <div className="space-y-2">
+              {[0, 1, 2].map((i) => (
+                <Skeleton key={i} className="h-32 w-full" />
+              ))}
+            </div>
+          )}
 
-                {loadingEvents ? (
-                  <SkeletonList count={3} />
-                ) : events.length === 0 ? (
-                  <p className="text-sm text-gray-400">No events found. Create your first event!</p>
-                ) : (
-                  <div className="space-y-3">
-                    {events.map((event) => (
-                      <div
-                        key={event.id}
-                        className={`p-4 rounded border ${
-                          selectedEventId === event.id ? "border-blue-500 bg-blue-900/10" : "border-gray-700 bg-gray-800"
-                        }`}
-                      >
-                        <div className="flex justify-between items-start mb-3">
-                          <div className="flex-1">
-                            <div className="flex items-center gap-2 mb-1">
-                              <h3 className="font-medium text-lg">{event.name}</h3>
-                              <span
-                                className={`px-2 py-0.5 rounded text-xs font-medium ${EVENT_STATUS_STYLES[event.status].bg} ${EVENT_STATUS_STYLES[event.status].text}`}
-                              >
-                                {EVENT_STATUS_STYLES[event.status].label}
-                              </span>
-                            </div>
-                            <p className="text-sm text-gray-400 mt-1">
-                              {event.venue}, {event.city}, {event.country}
-                            </p>
-                            <p className="text-sm text-gray-400">
-                              Start Date: {new Date(event.startDate).toLocaleDateString()}
-                            </p>
-                            <div className="flex gap-4 mt-2 text-xs text-gray-500">
-                              <span>Divisions: {event._count?.divisions || 0}</span>
-                              <span>Weight Classes: {event._count?.weightClasses || 0}</span>
-                              <span>Entries: {event._count?.entries || 0}</span>
-                            </div>
-                          </div>
-                          <div className="flex gap-2 flex-wrap">
-                            <button
-                              onClick={() => {
-                                setSelectedEventId(event.id);
-                                setActiveTab("divisions");
-                              }}
-                              className="px-3 py-1 bg-green-600/80 hover:bg-green-600 rounded text-xs"
-                            >
-                              Manage
-                            </button>
-                            <button
-                              onClick={() => setDocsEventId(docsEventId === event.id ? null : event.id)}
-                              className="px-3 py-1 bg-cyan-600/80 hover:bg-cyan-600 rounded text-xs"
-                            >
-                              Docs
-                            </button>
-                            <button
-                              onClick={() => handleEditEvent(event)}
-                              className="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-xs"
-                            >
-                              Edit
-                            </button>
-                            <button
-                              onClick={() => handleDeleteEvent(event)}
-                              className="px-3 py-1 bg-red-600/80 hover:bg-red-600 rounded text-xs"
-                            >
-                              Delete
-                            </button>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2 pt-3 border-t border-gray-700">
-                          <label className="text-xs text-gray-400">Status:</label>
-                          <Select
-                            value={event.status}
-                            onChange={(e) => updateEventStatusMutation.mutate({ id: event.id, status: e.target.value as EventStatus })}
-                            className="text-xs py-1"
-                          >
-                            <option value="DRAFT">Draft</option>
-                            <option value="ACTIVE">Active (Open for Entries)</option>
-                            <option value="CLOSED">Closed (Entries Locked)</option>
-                            <option value="ARCHIVED">Archived</option>
-                          </Select>
-                          <span className="text-xs text-gray-500">
-                            {event.status === "ACTIVE" ? "✓ Available for entries" :
-                             event.status === "DRAFT" ? "Available for entries" :
-                             "Not available for entries"}
-                          </span>
-                        </div>
-                        {docsEventId === event.id && (
-                          <div className="mt-3 pt-3 border-t border-gray-700">
-                            <DocumentSection
-                              entityFilter={{ eventId: event.id }}
-                              canUpload={isAdmin}
-                              canDelete={isAdmin}
-                            />
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
+          {!loadingEvents && events.length === 0 && (
+            <Card>
+              <CardContent className="py-10 text-center text-sm text-muted-foreground">
+                No events yet. Create your first event.
+              </CardContent>
+            </Card>
+          )}
+
+          {!loadingEvents &&
+            events.map((event) => (
+              <Card
+                key={event.id}
+                className={cn(
+                  selectedEventId === event.id && "border-primary/40",
                 )}
-              </div>
-            )}
-
-            {/* Divisions Tab */}
-            {activeTab === "divisions" && selectedEventId && (
-              <div>
-                <div className="flex justify-between items-center mb-4">
-                  <h2 className="text-lg font-semibold">Divisions for {selectedEvent?.name}</h2>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => {
-                        setTemplateToApply("");
-                        setShowTemplateModal(true);
-                      }}
-                      className="px-4 py-2 bg-purple-600 hover:bg-purple-700 rounded text-sm font-medium"
-                    >
-                      Apply Template
-                    </button>
-                    <button
-                      onClick={handleCreateDivision}
-                      className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded text-sm font-medium"
-                    >
-                      Add Division
-                    </button>
-                  </div>
-                </div>
-
-                {loadingDivisions ? (
-                  <SkeletonList count={3} />
-                ) : divisions.length === 0 ? (
-                  <p className="text-sm text-gray-400">No divisions found. Add your first division!</p>
-                ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    {divisions.map((division) => (
-                      <div key={division.id} className="p-4 rounded border border-gray-700 bg-gray-800">
-                        <div className="flex justify-between items-start">
-                          <div className="flex-1">
-                            <h3 className="font-medium">{division.name}</h3>
-                            <p className="text-sm text-gray-400">
-                              {division.gender} • Ages {division.minAge}-{division.maxAge}
-                            </p>
-                            <div className="flex gap-2 mt-2">
-                              <span className={`text-xs px-2 py-0.5 rounded ${
-                                division.category === 'KATA' ? 'bg-purple-600/30 text-purple-300' :
-                                'bg-red-600/30 text-red-300'
-                              }`}>
-                                {division.category === 'KATA' ? 'Kata' : 'Kumite'}
-                              </span>
-                            </div>
-                            <p className="text-xs text-gray-500 mt-2">Key: {division.key}</p>
-                            {division._count && (
-                              <p className="text-xs text-gray-500">Entries: {division._count.entries}</p>
-                            )}
-                          </div>
-                          <div className="flex gap-2">
-                            <button
-                              onClick={() => handleEditDivision(division)}
-                              className="px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-xs"
-                            >
-                              Edit
-                            </button>
-                            <button
-                              onClick={() => handleDeleteDivision(division)}
-                              className="px-2 py-1 bg-red-600/80 hover:bg-red-600 rounded text-xs"
-                            >
-                              Delete
-                            </button>
-                          </div>
-                        </div>
+              >
+                <CardContent className="space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h3 className="font-medium text-lg">{event.name}</h3>
+                        <Badge
+                          variant="outline"
+                          className={cn("font-normal text-[10px]", STATUS_STYLES[event.status])}
+                        >
+                          {event.status}
+                        </Badge>
                       </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Weight Classes Tab */}
-            {activeTab === "weights" && selectedEventId && (
-              <div>
-                <div className="flex justify-between items-center mb-4">
-                  <h2 className="text-lg font-semibold">Weight Classes for {selectedEvent?.name}</h2>
-                  <button
-                    onClick={handleCreateWeight}
-                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded text-sm font-medium"
-                  >
-                    Add Weight Class
-                  </button>
-                </div>
-
-                {loadingWeights ? (
-                  <SkeletonList count={3} />
-                ) : weightClasses.length === 0 ? (
-                  <p className="text-sm text-gray-400">No weight classes found. Add your first weight class!</p>
-                ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                    {weightClasses.map((weight) => (
-                      <div key={weight.id} className="p-4 rounded border border-gray-700 bg-gray-800">
-                        <div className="flex justify-between items-start">
-                          <div>
-                            <h3 className="font-medium">{weight.name}</h3>
-                            <p className="text-sm text-gray-400">{weight.gender}</p>
-                            <p className="text-xs text-gray-500">
-                              {weight.minKg || "0"}kg - {weight.maxKg || "∞"}kg
-                            </p>
-                            {weight.division && (
-                              <p className="text-xs text-gray-500 mt-1">Division: {weight.division.name}</p>
-                            )}
-                            {weight._count && (
-                              <p className="text-xs text-gray-500">Entries: {weight._count.entries}</p>
-                            )}
-                          </div>
-                          <div className="flex gap-2">
-                            <button
-                              onClick={() => handleEditWeight(weight)}
-                              className="px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-xs"
-                            >
-                              Edit
-                            </button>
-                            <button
-                              onClick={() => handleDeleteWeight(weight)}
-                              className="px-2 py-1 bg-red-600/80 hover:bg-red-600 rounded text-xs"
-                            >
-                              Delete
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Event Modal */}
-        {showEventModal && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-            <div className="bg-gray-900 rounded-lg p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-              <h2 className="text-xl font-semibold mb-4">{editingEvent ? "Edit Event" : "Create Event"}</h2>
-
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm text-gray-400 mb-1">Event Name *</label>
-                  <Input
-                    value={eventForm.name}
-                    onChange={(e) => setEventForm({ ...eventForm, name: e.target.value })}
-                    placeholder="e.g., National Championships 2026"
-                  />
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div>
-                    <label className="block text-sm text-gray-400 mb-1">Venue *</label>
-                    <Input
-                      value={eventForm.venue}
-                      onChange={(e) => setEventForm({ ...eventForm, venue: e.target.value })}
-                      placeholder="e.g., Sports Complex"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm text-gray-400 mb-1">City *</label>
-                    <Input
-                      value={eventForm.city}
-                      onChange={(e) => setEventForm({ ...eventForm, city: e.target.value })}
-                      placeholder="e.g., London"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm text-gray-400 mb-1">Country *</label>
-                    <Input
-                      value={eventForm.country}
-                      onChange={(e) => setEventForm({ ...eventForm, country: e.target.value })}
-                      placeholder="e.g., UK"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div>
-                    <label className="block text-sm text-gray-400 mb-1">Start Date *</label>
-                    <Input
-                      type="date"
-                      value={eventForm.startDate}
-                      onChange={(e) => setEventForm({ ...eventForm, startDate: e.target.value })}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm text-gray-400 mb-1">Registration Opens *</label>
-                    <Input
-                      type="date"
-                      value={eventForm.regOpen}
-                      onChange={(e) => setEventForm({ ...eventForm, regOpen: e.target.value })}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm text-gray-400 mb-1">Registration Closes *</label>
-                    <Input
-                      type="date"
-                      value={eventForm.regClose}
-                      onChange={(e) => setEventForm({ ...eventForm, regClose: e.target.value })}
-                    />
-                  </div>
-                </div>
-
-                {!editingEvent && (
-                  <div className="pt-4 border-t border-gray-800">
-                    <label className="block text-sm text-gray-400 mb-1">
-                      Start from Template <span className="text-gray-500">(optional)</span>
-                    </label>
-                    <Select
-                      value={templateForNewEvent}
-                      onChange={(e) => setTemplateForNewEvent(e.target.value as TemplateId | "")}
-                    >
-                      <option value="">None — add divisions manually</option>
-                      {templates.map((t) => (
-                        <option key={t.id} value={t.id}>
-                          {t.name} ({t.divisionCount} divisions, {t.weightClassCount} weight classes)
-                        </option>
-                      ))}
-                    </Select>
-                    {templateForNewEvent && (
-                      <p className="text-xs text-gray-500 mt-1">
-                        {templates.find((t) => t.id === templateForNewEvent)?.description}
+                      <p className="text-sm text-muted-foreground mt-1">
+                        {[event.venue, event.city, event.country].filter(Boolean).join(", ")}
                       </p>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              <div className="flex gap-3 mt-6">
-                <button
-                  onClick={handleSaveEvent}
-                  className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded font-medium"
-                  disabled={createEventMutation.isPending || updateEventMutation.isPending}
-                >
-                  {editingEvent ? "Update Event" : "Create Event"}
-                </button>
-                <button
-                  onClick={() => {
-                    setShowEventModal(false);
-                    setEditingEvent(null);
-                    resetEventForm();
-                  }}
-                  className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Division Modal */}
-        {showDivisionModal && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-            <div className="bg-gray-900 rounded-lg p-6 w-full max-w-xl">
-              <h2 className="text-xl font-semibold mb-4">
-                {editingDivision ? "Edit Division" : "Add Division"}
-              </h2>
-
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm text-gray-400 mb-1">Division Key *</label>
-                  <Input
-                    value={divisionForm.key}
-                    onChange={(e) => setDivisionForm({ ...divisionForm, key: e.target.value })}
-                    placeholder="e.g., CADET"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm text-gray-400 mb-1">Division Name *</label>
-                  <Input
-                    value={divisionForm.name}
-                    onChange={(e) => setDivisionForm({ ...divisionForm, name: e.target.value })}
-                    placeholder="e.g., Cadet (14-15)"
-                  />
-                </div>
-
-                <div className="grid grid-cols-3 gap-4">
-                  <div>
-                    <label className="block text-sm text-gray-400 mb-1">Category *</label>
-                    <Select
-                      value={divisionForm.category}
-                      onChange={(e) => setDivisionForm({ ...divisionForm, category: e.target.value as "KATA" | "KUMITE" })}
-                    >
-                      <option value="KATA">Kata</option>
-                      <option value="KUMITE">Kumite</option>
-                    </Select>
-                  </div>
-                  <div>
-                    <label className="block text-sm text-gray-400 mb-1">Gender *</label>
-                    <Select
-                      value={divisionForm.gender}
-                      onChange={(e) => setDivisionForm({ ...divisionForm, gender: e.target.value as "Male" | "Female" })}
-                    >
-                      <option value="Male">Male</option>
-                      <option value="Female">Female</option>
-                    </Select>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm text-gray-400 mb-1">Min Age *</label>
-                    <Input
-                      type="number"
-                      value={divisionForm.minAge}
-                      onChange={(e) => setDivisionForm({ ...divisionForm, minAge: parseInt(e.target.value) || 0 })}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm text-gray-400 mb-1">Max Age *</label>
-                    <Input
-                      type="number"
-                      value={divisionForm.maxAge}
-                      onChange={(e) => setDivisionForm({ ...divisionForm, maxAge: parseInt(e.target.value) || 0 })}
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-sm text-gray-400 mb-1">Notes (Optional)</label>
-                  <Input
-                    value={divisionForm.notes || ""}
-                    onChange={(e) => setDivisionForm({ ...divisionForm, notes: e.target.value })}
-                    placeholder="Additional notes..."
-                  />
-                </div>
-              </div>
-
-              <div className="flex gap-3 mt-6">
-                <button
-                  onClick={handleSaveDivision}
-                  className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded font-medium"
-                  disabled={createDivisionMutation.isPending || updateDivisionMutation.isPending}
-                >
-                  {editingDivision ? "Update Division" : "Add Division"}
-                </button>
-                <button
-                  onClick={() => {
-                    setShowDivisionModal(false);
-                    setEditingDivision(null);
-                    resetDivisionForm();
-                  }}
-                  className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Apply Template Modal */}
-        {showTemplateModal && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-            <div className="bg-gray-900 rounded-lg p-6 w-full max-w-xl">
-              <h2 className="text-xl font-semibold mb-2">Apply Division Template</h2>
-              <p className="text-sm text-gray-400 mb-4">
-                Populate {selectedEvent?.name} with divisions and weight classes from a preset.
-                Existing divisions with matching keys are skipped, so you can safely re-apply or layer templates.
-              </p>
-
-              <div className="space-y-3">
-                {templates.map((t) => (
-                  <label
-                    key={t.id}
-                    className={`block p-3 rounded border cursor-pointer transition ${
-                      templateToApply === t.id
-                        ? "border-purple-500 bg-purple-900/20"
-                        : "border-gray-700 bg-gray-800 hover:border-gray-600"
-                    }`}
-                  >
-                    <div className="flex items-start gap-3">
-                      <input
-                        type="radio"
-                        name="template"
-                        value={t.id}
-                        checked={templateToApply === t.id}
-                        onChange={() => setTemplateToApply(t.id)}
-                        className="mt-1"
-                      />
-                      <div className="flex-1">
-                        <div className="font-medium">{t.name}</div>
-                        <div className="text-sm text-gray-400">{t.description}</div>
-                        <div className="text-xs text-gray-500 mt-1">
-                          {t.divisionCount} divisions · {t.weightClassCount} weight classes
-                        </div>
+                      <p className="text-sm text-muted-foreground">
+                        Starts {new Date(event.startDate).toLocaleDateString()}
+                      </p>
+                      <div className="flex gap-3 mt-2 text-xs text-muted-foreground">
+                        <span>Divisions: {event._count?.divisions ?? 0}</span>
+                        <span>Weights: {event._count?.weightClasses ?? 0}</span>
+                        <span>Entries: {event._count?.entries ?? 0}</span>
                       </div>
                     </div>
-                  </label>
-                ))}
+                    <div className="flex gap-2 items-start">
+                      <Button
+                        size="sm"
+                        onClick={() => {
+                          setSelectedEventId(event.id)
+                          setActiveTab("divisions")
+                        }}
+                      >
+                        Manage
+                      </Button>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon-sm" aria-label="Actions">
+                            <MoreHorizontal />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onSelect={() => handleEditEvent(event)}>
+                            Edit
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onSelect={() => setDocsEvent(event)}>
+                            <FileText />
+                            Documents
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            variant="destructive"
+                            onSelect={() => handleDeleteEvent(event)}
+                          >
+                            Delete
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 pt-2 border-t">
+                    <Label className="text-xs text-muted-foreground shrink-0">Status:</Label>
+                    <Select
+                      value={event.status}
+                      onValueChange={(v) =>
+                        updateEventStatusMutation.mutate({
+                          id: event.id,
+                          status: v as EventStatus,
+                        })
+                      }
+                    >
+                      <SelectTrigger size="sm" className="w-44">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="DRAFT">Draft</SelectItem>
+                        <SelectItem value="ACTIVE">Active</SelectItem>
+                        <SelectItem value="CLOSED">Closed</SelectItem>
+                        <SelectItem value="ARCHIVED">Archived</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+        </TabsContent>
+
+        {/* Divisions tab */}
+        <TabsContent value="divisions" className="space-y-3">
+          {selectedEventId && (
+            <>
+              <div className="flex justify-between items-center flex-wrap gap-2">
+                <h2 className="text-sm font-medium text-muted-foreground">
+                  Divisions for {selectedEvent?.name}
+                </h2>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setTemplateToApply("")
+                      setShowTemplateModal(true)
+                    }}
+                  >
+                    <Sparkles />
+                    Apply template
+                  </Button>
+                  <Button onClick={handleCreateDivision}>
+                    <PlusCircle />
+                    Add division
+                  </Button>
+                </div>
               </div>
 
-              <div className="flex gap-3 mt-6">
-                <button
-                  onClick={handleApplyTemplate}
-                  className="flex-1 px-4 py-2 bg-purple-600 hover:bg-purple-700 rounded font-medium disabled:opacity-50"
-                  disabled={!templateToApply || applyTemplateMutation.isPending}
-                >
-                  {applyTemplateMutation.isPending ? "Applying..." : "Apply Template"}
-                </button>
-                <button
-                  onClick={() => {
-                    setShowTemplateModal(false);
-                    setTemplateToApply("");
-                  }}
-                  className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded"
-                  disabled={applyTemplateMutation.isPending}
-                >
-                  Cancel
-                </button>
+              {loadingDivisions && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {[0, 1, 2, 3].map((i) => (
+                    <Skeleton key={i} className="h-32 w-full" />
+                  ))}
+                </div>
+              )}
+
+              {!loadingDivisions && divisions.length === 0 && (
+                <Card>
+                  <CardContent className="py-10 text-center text-sm text-muted-foreground">
+                    No divisions yet. Add one or apply a template.
+                  </CardContent>
+                </Card>
+              )}
+
+              {!loadingDivisions && divisions.length > 0 && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {divisions.map((division) => (
+                    <Card key={division.id}>
+                      <CardContent>
+                        <div className="flex justify-between items-start gap-3">
+                          <div className="min-w-0 flex-1">
+                            <h3 className="font-medium">{division.name}</h3>
+                            <p className="text-sm text-muted-foreground">
+                              {division.gender} · Ages {division.minAge}-{division.maxAge}
+                            </p>
+                            <div className="flex gap-2 mt-2 flex-wrap">
+                              <Badge
+                                variant="outline"
+                                className={cn(
+                                  "font-normal text-[10px]",
+                                  CATEGORY_STYLES[division.category],
+                                )}
+                              >
+                                {division.category}
+                              </Badge>
+                              <Badge variant="outline" className="font-normal text-[10px]">
+                                {division.key}
+                              </Badge>
+                            </div>
+                            {division._count && (
+                              <p className="text-xs text-muted-foreground mt-2">
+                                Entries: {division._count.entries}
+                              </p>
+                            )}
+                          </div>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="ghost" size="icon-sm" aria-label="Actions">
+                                <MoreHorizontal />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem onSelect={() => handleEditDivision(division)}>
+                                Edit
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                variant="destructive"
+                                onSelect={() => handleDeleteDivision(division)}
+                              >
+                                Delete
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </TabsContent>
+
+        {/* Weights tab */}
+        <TabsContent value="weights" className="space-y-3">
+          {selectedEventId && (
+            <>
+              <div className="flex justify-between items-center flex-wrap gap-2">
+                <h2 className="text-sm font-medium text-muted-foreground">
+                  Weight classes for {selectedEvent?.name}
+                </h2>
+                <Button onClick={handleCreateWeight}>
+                  <PlusCircle />
+                  Add weight class
+                </Button>
+              </div>
+
+              {loadingWeights && (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  {[0, 1, 2].map((i) => (
+                    <Skeleton key={i} className="h-28 w-full" />
+                  ))}
+                </div>
+              )}
+
+              {!loadingWeights && weightClasses.length === 0 && (
+                <Card>
+                  <CardContent className="py-10 text-center text-sm text-muted-foreground">
+                    No weight classes yet.
+                  </CardContent>
+                </Card>
+              )}
+
+              {!loadingWeights && weightClasses.length > 0 && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                  {weightClasses.map((weight) => (
+                    <Card key={weight.id}>
+                      <CardContent>
+                        <div className="flex justify-between items-start gap-2">
+                          <div className="min-w-0 flex-1">
+                            <h3 className="font-medium">{weight.name}</h3>
+                            <p className="text-sm text-muted-foreground">{weight.gender}</p>
+                            <p className="text-xs text-muted-foreground mt-0.5">
+                              {weight.minKg ?? "0"}kg – {weight.maxKg ?? "∞"}kg
+                            </p>
+                            {weight.division && (
+                              <p className="text-xs text-muted-foreground mt-1">
+                                Division: {weight.division.name}
+                              </p>
+                            )}
+                            {weight._count && (
+                              <p className="text-xs text-muted-foreground">
+                                Entries: {weight._count.entries}
+                              </p>
+                            )}
+                          </div>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="ghost" size="icon-sm" aria-label="Actions">
+                                <MoreHorizontal />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem onSelect={() => handleEditWeight(weight)}>
+                                Edit
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                variant="destructive"
+                                onSelect={() => handleDeleteWeight(weight)}
+                              >
+                                Delete
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </TabsContent>
+      </Tabs>
+
+      {/* Event modal */}
+      <Dialog open={showEventModal} onOpenChange={setShowEventModal}>
+        <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{editingEvent ? "Edit event" : "Create event"}</DialogTitle>
+            <DialogDescription>
+              Set the event details. All fields with * are required.
+            </DialogDescription>
+          </DialogHeader>
+          <form id="event-form" onSubmit={handleSaveEvent} className="space-y-4">
+            <div>
+              <Label htmlFor="ev-name" className="mb-1.5">
+                Event name <span className="text-destructive">*</span>
+              </Label>
+              <Input
+                id="ev-name"
+                value={eventForm.name}
+                onChange={(e) => setEventForm({ ...eventForm, name: e.target.value })}
+                placeholder="National Championships 2026"
+                required
+                autoFocus
+              />
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div>
+                <Label htmlFor="ev-venue" className="mb-1.5">
+                  Venue <span className="text-destructive">*</span>
+                </Label>
+                <Input
+                  id="ev-venue"
+                  value={eventForm.venue}
+                  onChange={(e) => setEventForm({ ...eventForm, venue: e.target.value })}
+                  required
+                />
+              </div>
+              <div>
+                <Label htmlFor="ev-city" className="mb-1.5">
+                  City <span className="text-destructive">*</span>
+                </Label>
+                <Input
+                  id="ev-city"
+                  value={eventForm.city}
+                  onChange={(e) => setEventForm({ ...eventForm, city: e.target.value })}
+                  required
+                />
+              </div>
+              <div>
+                <Label htmlFor="ev-country" className="mb-1.5">
+                  Country <span className="text-destructive">*</span>
+                </Label>
+                <Input
+                  id="ev-country"
+                  value={eventForm.country}
+                  onChange={(e) => setEventForm({ ...eventForm, country: e.target.value })}
+                  required
+                />
               </div>
             </div>
-          </div>
-        )}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div>
+                <Label htmlFor="ev-start" className="mb-1.5">
+                  Start date <span className="text-destructive">*</span>
+                </Label>
+                <Input
+                  id="ev-start"
+                  type="date"
+                  value={eventForm.startDate}
+                  onChange={(e) => setEventForm({ ...eventForm, startDate: e.target.value })}
+                  required
+                />
+              </div>
+              <div>
+                <Label htmlFor="ev-regopen" className="mb-1.5">
+                  Registration opens <span className="text-destructive">*</span>
+                </Label>
+                <Input
+                  id="ev-regopen"
+                  type="date"
+                  value={eventForm.regOpen}
+                  onChange={(e) => setEventForm({ ...eventForm, regOpen: e.target.value })}
+                  required
+                />
+              </div>
+              <div>
+                <Label htmlFor="ev-regclose" className="mb-1.5">
+                  Registration closes <span className="text-destructive">*</span>
+                </Label>
+                <Input
+                  id="ev-regclose"
+                  type="date"
+                  value={eventForm.regClose}
+                  onChange={(e) => setEventForm({ ...eventForm, regClose: e.target.value })}
+                  required
+                />
+              </div>
+            </div>
+            {!editingEvent && (
+              <div className="pt-3 border-t">
+                <Label className="mb-1.5">Start from template (optional)</Label>
+                <Select
+                  value={templateForNewEvent || "none"}
+                  onValueChange={(v) =>
+                    setTemplateForNewEvent(v === "none" ? "" : (v as TemplateId))
+                  }
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">None — add divisions manually</SelectItem>
+                    {templates.map((t) => (
+                      <SelectItem key={t.id} value={t.id}>
+                        {t.name} ({t.divisionCount} divisions, {t.weightClassCount} weights)
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {templateForNewEvent && (
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {templates.find((t) => t.id === templateForNewEvent)?.description}
+                  </p>
+                )}
+              </div>
+            )}
+          </form>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setShowEventModal(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              form="event-form"
+              disabled={createEventMutation.isPending || updateEventMutation.isPending}
+            >
+              {editingEvent ? "Update" : "Create"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
-        {/* Weight Class Modal */}
-        {showWeightModal && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-            <div className="bg-gray-900 rounded-lg p-6 w-full max-w-xl">
-              <h2 className="text-xl font-semibold mb-4">
-                {editingWeight ? "Edit Weight Class" : "Add Weight Class"}
-              </h2>
+      {/* Division modal */}
+      <Dialog open={showDivisionModal} onOpenChange={setShowDivisionModal}>
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>
+              {editingDivision ? "Edit division" : "Add division"}
+            </DialogTitle>
+          </DialogHeader>
+          <form id="div-form" onSubmit={handleSaveDivision} className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <Label htmlFor="div-key" className="mb-1.5">
+                  Key <span className="text-destructive">*</span>
+                </Label>
+                <Input
+                  id="div-key"
+                  value={divisionForm.key}
+                  onChange={(e) => setDivisionForm({ ...divisionForm, key: e.target.value })}
+                  placeholder="CADET"
+                  required
+                  autoFocus
+                />
+              </div>
+              <div>
+                <Label htmlFor="div-name" className="mb-1.5">
+                  Name <span className="text-destructive">*</span>
+                </Label>
+                <Input
+                  id="div-name"
+                  value={divisionForm.name}
+                  onChange={(e) => setDivisionForm({ ...divisionForm, name: e.target.value })}
+                  placeholder="Cadet (14-15)"
+                  required
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label htmlFor="div-category" className="mb-1.5">
+                  Category <span className="text-destructive">*</span>
+                </Label>
+                <Select
+                  value={divisionForm.category}
+                  onValueChange={(v) =>
+                    setDivisionForm({ ...divisionForm, category: v as "KATA" | "KUMITE" })
+                  }
+                >
+                  <SelectTrigger id="div-category">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="KATA">Kata</SelectItem>
+                    <SelectItem value="KUMITE">Kumite</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label htmlFor="div-gender" className="mb-1.5">
+                  Gender <span className="text-destructive">*</span>
+                </Label>
+                <Select
+                  value={divisionForm.gender}
+                  onValueChange={(v) =>
+                    setDivisionForm({ ...divisionForm, gender: v as "Male" | "Female" })
+                  }
+                >
+                  <SelectTrigger id="div-gender">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Male">Male</SelectItem>
+                    <SelectItem value="Female">Female</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label htmlFor="div-min" className="mb-1.5">
+                  Min age <span className="text-destructive">*</span>
+                </Label>
+                <Input
+                  id="div-min"
+                  type="number"
+                  value={divisionForm.minAge}
+                  onChange={(e) =>
+                    setDivisionForm({ ...divisionForm, minAge: parseInt(e.target.value) || 0 })
+                  }
+                />
+              </div>
+              <div>
+                <Label htmlFor="div-max" className="mb-1.5">
+                  Max age <span className="text-destructive">*</span>
+                </Label>
+                <Input
+                  id="div-max"
+                  type="number"
+                  value={divisionForm.maxAge}
+                  onChange={(e) =>
+                    setDivisionForm({ ...divisionForm, maxAge: parseInt(e.target.value) || 0 })
+                  }
+                />
+              </div>
+            </div>
+            <div>
+              <Label htmlFor="div-notes" className="mb-1.5">Notes</Label>
+              <Input
+                id="div-notes"
+                value={divisionForm.notes || ""}
+                onChange={(e) => setDivisionForm({ ...divisionForm, notes: e.target.value })}
+              />
+            </div>
+          </form>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setShowDivisionModal(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              form="div-form"
+              disabled={createDivisionMutation.isPending || updateDivisionMutation.isPending}
+            >
+              {editingDivision ? "Update" : "Add"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm text-gray-400 mb-1">Weight Class Name *</label>
-                  <Input
-                    value={weightForm.name}
-                    onChange={(e) => setWeightForm({ ...weightForm, name: e.target.value })}
-                    placeholder="e.g., -57kg or 57-62kg"
+      {/* Template modal */}
+      <Dialog open={showTemplateModal} onOpenChange={setShowTemplateModal}>
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Apply division template</DialogTitle>
+            <DialogDescription>
+              Populate {selectedEvent?.name} with divisions and weight classes from a preset.
+              Existing divisions with matching keys are skipped.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            {templates.map((t) => (
+              <label
+                key={t.id}
+                className={cn(
+                  "block rounded-md border p-3 cursor-pointer transition-colors",
+                  templateToApply === t.id
+                    ? "border-primary bg-primary/5"
+                    : "hover:border-foreground/20",
+                )}
+              >
+                <div className="flex items-start gap-3">
+                  <input
+                    type="radio"
+                    name="template"
+                    value={t.id}
+                    checked={templateToApply === t.id}
+                    onChange={() => setTemplateToApply(t.id)}
+                    className="mt-1 size-4 accent-primary"
                   />
-                </div>
-
-                <div>
-                  <label className="block text-sm text-gray-400 mb-1">Gender *</label>
-                  <Select
-                    value={weightForm.gender}
-                    onChange={(e) => setWeightForm({ ...weightForm, gender: e.target.value as "Male" | "Female" })}
-                  >
-                    <option value="Male">Male</option>
-                    <option value="Female">Female</option>
-                  </Select>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm text-gray-400 mb-1">Min Weight (kg)</label>
-                    <Input
-                      type="number"
-                      step="0.1"
-                      value={weightForm.minKg || ""}
-                      onChange={(e) => setWeightForm({ ...weightForm, minKg: e.target.value ? parseFloat(e.target.value) : undefined })}
-                      placeholder="Optional"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm text-gray-400 mb-1">Max Weight (kg)</label>
-                    <Input
-                      type="number"
-                      step="0.1"
-                      value={weightForm.maxKg || ""}
-                      onChange={(e) => setWeightForm({ ...weightForm, maxKg: e.target.value ? parseFloat(e.target.value) : undefined })}
-                      placeholder="Optional"
-                    />
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium leading-tight">{t.name}</p>
+                    <p className="text-sm text-muted-foreground mt-0.5">{t.description}</p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {t.divisionCount} divisions · {t.weightClassCount} weights
+                    </p>
                   </div>
                 </div>
+              </label>
+            ))}
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setShowTemplateModal(false)}
+              disabled={applyTemplateMutation.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                if (!selectedEventId || !templateToApply) return
+                applyTemplateMutation.mutate({
+                  eventId: selectedEventId,
+                  template: templateToApply,
+                })
+              }}
+              disabled={!templateToApply || applyTemplateMutation.isPending}
+            >
+              {applyTemplateMutation.isPending ? "Applying..." : "Apply template"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
-                <div>
-                  <label className="block text-sm text-gray-400 mb-1">Link to Division (Optional)</label>
-                  <Select
-                    value={weightForm.divisionId || ""}
-                    onChange={(e) => setWeightForm({ ...weightForm, divisionId: e.target.value || undefined })}
-                  >
-                    <option value="">Not linked to a specific division</option>
-                    {divisions
-                      .filter((d) => d.gender === weightForm.gender)
-                      .map((div) => (
-                        <option key={div.id} value={div.id}>
-                          {div.name}
-                        </option>
-                      ))}
-                  </Select>
-                </div>
+      {/* Weight class modal */}
+      <Dialog open={showWeightModal} onOpenChange={setShowWeightModal}>
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>
+              {editingWeight ? "Edit weight class" : "Add weight class"}
+            </DialogTitle>
+          </DialogHeader>
+          <form id="wt-form" onSubmit={handleSaveWeight} className="space-y-4">
+            <div>
+              <Label htmlFor="wt-name" className="mb-1.5">
+                Name <span className="text-destructive">*</span>
+              </Label>
+              <Input
+                id="wt-name"
+                value={weightForm.name}
+                onChange={(e) => setWeightForm({ ...weightForm, name: e.target.value })}
+                placeholder="e.g. -57kg or 57-62kg"
+                required
+                autoFocus
+              />
+            </div>
+            <div>
+              <Label htmlFor="wt-gender" className="mb-1.5">
+                Gender <span className="text-destructive">*</span>
+              </Label>
+              <Select
+                value={weightForm.gender}
+                onValueChange={(v) =>
+                  setWeightForm({ ...weightForm, gender: v as "Male" | "Female" })
+                }
+              >
+                <SelectTrigger id="wt-gender">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Male">Male</SelectItem>
+                  <SelectItem value="Female">Female</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label htmlFor="wt-min" className="mb-1.5">Min (kg)</Label>
+                <Input
+                  id="wt-min"
+                  type="number"
+                  step="0.1"
+                  value={weightForm.minKg ?? ""}
+                  onChange={(e) =>
+                    setWeightForm({
+                      ...weightForm,
+                      minKg: e.target.value ? parseFloat(e.target.value) : undefined,
+                    })
+                  }
+                  placeholder="Optional"
+                />
               </div>
-
-              <div className="flex gap-3 mt-6">
-                <button
-                  onClick={handleSaveWeight}
-                  className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded font-medium"
-                  disabled={createWeightMutation.isPending || updateWeightMutation.isPending}
-                >
-                  {editingWeight ? "Update Weight Class" : "Add Weight Class"}
-                </button>
-                <button
-                  onClick={() => {
-                    setShowWeightModal(false);
-                    setEditingWeight(null);
-                    resetWeightForm();
-                  }}
-                  className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded"
-                >
-                  Cancel
-                </button>
+              <div>
+                <Label htmlFor="wt-max" className="mb-1.5">Max (kg)</Label>
+                <Input
+                  id="wt-max"
+                  type="number"
+                  step="0.1"
+                  value={weightForm.maxKg ?? ""}
+                  onChange={(e) =>
+                    setWeightForm({
+                      ...weightForm,
+                      maxKg: e.target.value ? parseFloat(e.target.value) : undefined,
+                    })
+                  }
+                  placeholder="Optional"
+                />
               </div>
             </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-};
+            <div>
+              <Label htmlFor="wt-division" className="mb-1.5">Link to division (optional)</Label>
+              <Select
+                value={weightForm.divisionId || "none"}
+                onValueChange={(v) =>
+                  setWeightForm({ ...weightForm, divisionId: v === "none" ? undefined : v })
+                }
+              >
+                <SelectTrigger id="wt-division" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Not linked to a specific division</SelectItem>
+                  {divisions
+                    .filter((d) => d.gender === weightForm.gender)
+                    .map((div) => (
+                      <SelectItem key={div.id} value={div.id}>
+                        {div.name}
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </form>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setShowWeightModal(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              form="wt-form"
+              disabled={createWeightMutation.isPending || updateWeightMutation.isPending}
+            >
+              {editingWeight ? "Update" : "Add"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
-export default Events;
+      {/* Documents sheet */}
+      <Sheet open={docsEvent !== null} onOpenChange={(o) => !o && setDocsEvent(null)}>
+        <SheetContent side="right" className="w-full sm:max-w-lg gap-0">
+          <SheetHeader>
+            <SheetTitle>{docsEvent?.name} — Documents</SheetTitle>
+            <SheetDescription>
+              Upload and manage event documents.
+            </SheetDescription>
+          </SheetHeader>
+          <div className="flex-1 overflow-y-auto px-4 pb-4">
+            {docsEvent && (
+              <DocumentSection
+                entityFilter={{ eventId: docsEvent.id }}
+                canUpload={isAdmin}
+                canDelete={isAdmin}
+              />
+            )}
+          </div>
+        </SheetContent>
+      </Sheet>
+    </AppShell>
+  )
+}
+
+export default EventsAdmin

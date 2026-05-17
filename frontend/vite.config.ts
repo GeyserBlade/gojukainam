@@ -3,13 +3,18 @@ import react from '@vitejs/plugin-react'
 import tailwind from '@tailwindcss/vite'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const pkg = JSON.parse(readFileSync(join(__dirname, 'package.json'), 'utf8'))
 
 export default defineConfig({
   plugins: [react(), tailwind()],
+  resolve: {
+    alias: {
+      '@': resolve(__dirname, './src'),
+    },
+  },
   server: { port: 5173 },
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version),

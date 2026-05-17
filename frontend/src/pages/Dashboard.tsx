@@ -1,447 +1,469 @@
-import { useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { useAuth } from "../contexts/AuthContext";
-import { api } from "../lib/api";
-import { listAthletes, listAllAthletes, deleteAthlete, type Athlete } from "../lib/athletes";
-import { Input, Select, ActionButton } from "../components/Input";
-import { SkeletonList, EmptyState, ErrorState } from "../components/UIState";
-import { useToast, useApiErrorToast } from "../components/Toast";
-import { ThemeToggle } from "../contexts/ThemeContext";
-import { useHoverPrefetch } from "../lib/prefetch";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMemo } from "react"
+import { useNavigate } from "react-router-dom"
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+import {
+  CalendarDays,
+  Eye,
+  ListChecks,
+  PlusCircle,
+  Shield,
+  Upload,
+  UserCog,
+  Users,
+  Users2,
+  type LucideIcon,
+} from "lucide-react"
 
-/***************************************
- * src/pages/Dashboard.tsx (mobile-optimized)
- ***************************************/
+import { useAuth } from "@/contexts/AuthContext"
+import { api } from "@/lib/api"
+import {
+  deleteAthlete,
+  listAllAthletes,
+  listAthletes,
+  type Athlete,
+} from "@/lib/athletes"
+import { listClubs, type Club } from "@/lib/clubs"
+import { useHoverPrefetch } from "@/lib/prefetch"
+import { useToast, useApiErrorToast } from "@/components/Toast"
+import { useConfirm } from "@/components/ConfirmDialog"
+import { AppShell } from "@/components/layout/AppShell"
+import { StatCard } from "@/components/dashboard/StatCard"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Button } from "@/components/ui/button"
+import { Skeleton } from "@/components/ui/skeleton"
+import { ErrorState } from "@/components/UIState"
+
 function calculateAge(dob: string) {
-  const birth = new Date(dob);
-  if (Number.isNaN(birth.getTime())) return null;
-  const today = new Date();
-  let age = today.getFullYear() - birth.getFullYear();
-  const monthDiff = today.getMonth() - birth.getMonth();
-  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birth.getDate())) age--;
-  return age >= 0 ? age : null;
+  const birth = new Date(dob)
+  if (Number.isNaN(birth.getTime())) return null
+  const today = new Date()
+  let age = today.getFullYear() - birth.getFullYear()
+  const monthDiff = today.getMonth() - birth.getMonth()
+  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birth.getDate())) age--
+  return age >= 0 ? age : null
 }
 
-// Mobile navigation menu item
-const NavMenuItem = ({ onClick, icon, label, color = "cyan" }: {
-  onClick: () => void;
-  icon: React.ReactNode;
-  label: string;
-  color?: "cyan" | "purple" | "green" | "blue";
-}) => {
-  const colorClasses = {
-    cyan: "bg-cyan-600/20 text-cyan-400 border-cyan-600/30",
-    purple: "bg-purple-600/20 text-purple-400 border-purple-600/30",
-    green: "bg-green-600/20 text-green-400 border-green-600/30",
-    blue: "bg-blue-600/20 text-blue-400 border-blue-600/30",
-  };
-
-  return (
-    <button
-      onClick={onClick}
-      className={`flex items-center gap-3 w-full p-4 rounded-xl border ${colorClasses[color]} active:opacity-70 transition-all`}
-    >
-      <span className="text-xl">{icon}</span>
-      <span className="font-medium text-sm">{label}</span>
-    </button>
-  );
-};
+type QuickAction = {
+  label: string
+  to: string
+  icon: LucideIcon
+  variant?: "default" | "secondary" | "outline"
+}
 
 const Dashboard = () => {
-  const { role, clubId, logout } = useAuth();
-  const navigate = useNavigate();
-  const queryClient = useQueryClient();
-  const toast = useToast();
-  const showApiError = useApiErrorToast();
+  const { role, clubId, user } = useAuth()
+  const navigate = useNavigate()
+  const queryClient = useQueryClient()
+  const toast = useToast()
+  const showApiError = useApiErrorToast()
+  const confirm = useConfirm()
 
-  const [query, setQuery] = useState("");
-  const [sortBy, setSortBy] = useState<"name"|"dob"|"gender"|"belt"|"club">("name");
-  const [sortDir, setSortDir] = useState<"asc"|"desc">("asc");
-  const [showMenu, setShowMenu] = useState(false);
+  const canManage = role === "ADMIN" || role === "SUPERADMIN" || role === "CLUB_MANAGER"
 
-  // Version info — fetched once per session, staleTime: Infinity prevents refetches
   const { data: versionInfo } = useQuery({
-    queryKey: ['version'],
+    queryKey: ["version"],
     queryFn: async () => {
-      const res = await api.get("/version");
-      return res.data as { backend: string; db: number };
+      const res = await api.get("/version")
+      return res.data as { backend: string; db: number }
     },
     staleTime: Infinity,
-  });
+  })
 
-  // 1. Fetch Events
-  const { data: events = [] } = useQuery({
-    queryKey: ['events'],
-    queryFn: async () => {
-      const res = await api.get("/events");
-      return res.data;
+  const {
+    data: events = [],
+    isLoading: loadingEvents,
+  } = useQuery<Array<{ id: string; name: string; startDate: string; venue?: string; city?: string }>>({
+    queryKey: ["events"],
+    queryFn: async () => (await api.get("/events")).data,
+  })
+
+  const { data: club } = useQuery<Club>({
+    queryKey: ["club", clubId],
+    queryFn: async () => (await api.get(`/clubs/${clubId}`)).data,
+    enabled: !!clubId,
+  })
+
+  const canSeeAllClubs = role === "SUPERADMIN" || role === "ADMIN"
+
+  const { data: clubs = [], isLoading: loadingClubs } = useQuery<Club[]>({
+    queryKey: ["clubs"],
+    queryFn: listClubs,
+    enabled: canSeeAllClubs,
+  })
+
+  const clubsForCard = useMemo<Club[]>(() => {
+    if (canSeeAllClubs) {
+      return [...clubs].sort(
+        (a, b) => (b._count?.athletes ?? 0) - (a._count?.athletes ?? 0),
+      )
     }
-  });
+    return club ? [club] : []
+  }, [canSeeAllClubs, clubs, club])
 
-  // 2. Fetch Club (if clubId exists)
-  const { data: club } = useQuery({
-    queryKey: ['club', clubId],
-    queryFn: async () => {
-      const res = await api.get(`/clubs/${clubId}`);
-      return res.data;
-    },
-    enabled: !!clubId
-  });
+  const totalAthletesAcrossClubs = useMemo(() => {
+    if (!canSeeAllClubs) return club?._count?.athletes ?? null
+    return clubs.reduce((sum, c) => sum + (c._count?.athletes ?? 0), 0)
+  }, [canSeeAllClubs, clubs, club])
 
-  // 3. Fetch Athletes
   const {
     data: athletes = [],
     isLoading: loadingAthletes,
     error: errorAthletes,
     refetch: refetchAthletes,
-  } = useQuery({
-    queryKey: ['athletes', clubId, role],
+  } = useQuery<Athlete[]>({
+    queryKey: ["athletes", clubId, role],
     queryFn: async () => {
-      // SUPERADMIN/ADMIN without clubId -> list all
-      const canListAll = role === "SUPERADMIN";
-      if (!clubId && !canListAll) return [];
-
-      if (clubId) {
-        return listAthletes(clubId);
-      } else {
-        return listAllAthletes();
-      }
+      const canListAll = role === "SUPERADMIN"
+      if (!clubId && !canListAll) return []
+      if (clubId) return listAthletes(clubId)
+      return listAllAthletes()
     },
-    enabled: !!clubId || role === "SUPERADMIN"
-  });
+    enabled: !!clubId || role === "SUPERADMIN",
+  })
 
-  // 4. Delete Mutation
   const deleteMutation = useMutation({
     mutationFn: deleteAthlete,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['athletes'] });
-      toast.success("Athlete deleted");
+      queryClient.invalidateQueries({ queryKey: ["athletes"] })
+      toast.success("Athlete deleted")
     },
-    onError: (error) => {
-      showApiError(error, "Failed to delete athlete");
-    }
-  });
+    onError: (e) => showApiError(e, "Failed to delete athlete"),
+  })
 
-  async function onDeleteAthlete(id: string) {
-    if (!confirm("Delete this athlete? This cannot be undone.")) return;
-    deleteMutation.mutate(id);
+  async function onDeleteAthlete(id: string, label: string) {
+    const ok = await confirm({
+      title: `Delete ${label}?`,
+      description: "This cannot be undone.",
+      confirmText: "Delete",
+      destructive: true,
+    })
+    if (!ok) return
+    deleteMutation.mutate(id)
   }
 
-  const filteredSorted = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    let rows: Athlete[] = athletes;
-    if (q) {
-      rows = rows.filter(a => {
-        const name = `${a.firstName} ${a.lastName}`.toLowerCase();
-        const clubName = a.club?.name?.toLowerCase() || "";
-        return (
-          name.includes(q) ||
-          (a.nationality?.toLowerCase?.() || "").includes(q) ||
-          (a.belt?.name?.toLowerCase?.() || "").includes(q) ||
-          clubName.includes(q)
-        );
-      });
-    }
-    const dir = sortDir === "asc" ? 1 : -1;
-    const cmp = (a: Athlete, b: Athlete) => {
-      if (sortBy === "name") {
-        const an = `${a.lastName} ${a.firstName}`.toLowerCase();
-        const bn = `${b.lastName} ${b.firstName}`.toLowerCase();
-        return an < bn ? -1*dir : an > bn ? 1*dir : 0;
-      }
-      if (sortBy === "dob") {
-        const ad = new Date(a.dob).getTime();
-        const bd = new Date(b.dob).getTime();
-        return (ad - bd) * dir;
-      }
-      if (sortBy === "gender") {
-        return (a.gender || "").localeCompare(b.gender || "") * dir;
-      }
-      if (sortBy === "belt") {
-        return ((a.belt?.name || "").localeCompare(b.belt?.name || "")) * dir;
-      }
-      if (sortBy === "club") {
-        return (a.club?.name || "").localeCompare(b.club?.name || "") * dir;
-      }
-      return 0;
-    };
-    return [...rows].sort(cmp);
-  }, [athletes, query, sortBy, sortDir]);
+  const upcomingEvents = useMemo(() => {
+    const now = Date.now()
+    return [...events]
+      .filter((e) => new Date(e.startDate).getTime() >= now - 86_400_000)
+      .sort((a, b) => new Date(a.startDate).getTime() - new Date(b.startDate).getTime())
+      .slice(0, 5)
+  }, [events])
 
-  const canManage = role === "ADMIN" || role === "SUPERADMIN" || role === "CLUB_MANAGER";
+  const recentAthletes = useMemo(() => athletes.slice(0, 6), [athletes])
 
-  // Prefetch handlers: warm the cache on hover/focus so the target page renders instantly.
-  // Wired on admin buttons that land on pages that read from the same TanStack Query cache
-  // (AthletesList uses ['athletes', clubId, role], EntriesView uses ['events']).
-  const prefetchAthletesAll = useHoverPrefetch({
+  // Cache warm-up on hover.
+  const prefetchAthletes = useHoverPrefetch({
     queryKey: ["athletes", "", role, false],
     queryFn: () => (role === "SUPERADMIN" ? listAllAthletes() : Promise.resolve([])),
-  });
+  })
+
+  const quickActions: QuickAction[] = []
+  if (canManage) {
+    quickActions.push(
+      { label: "New athlete", to: "/athletes/new", icon: PlusCircle },
+      { label: "Manage athletes", to: "/athletes", icon: Users, variant: "secondary" },
+      { label: "Entry management", to: "/events", icon: ListChecks, variant: "secondary" },
+      { label: "Event admin", to: "/events/manage", icon: CalendarDays, variant: "secondary" },
+      { label: "View entries", to: "/entries/view", icon: Eye, variant: "outline" },
+    )
+    if (role === "SUPERADMIN") {
+      quickActions.push({ label: "Import", to: "/athletes/import", icon: Upload, variant: "outline" })
+    }
+    quickActions.push(
+      { label: "Users", to: "/users", icon: UserCog, variant: "outline" },
+      { label: "Clubs", to: "/clubs", icon: Shield, variant: "outline" },
+    )
+  }
+
+  const greeting = useMemo(() => {
+    const h = new Date().getHours()
+    if (h < 12) return "Good morning"
+    if (h < 18) return "Good afternoon"
+    return "Good evening"
+  }, [])
 
   return (
-    <div className="min-h-screen bg-gray-950 text-gray-100">
-      {/* Mobile-friendly header */}
-      <header className="sticky top-0 z-50 bg-gray-950/95 backdrop-blur border-b border-gray-800 px-4 py-3">
-        <div className="max-w-7xl mx-auto flex items-center justify-between">
-          <h1 className="text-xl md:text-2xl font-semibold">Dashboard</h1>
-          <div className="flex items-center gap-2">
-            <ThemeToggle />
-            {canManage && (
-              <button
-                onClick={() => setShowMenu(!showMenu)}
-                className="md:hidden p-2 rounded-lg bg-gray-800 hover:bg-gray-700 active:bg-gray-600 transition-colors"
-                aria-label="Menu"
-              >
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  {showMenu ? (
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  ) : (
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-                  )}
-                </svg>
-              </button>
-            )}
-            <button
-              onClick={logout}
-              className="px-3 py-2 text-sm text-gray-400 hover:text-white active:text-gray-300 transition-colors"
-            >
-              Sign out
-            </button>
-          </div>
-        </div>
-      </header>
+    <AppShell title="Dashboard">
+      {/* Hero */}
+      <div className="mb-4 sm:mb-6">
+        <h1 className="font-display text-3xl sm:text-4xl tracking-wider">
+          {greeting.toUpperCase()}
+        </h1>
+        <p className="text-sm text-muted-foreground mt-1">
+          {user?.email ?? "Welcome back"}
+          {club?.name ? ` · ${club.name}` : ""}
+          {club?.region ? ` · ${club.region}` : ""}
+        </p>
+      </div>
 
-      {/* Mobile slide-down menu */}
-      {showMenu && canManage && (
-        <div className="md:hidden fixed inset-0 top-[57px] z-40 bg-gray-950/95 backdrop-blur overflow-y-auto">
-          <div className="p-4 space-y-3">
-            <NavMenuItem onClick={() => { navigate("/athletes"); setShowMenu(false); }} icon="👥" label="Manage Athletes" />
-            <NavMenuItem onClick={() => { navigate("/athletes/extract"); setShowMenu(false); }} icon="📋" label="Athlete Extract" />
-            <NavMenuItem onClick={() => { navigate("/events/manage"); setShowMenu(false); }} icon="📅" label="Event Admin" color="purple" />
-            <NavMenuItem onClick={() => { navigate("/events"); setShowMenu(false); }} icon="✅" label="Entry Management" color="green" />
-            <NavMenuItem onClick={() => { navigate("/entries/view"); setShowMenu(false); }} icon="👁️" label="View All Entries" color="blue" />
-            {role === "SUPERADMIN" && (
-              <NavMenuItem onClick={() => { navigate("/athletes/import"); setShowMenu(false); }} icon="📥" label="Import Athletes" />
-            )}
-            <NavMenuItem onClick={() => { navigate("/users"); setShowMenu(false); }} icon="👤" label="Manage Users" />
-            <NavMenuItem onClick={() => { navigate("/clubs"); setShowMenu(false); }} icon="🏛️" label="Manage Clubs" />
-            <NavMenuItem onClick={() => { navigate("/belts"); setShowMenu(false); }} icon="🥋" label="Manage Belts" />
-          </div>
-        </div>
+      {/* Stat cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 mb-5 sm:mb-6">
+        <StatCard
+          label="Athletes"
+          value={athletes.length}
+          icon={Users}
+          accent="primary"
+          hint={canManage ? "Manage your roster" : "Athletes in your club"}
+          href={canManage ? "/athletes" : undefined}
+          loading={loadingAthletes}
+        />
+        <StatCard
+          label="Events"
+          value={events.length}
+          icon={CalendarDays}
+          accent="belt-orange"
+          hint={upcomingEvents[0]?.name ?? "No upcoming events"}
+          href={canManage ? "/events" : undefined}
+          loading={loadingEvents}
+        />
+        <StatCard
+          label="Role"
+          value={role ?? "—"}
+          icon={Users2}
+          accent="flag-blue"
+          hint={club?.name ? club.name : clubId ? "(club set)" : "No club assigned"}
+        />
+      </div>
+
+      {/* Quick actions */}
+      {canManage && quickActions.length > 0 && (
+        <Card className="mb-5 sm:mb-6">
+          <CardHeader>
+            <CardTitle className="text-base">Quick actions</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-wrap gap-2">
+            {quickActions.map((a) => {
+              const Icon = a.icon
+              const prefetch = a.to === "/athletes" ? prefetchAthletes : undefined
+              return (
+                <Button
+                  key={a.to}
+                  variant={a.variant ?? "default"}
+                  size="sm"
+                  onClick={() => navigate(a.to)}
+                  onMouseEnter={prefetch?.onMouseEnter}
+                  onFocus={prefetch?.onFocus}
+                >
+                  <Icon />
+                  {a.label}
+                </Button>
+              )
+            })}
+          </CardContent>
+        </Card>
       )}
 
-      <main className="p-4 pb-8">
-        <div className="max-w-7xl mx-auto">
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {/* Session Card */}
-            <div className="p-4 rounded-xl border border-gray-800 bg-gray-900/50">
-              <h2 className="font-semibold mb-3 text-base">Session</h2>
-              <div className="space-y-2 text-sm text-gray-400">
-                <p>Role: <span className="text-gray-200">{role ?? "(none)"}</span></p>
-                <p>
-                  Club:&nbsp;
-                  <span className="text-gray-200">{club ? `${club.name ?? "(no name)"}` : (clubId ?? "(none)")}</span>
-                </p>
-                {club?.region && <p>Region: <span className="text-gray-200">{club.region}</span></p>}
-                {club?.contactName && <p>Contact: <span className="text-gray-200">{club.contactName}</span></p>}
-                {club?.email && <p>Email: <span className="text-gray-200 break-all">{club.email}</span></p>}
-              </div>
-            </div>
-
-            {/* Events Card */}
-            <div className="p-4 rounded-xl border border-gray-800 bg-gray-900/50">
-              <h2 className="font-semibold mb-3 text-base">Events</h2>
-              <p className="text-sm text-gray-500 mb-3">Total: {events.length}</p>
-              <ul className="text-sm text-gray-300 space-y-2">
-                {events.map((ev: any) => (
-                  <li key={ev.id} className="flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full bg-cyan-500 flex-shrink-0"></span>
-                    <span className="truncate">{ev.name}</span>
-                    <span className="text-gray-500 text-xs ml-auto flex-shrink-0">{new Date(ev.startDate).toLocaleDateString()}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-
-            {/* Desktop-only Administration Card */}
+      {/* Upcoming events */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 sm:gap-4 mb-5 sm:mb-6">
+        <Card className="lg:col-span-2">
+          <CardHeader className="flex-row items-center justify-between gap-2">
+            <CardTitle className="text-base">Upcoming events</CardTitle>
             {canManage && (
-              <div className="hidden md:block p-4 rounded-xl border border-gray-800 bg-gray-900/50">
-                <h2 className="font-semibold mb-3 text-base">Administration</h2>
-                <div className="flex gap-2 flex-wrap">
-                  <button
-                    onClick={() => navigate("/athletes")}
-                    {...prefetchAthletesAll}
-                    className="text-sm px-3 py-2 rounded-md bg-cyan-600/80 hover:bg-cyan-600 text-black font-semibold"
-                  >
-                    Manage Athletes
-                  </button>
-                  <button
-                    onClick={() => navigate("/athletes/extract")}
-                    className="text-sm px-3 py-2 rounded-md bg-cyan-600/80 hover:bg-cyan-600 text-black font-semibold"
-                  >
-                    Athlete Extract
-                  </button>
-                  <button
-                    onClick={() => navigate("/events/manage")}
-                    className="text-sm px-3 py-2 rounded-md bg-purple-600/80 hover:bg-purple-600 text-black font-semibold"
-                  >
-                    Event Admin
-                  </button>
-                  <button
-                    onClick={() => navigate("/events")}
-                    className="text-sm px-3 py-2 rounded-md bg-green-600/80 hover:bg-green-600 text-black font-semibold"
-                  >
-                    Entry Management
-                  </button>
-                  <button
-                    onClick={() => navigate("/entries/view")}
-                    className="text-sm px-3 py-2 rounded-md bg-blue-600/80 hover:bg-blue-600 text-black font-semibold"
-                  >
-                    View All Entries
-                  </button>
-                  {role === "SUPERADMIN" && (
-                    <button
-                      onClick={() => navigate("/athletes/import")}
-                      className="text-sm px-3 py-2 rounded-md bg-cyan-600/80 hover:bg-cyan-600 text-black font-semibold"
-                    >
-                      Import Athletes
-                    </button>
-                  )}
-                  <button
-                    onClick={() => navigate("/users")}
-                    className="text-sm px-3 py-2 rounded-md bg-cyan-600/80 hover:bg-cyan-600 text-black font-semibold"
-                  >
-                    Manage Users
-                  </button>
-                  <button
-                    onClick={() => navigate("/clubs")}
-                    className="text-sm px-3 py-2 rounded-md bg-cyan-600/80 hover:bg-cyan-600 text-black font-semibold"
-                  >
-                    Manage Clubs
-                  </button>
-                  <button
-                    onClick={() => navigate("/belts")}
-                    className="text-sm px-3 py-2 rounded-md bg-cyan-600/80 hover:bg-cyan-600 text-black font-semibold"
-                  >
-                    Manage Belts
-                  </button>
-                </div>
+              <Button asChild variant="ghost" size="sm">
+                <a href="/events/manage">
+                  Manage
+                </a>
+              </Button>
+            )}
+          </CardHeader>
+          <CardContent>
+            {loadingEvents && (
+              <div className="space-y-2">
+                {[0, 1, 2].map((i) => (
+                  <Skeleton key={i} className="h-12 w-full" />
+                ))}
               </div>
             )}
-
-            {/* Athletes Section - Full width */}
-            <div className="p-4 rounded-xl border border-gray-800 bg-gray-900/50 md:col-span-2 lg:col-span-3">
-              <div className="flex items-center justify-between mb-3">
-                <h2 className="font-semibold text-base">Athletes</h2>
-                {!clubId && role !== "SUPERADMIN" && (
-                  <span className="text-sm text-gray-400">Set a club to view athletes</span>
-                )}
-              </div>
-              {(clubId || role === "SUPERADMIN") && (
-                <p className="text-sm text-gray-500 mb-3">Total: {athletes.length} | Showing: {filteredSorted.length}</p>
-              )}
-
-              {/* Search and filters */}
-              <div className="space-y-3 mb-4">
-                <Input placeholder="Search name, club, nationality, belt..." value={query} onChange={(e)=>setQuery(e.target.value)} />
-                <div className="flex gap-2">
-                  <div className="flex-1">
-                    <Select value={sortBy} onChange={(e)=>setSortBy(e.target.value as any)}>
-                      <option value="name">Sort: Name</option>
-                      <option value="dob">Sort: DOB</option>
-                      <option value="gender">Sort: Gender</option>
-                      <option value="belt">Sort: Belt</option>
-                      <option value="club">Sort: Club</option>
-                    </Select>
-                  </div>
-                  <div className="w-24">
-                    <Select value={sortDir} onChange={(e)=>setSortDir(e.target.value as any)}>
-                      <option value="asc">Asc</option>
-                      <option value="desc">Desc</option>
-                    </Select>
-                  </div>
-                </div>
-              </div>
-
-              {loadingAthletes && <SkeletonList count={5} />}
-              {errorAthletes && !loadingAthletes && (
-                <ErrorState
-                  title="Couldn't load athletes"
-                  message={errorAthletes instanceof Error ? errorAthletes.message : "Please try again."}
-                  onRetry={() => refetchAthletes()}
-                />
-              )}
-
-              {/* Mobile-friendly athlete list */}
-              {!loadingAthletes && !errorAthletes && !!filteredSorted.length && (
-                <ul className="divide-y divide-gray-800 -mx-4 md:mx-0">
-                  {filteredSorted.map((a) => (
-                    <li key={a.id} className="py-3 px-4 md:px-0 flex items-start justify-between gap-3 active:bg-gray-800/50 md:active:bg-transparent transition-colors">
+            {!loadingEvents && upcomingEvents.length === 0 && (
+              <p className="text-sm text-muted-foreground py-6 text-center">
+                No upcoming events.
+              </p>
+            )}
+            {!loadingEvents && upcomingEvents.length > 0 && (
+              <ul className="divide-y">
+                {upcomingEvents.map((ev) => {
+                  const date = new Date(ev.startDate)
+                  return (
+                    <li
+                      key={ev.id}
+                      className="flex items-center gap-3 py-3 first:pt-0 last:pb-0"
+                    >
+                      <div className="flex size-10 flex-col items-center justify-center rounded-md bg-primary/10 text-primary shrink-0">
+                        <span className="text-xs font-medium leading-none">
+                          {date.toLocaleString(undefined, { month: "short" }).toUpperCase()}
+                        </span>
+                        <span className="font-display text-lg leading-none mt-0.5">
+                          {date.getDate()}
+                        </span>
+                      </div>
                       <div className="min-w-0 flex-1">
-                        <p className="text-base md:text-sm text-gray-200">
-                          {a.firstName} {a.lastName}
-                          <span className="text-sm md:text-xs text-gray-500 ml-2">({a.gender})</span>
-                        </p>
-                        <p className="text-sm md:text-xs text-gray-500 mt-1">
-                          {[
-                            new Date(a.dob).toLocaleDateString(),
-                            (() => {
-                              const age = calculateAge(a.dob);
-                              return age !== null ? `${age} yrs` : null;
-                            })(),
-                            a.belt?.name || null,
-                          ].filter(Boolean).join(" • ")}
-                        </p>
-                        <p className="text-sm md:text-xs text-gray-600 mt-0.5 truncate">
-                          {[
-                            a.nationality || null,
-                            a.weightKg ? `${a.weightKg}kg` : null,
-                            a.club?.name || null,
-                          ].filter(Boolean).join(" • ")}
+                        <p className="text-sm font-medium truncate">{ev.name}</p>
+                        <p className="text-xs text-muted-foreground truncate">
+                          {[ev.venue, ev.city].filter(Boolean).join(" · ") || date.toLocaleDateString()}
                         </p>
                       </div>
-                      <ActionButton
-                        variant="danger"
-                        onClick={() => onDeleteAthlete(a.id)}
-                        disabled={deleteMutation.isPending}
-                      >
-                        {deleteMutation.isPending ? "..." : "Delete"}
-                      </ActionButton>
                     </li>
-                  ))}
-                </ul>
-              )}
-              {!loadingAthletes && !errorAthletes && (clubId || role === "SUPERADMIN") && filteredSorted.length === 0 && (
-                query.trim() ? (
-                  <EmptyState
-                    icon="🔍"
-                    title="No matches"
-                    description={`No athletes match "${query}". Try a different search.`}
-                  />
-                ) : (
-                  <EmptyState
-                    icon="👥"
-                    title="No athletes yet"
-                    description={canManage ? "Add your first athlete to get started." : "Your club has no athletes registered yet."}
-                    action={canManage ? (
-                      <ActionButton onClick={() => navigate("/athletes/new")}>Add athlete</ActionButton>
-                    ) : undefined}
-                  />
-                )
+                  )
+                })}
+              </ul>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex-row items-center justify-between gap-2">
+            <div>
+              <CardTitle className="text-base">Clubs</CardTitle>
+              {!loadingClubs && (
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {canSeeAllClubs ? `${clubs.length} club${clubs.length === 1 ? "" : "s"}` : "Your club"}
+                  {totalAthletesAcrossClubs !== null &&
+                    ` · ${totalAthletesAcrossClubs} athlete${totalAthletesAcrossClubs === 1 ? "" : "s"}`}
+                </p>
               )}
             </div>
-          </div>
-        </div>
-      </main>
+            {canSeeAllClubs && (
+              <Button asChild variant="ghost" size="sm">
+                <a href="/clubs">Manage</a>
+              </Button>
+            )}
+          </CardHeader>
+          <CardContent>
+            {loadingClubs && canSeeAllClubs && (
+              <div className="space-y-2">
+                {[0, 1, 2].map((i) => (
+                  <Skeleton key={i} className="h-10 w-full" />
+                ))}
+              </div>
+            )}
+            {!loadingClubs && clubsForCard.length === 0 && (
+              <p className="text-sm text-muted-foreground py-6 text-center">
+                {canSeeAllClubs ? "No clubs yet." : "No club assigned."}
+              </p>
+            )}
+            {!loadingClubs && clubsForCard.length > 0 && (
+              <ul className="divide-y -my-2 max-h-72 overflow-y-auto">
+                {clubsForCard.map((c) => {
+                  const count = c._count?.athletes ?? 0
+                  return (
+                    <li
+                      key={c.id}
+                      className="flex items-center justify-between gap-3 py-2.5"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium truncate">{c.name}</p>
+                        {c.region && (
+                          <p className="text-xs text-muted-foreground truncate">
+                            {c.region}
+                          </p>
+                        )}
+                      </div>
+                      <div className="flex items-baseline gap-1 shrink-0">
+                        <span className="font-display text-xl tracking-wide leading-none tabular-nums">
+                          {count}
+                        </span>
+                        <span className="text-xs text-muted-foreground">
+                          athlete{count === 1 ? "" : "s"}
+                        </span>
+                      </div>
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+          </CardContent>
+        </Card>
+      </div>
 
-      <footer className="pb-6 text-center">
-        <span className="text-xs text-gray-700">
-          fe {__APP_VERSION__} · api {versionInfo?.backend ?? '…'} · db {versionInfo?.db ?? '…'}
+      {/* Recent athletes */}
+      <Card>
+        <CardHeader className="flex-row items-center justify-between gap-2">
+          <div>
+            <CardTitle className="text-base">Athletes</CardTitle>
+            {!loadingAthletes && (
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {athletes.length} total
+                {recentAthletes.length < athletes.length && ` · showing latest ${recentAthletes.length}`}
+              </p>
+            )}
+          </div>
+          {canManage && (
+            <Button asChild variant="ghost" size="sm">
+              <a href="/athletes">View all</a>
+            </Button>
+          )}
+        </CardHeader>
+        <CardContent>
+          {loadingAthletes && (
+            <div className="space-y-2">
+              {[0, 1, 2, 3].map((i) => (
+                <Skeleton key={i} className="h-14 w-full" />
+              ))}
+            </div>
+          )}
+          {errorAthletes && !loadingAthletes && (
+            <ErrorState
+              title="Couldn't load athletes"
+              message={errorAthletes instanceof Error ? errorAthletes.message : "Please try again."}
+              onRetry={() => refetchAthletes()}
+            />
+          )}
+          {!loadingAthletes && !errorAthletes && recentAthletes.length === 0 && (
+            <p className="text-sm text-muted-foreground py-8 text-center">
+              {!clubId && role !== "SUPERADMIN"
+                ? "Set a club to view athletes."
+                : "No athletes yet."}
+            </p>
+          )}
+          {!loadingAthletes && !errorAthletes && recentAthletes.length > 0 && (
+            <ul className="divide-y -my-2">
+              {recentAthletes.map((a) => {
+                const age = calculateAge(a.dob)
+                return (
+                  <li
+                    key={a.id}
+                    className="flex items-center justify-between gap-3 py-3"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium truncate">
+                        {a.firstName} {a.lastName}
+                      </p>
+                      <p className="text-xs text-muted-foreground truncate">
+                        {[
+                          a.gender,
+                          age !== null ? `${age} yrs` : null,
+                          a.belt?.name,
+                          a.club?.name,
+                        ].filter(Boolean).join(" · ")}
+                      </p>
+                    </div>
+                    {canManage && (
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        onClick={() =>
+                          onDeleteAthlete(a.id, `${a.firstName} ${a.lastName}`)
+                        }
+                        disabled={deleteMutation.isPending}
+                      >
+                        Delete
+                      </Button>
+                    )}
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
+
+      <footer className="pt-8 pb-2 text-center">
+        <span className="text-xs text-muted-foreground/60">
+          fe {__APP_VERSION__} · api {versionInfo?.backend ?? "…"} · db {versionInfo?.db ?? "…"}
         </span>
       </footer>
-    </div>
-  );
-};
-export { Dashboard };
+    </AppShell>
+  )
+}
 
+export { Dashboard }

@@ -1,600 +1,636 @@
-import { useState, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
-import { useAuth } from "../contexts/AuthContext";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Input, Select } from "../components/Input";
-import { SkeletonList } from "../components/UIState";
-import { useToast, useApiErrorToast } from "../components/Toast";
-import { EntryService, type Entry, type EntryFilters } from "../lib/entries";
-import { listEvents, getDivisions, type Event, type Division } from "../lib/events";
-import { listClubs, type Club } from "../lib/clubs";
+import { useState, useMemo } from "react"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
+import {
+  Check,
+  ChevronRight,
+  Search,
+  Undo2,
+  Users as UsersIcon,
+  Weight as WeightIcon,
+  User as UserIcon,
+} from "lucide-react"
 
-// ============ Constants ============
+import { useAuth } from "@/contexts/AuthContext"
+import { useToast, useApiErrorToast } from "@/components/Toast"
+import { AppShell } from "@/components/layout/AppShell"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import {
+  Card,
+  CardContent,
+} from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { Skeleton } from "@/components/ui/skeleton"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { cn } from "@/lib/utils"
+import { EntryService, type Entry, type EntryFilters } from "@/lib/entries"
+import { listEvents, getDivisions, type Division } from "@/lib/events"
+import { listClubs } from "@/lib/clubs"
 
-const STATUS_STYLES = {
-  DRAFT: {
-    bg: "bg-gray-600/30",
-    text: "text-gray-300",
-    border: "border-gray-600",
-    icon: "📝",
-    label: "Draft",
-  },
-  SUBMITTED: {
-    bg: "bg-amber-600/30",
-    text: "text-amber-300",
-    border: "border-amber-600",
-    icon: "⏳",
-    label: "Pending",
-  },
-  APPROVED: {
-    bg: "bg-green-600/30",
-    text: "text-green-300",
-    border: "border-green-600",
-    icon: "✓",
-    label: "Approved",
-  },
-  RETURNED: {
-    bg: "bg-red-600/30",
-    text: "text-red-300",
-    border: "border-red-600",
-    icon: "↩",
-    label: "Returned",
-  },
-};
+type StatusKey = "DRAFT" | "SUBMITTED" | "APPROVED" | "RETURNED"
+
+const STATUS_STYLES: Record<StatusKey, string> = {
+  DRAFT: "bg-muted text-muted-foreground border-border",
+  SUBMITTED: "bg-belt-orange/15 text-belt-orange border-belt-orange/30",
+  APPROVED: "bg-belt-green/15 text-belt-green border-belt-green/30",
+  RETURNED: "bg-flag-red/15 text-flag-red border-flag-red/30",
+}
+
+const STATUS_LABEL: Record<StatusKey, string> = {
+  DRAFT: "Draft",
+  SUBMITTED: "Pending",
+  APPROVED: "Approved",
+  RETURNED: "Returned",
+}
 
 const CATEGORY_STYLES = {
-  KATA: {
-    bg: "bg-purple-600/30",
-    text: "text-purple-300",
-    icon: "🥋",
-  },
-  KUMITE: {
-    bg: "bg-red-600/30",
-    text: "text-red-300",
-    icon: "🥊",
-  },
-};
+  KATA: "bg-belt-blue/15 text-belt-blue border-belt-blue/30",
+  KUMITE: "bg-flag-red/15 text-flag-red border-flag-red/30",
+} as const
 
-// ============ Components ============
+const StatusBadge = ({ status }: { status: StatusKey }) => (
+  <Badge variant="outline" className={cn("font-normal text-[10px]", STATUS_STYLES[status])}>
+    {STATUS_LABEL[status]}
+  </Badge>
+)
 
-interface StatusBadgeProps {
-  status: "DRAFT" | "SUBMITTED" | "APPROVED" | "RETURNED";
-}
-
-const StatusBadge: React.FC<StatusBadgeProps> = ({ status }) => {
-  const style = STATUS_STYLES[status];
-  return (
-    <span className={`inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium ${style.bg} ${style.text}`}>
-      <span>{style.icon}</span>
-      {style.label}
-    </span>
-  );
-};
-
-interface EntryCardProps {
-  entry: Entry;
-  onStatusChange?: (entryId: string, newStatus: string) => void;
-  isAdmin: boolean;
-}
-
-const EntryCard: React.FC<EntryCardProps> = ({ entry, onStatusChange, isAdmin }) => {
-  const isTeam = entry.entryType === "TEAM_KATA" || entry.entryType === "TEAM_KUMITE";
-  const category = entry.division.category;
-  const categoryStyle = CATEGORY_STYLES[category];
+const EntryRow = ({
+  entry,
+  onStatusChange,
+  isAdmin,
+}: {
+  entry: Entry
+  onStatusChange?: (id: string, next: StatusKey) => void
+  isAdmin: boolean
+}) => {
+  const isTeam = entry.entryType === "TEAM_KATA" || entry.entryType === "TEAM_KUMITE"
+  const cat = entry.division.category
 
   return (
-    <div className={`p-4 rounded border ${STATUS_STYLES[entry.status].border} bg-gray-800 border-l-4`}>
-      <div className="flex justify-between items-start mb-2">
-        <div className="flex-1">
-          <div className="flex items-center gap-2 mb-1">
-            <span className="text-lg">{isTeam ? "👥" : "👤"}</span>
-            <h3 className="font-medium">
-              {isTeam && entry.team
-                ? entry.team.name
-                : entry.athlete
-                ? `${entry.athlete.firstName} ${entry.athlete.lastName}`
-                : "Unknown"}
-            </h3>
-          </div>
-
-          <div className="flex gap-2 flex-wrap text-xs text-gray-400">
-            <span>{entry.club.name}</span>
-            <span>•</span>
-            <span className={categoryStyle.text}>
-              {categoryStyle.icon} {category === "KATA" ? "Kata" : "Kumite"}
-            </span>
-            {entry.weightClass && (
-              <>
-                <span>•</span>
-                <span className="text-orange-300">⚖️ {entry.weightClass.name}</span>
-              </>
-            )}
-            {!isTeam && entry.athlete?.belt && (
-              <>
-                <span>•</span>
+    <Card>
+      <CardContent className="space-y-2 px-4 py-3">
+        <div className="flex justify-between items-start gap-3">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 mb-0.5">
+              {isTeam ? (
+                <UsersIcon className="size-4 text-muted-foreground" />
+              ) : (
+                <UserIcon className="size-4 text-muted-foreground" />
+              )}
+              <h3 className="font-medium truncate">
+                {isTeam && entry.team
+                  ? entry.team.name
+                  : entry.athlete
+                  ? `${entry.athlete.firstName} ${entry.athlete.lastName}`
+                  : "Unknown"}
+              </h3>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap text-xs text-muted-foreground">
+              <span>{entry.club.name}</span>
+              <span aria-hidden>·</span>
+              <Badge variant="outline" className={cn("font-normal text-[10px]", CATEGORY_STYLES[cat])}>
+                {cat}
+              </Badge>
+              {entry.weightClass && (
+                <Badge variant="outline" className="font-normal text-[10px] gap-1">
+                  <WeightIcon className="size-3" />
+                  {entry.weightClass.name}
+                </Badge>
+              )}
+              {!isTeam && entry.athlete?.belt && (
                 <span>{entry.athlete.belt.name}</span>
-              </>
-            )}
-          </div>
-
-          {isTeam && entry.team && (
-            <div className="mt-2 text-xs text-gray-500">
-              <span>Members: {entry.team.members.filter((m) => !m.isReserve).length}</span>
-              {entry.team.members.some((m) => m.isReserve) && (
-                <span> (+{entry.team.members.filter((m) => m.isReserve).length} reserve)</span>
               )}
             </div>
-          )}
+            {isTeam && entry.team && (
+              <p className="mt-1 text-xs text-muted-foreground">
+                Members: {entry.team.members.filter((m) => !m.isReserve).length}
+                {entry.team.members.some((m) => m.isReserve) &&
+                  ` (+${entry.team.members.filter((m) => m.isReserve).length} reserve)`}
+              </p>
+            )}
+          </div>
+          <div className="flex flex-col items-end gap-2">
+            <StatusBadge status={entry.status} />
+            {isAdmin && entry.status === "SUBMITTED" && onStatusChange && (
+              <div className="flex gap-1">
+                <Button
+                  size="xs"
+                  variant="outline"
+                  onClick={() => onStatusChange(entry.id, "APPROVED")}
+                >
+                  <Check />
+                  Approve
+                </Button>
+                <Button
+                  size="xs"
+                  variant="outline"
+                  onClick={() => onStatusChange(entry.id, "RETURNED")}
+                >
+                  <Undo2 />
+                  Return
+                </Button>
+              </div>
+            )}
+          </div>
         </div>
-
-        <div className="flex flex-col items-end gap-2">
-          <StatusBadge status={entry.status} />
-          {isAdmin && entry.status === "SUBMITTED" && onStatusChange && (
-            <div className="flex gap-1">
-              <button
-                onClick={() => onStatusChange(entry.id, "APPROVED")}
-                className="px-2 py-1 bg-green-600 hover:bg-green-500 rounded text-xs"
-              >
-                Approve
-              </button>
-              <button
-                onClick={() => onStatusChange(entry.id, "RETURNED")}
-                className="px-2 py-1 bg-red-600 hover:bg-red-500 rounded text-xs"
-              >
-                Return
-              </button>
-            </div>
-          )}
+        <div className="text-xs text-muted-foreground pt-2 border-t flex justify-between">
+          <span>Division: {entry.division.name}</span>
+          <span>
+            {entry.entryType === "KATA"
+              ? "Kata (Individual)"
+              : entry.entryType === "KUMITE"
+              ? "Kumite (Individual)"
+              : entry.entryType === "TEAM_KATA"
+              ? "Kata (Team)"
+              : "Kumite (Team)"}
+          </span>
         </div>
-      </div>
-
-      <div className="mt-2 pt-2 border-t border-gray-700 flex justify-between text-xs text-gray-500">
-        <span>Division: {entry.division.name}</span>
-        <span>
-          {entry.entryType === "KATA"
-            ? "Kata (Individual)"
-            : entry.entryType === "KUMITE"
-            ? "Kumite (Individual)"
-            : entry.entryType === "TEAM_KATA"
-            ? "Kata (Team)"
-            : "Kumite (Team)"}
-        </span>
-      </div>
-    </div>
-  );
-};
-
-// ============ Main Component ============
+      </CardContent>
+    </Card>
+  )
+}
 
 const EntriesView = () => {
-  const { role, clubId } = useAuth();
-  const navigate = useNavigate();
-  const queryClient = useQueryClient();
-  const toast = useToast();
-  const showApiError = useApiErrorToast();
-  const isAdmin = role === "SUPERADMIN" || role === "ADMIN";
+  const { role, clubId } = useAuth()
+  const queryClient = useQueryClient()
+  const toast = useToast()
+  const showApiError = useApiErrorToast()
+  const isAdmin = role === "SUPERADMIN" || role === "ADMIN"
 
-  // State
-  const [selectedEventId, setSelectedEventId] = useState<string>("");
-  const [filterClubId, setFilterClubId] = useState<string>(clubId || "");
-  const [filterDivisionId, setFilterDivisionId] = useState<string>("");
-  const [filterStatus, setFilterStatus] = useState<string>("ALL");
-  const [filterEntryType, setFilterEntryType] = useState<string>("ALL");
-  const [searchQuery, setSearchQuery] = useState("");
-  const [viewMode, setViewMode] = useState<"grouped" | "table">("grouped");
-  const [expandedDivisions, setExpandedDivisions] = useState<Set<string>>(new Set());
+  const [selectedEventId, setSelectedEventId] = useState<string>("")
+  const [filterClubId, setFilterClubId] = useState<string>(clubId || "")
+  const [filterDivisionId, setFilterDivisionId] = useState<string>("")
+  const [filterStatus, setFilterStatus] = useState<string>("ALL")
+  const [filterEntryType, setFilterEntryType] = useState<string>("ALL")
+  const [searchQuery, setSearchQuery] = useState("")
+  const [viewMode, setViewMode] = useState<"grouped" | "table">("grouped")
+  const [expandedDivisions, setExpandedDivisions] = useState<Set<string>>(new Set())
 
-  // Queries
   const { data: events = [] } = useQuery({
     queryKey: ["events"],
     queryFn: listEvents,
-  });
+  })
 
   const { data: clubs = [] } = useQuery({
     queryKey: ["clubs"],
     queryFn: listClubs,
     enabled: isAdmin,
-  });
+  })
 
   const { data: divisions = [] } = useQuery({
     queryKey: ["divisions", selectedEventId],
     queryFn: () => getDivisions(selectedEventId),
     enabled: !!selectedEventId,
-  });
+  })
 
   const filters: EntryFilters = {
     eventId: selectedEventId,
     clubId: isAdmin ? filterClubId || undefined : clubId || undefined,
     divisionId: filterDivisionId || undefined,
-    status: filterStatus !== "ALL" ? (filterStatus as any) : undefined,
-    entryType: filterEntryType !== "ALL" ? (filterEntryType as any) : undefined,
+    status: filterStatus !== "ALL" ? (filterStatus as EntryFilters["status"]) : undefined,
+    entryType:
+      filterEntryType !== "ALL" ? (filterEntryType as EntryFilters["entryType"]) : undefined,
     searchQuery: searchQuery || undefined,
-  };
+  }
 
   const { data: entries = [], isLoading: loadingEntries } = useQuery({
     queryKey: ["entries", filters],
     queryFn: () => EntryService.list(filters),
     enabled: !!selectedEventId,
-  });
+  })
 
-  // Handlers
-  const handleStatusChange = async (entryId: string, newStatus: string) => {
+  const handleStatusChange = async (entryId: string, newStatus: StatusKey) => {
     try {
-      await EntryService.updateStatus(entryId, newStatus);
-      queryClient.invalidateQueries({ queryKey: ["entries"] });
-      toast.success("Entry status updated");
-    } catch (error) {
-      showApiError(error, "Failed to update status");
+      await EntryService.updateStatus(entryId, newStatus)
+      queryClient.invalidateQueries({ queryKey: ["entries"] })
+      toast.success("Entry status updated")
+    } catch (e) {
+      showApiError(e, "Failed to update status")
     }
-  };
+  }
 
-  const toggleDivision = (divisionId: string) => {
-    const newExpanded = new Set(expandedDivisions);
-    if (newExpanded.has(divisionId)) {
-      newExpanded.delete(divisionId);
-    } else {
-      newExpanded.add(divisionId);
-    }
-    setExpandedDivisions(newExpanded);
-  };
+  const toggleDivision = (id: string) => {
+    setExpandedDivisions((prev) => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }
 
-  const toggleAllDivisions = () => {
-    if (expandedDivisions.size === divisions.length) {
-      setExpandedDivisions(new Set());
-    } else {
-      setExpandedDivisions(new Set(divisions.map((d) => d.id)));
-    }
-  };
+  const toggleAll = () => {
+    if (expandedDivisions.size === divisions.length) setExpandedDivisions(new Set())
+    else setExpandedDivisions(new Set(divisions.map((d) => d.id)))
+  }
 
-  // Statistics
-  const stats = useMemo(() => {
-    return {
+  const stats = useMemo(
+    () => ({
       total: entries.length,
       draft: entries.filter((e) => e.status === "DRAFT").length,
       submitted: entries.filter((e) => e.status === "SUBMITTED").length,
       approved: entries.filter((e) => e.status === "APPROVED").length,
       returned: entries.filter((e) => e.status === "RETURNED").length,
-    };
-  }, [entries]);
+    }),
+    [entries],
+  )
 
-  // Group entries by division
   const groupedEntries = useMemo(() => {
-    const groups: {
-      [divisionId: string]: {
-        division: Division;
-        entries: Entry[];
-      };
-    } = {};
-
+    const groups: { [id: string]: { division: Division; entries: Entry[] } } = {}
     entries.forEach((entry) => {
       if (!groups[entry.divisionId]) {
-        groups[entry.divisionId] = {
-          division: entry.division,
-          entries: [],
-        };
+        groups[entry.divisionId] = { division: entry.division, entries: [] }
       }
-      groups[entry.divisionId].entries.push(entry);
-    });
+      groups[entry.divisionId].entries.push(entry)
+    })
+    return groups
+  }, [entries])
 
-    return groups;
-  }, [entries]);
-
-  // Get all divisions (including empty ones)
-  const allDivisionsWithEntries = useMemo(() => {
-    return divisions.map((division) => ({
-      division,
-      entries: groupedEntries[division.id]?.entries || [],
-    }));
-  }, [divisions, groupedEntries]);
+  const allDivisionsWithEntries = useMemo(
+    () =>
+      divisions.map((division) => ({
+        division,
+        entries: groupedEntries[division.id]?.entries || [],
+      })),
+    [divisions, groupedEntries],
+  )
 
   if (!isAdmin && !clubId) {
     return (
-      <div className="min-h-screen bg-gray-950 text-gray-100 p-4">
-        <div className="max-w-7xl mx-auto">
-          <div className="flex items-center justify-between mb-6">
-            <h1 className="text-2xl font-semibold">View Entries</h1>
-            <button className="text-sm text-gray-400 hover:text-white" onClick={() => navigate("/dashboard")}>
-              Back to Dashboard
-            </button>
-          </div>
-          <p className="text-sm text-gray-400">You do not have permission to access this page.</p>
-        </div>
-      </div>
-    );
+      <AppShell title="Entries">
+        <Card>
+          <CardContent className="py-10 text-center">
+            <p className="text-sm text-muted-foreground">
+              You don't have permission to access this page.
+            </p>
+          </CardContent>
+        </Card>
+      </AppShell>
+    )
+  }
+
+  const statTone: Record<keyof typeof stats, string> = {
+    total: "",
+    draft: "text-muted-foreground",
+    submitted: "text-belt-orange",
+    approved: "text-belt-green",
+    returned: "text-flag-red",
+  }
+  const statLabel: Record<keyof typeof stats, string> = {
+    total: "Total",
+    draft: "Draft",
+    submitted: "Pending",
+    approved: "Approved",
+    returned: "Returned",
   }
 
   return (
-    <div className="min-h-screen bg-gray-950 text-gray-100 p-4">
-      <div className="max-w-7xl mx-auto">
-        {/* Header */}
-        <div className="flex justify-between items-center mb-6">
-          <div>
-            <h1 className="text-2xl font-bold">Event Entries</h1>
-            <p className="text-sm text-gray-400 mt-1">View and manage all competition entries</p>
-          </div>
-          <button
-            onClick={() => navigate("/events")}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded text-sm"
-          >
-            ← Back to Event Management
-          </button>
-        </div>
+    <AppShell title="Entries">
+      <div className="mb-4 sm:mb-6">
+        <h1 className="font-display text-3xl sm:text-4xl tracking-wider">
+          ALL ENTRIES
+        </h1>
+        <p className="text-sm text-muted-foreground mt-1">
+          View and manage competition entries across all events.
+        </p>
+      </div>
 
-        {/* Event Selection */}
-        <div className="bg-gray-900 rounded-lg p-4 mb-6">
-          <label className="block text-sm text-gray-400 mb-2">Select Event</label>
+      <Card className="mb-4">
+        <CardContent>
+          <Label htmlFor="event-select" className="mb-1.5">Select event</Label>
           <Select
-            value={selectedEventId}
-            onChange={(e) => {
-              setSelectedEventId(e.target.value);
-              setFilterDivisionId("");
+            value={selectedEventId || "none"}
+            onValueChange={(v) => {
+              setSelectedEventId(v === "none" ? "" : v)
+              setFilterDivisionId("")
             }}
           >
-            <option value="">-- Select Event --</option>
-            {events.map((event) => (
-              <option key={event.id} value={event.id}>
-                {event.name} - {new Date(event.startDate).toLocaleDateString()}
-              </option>
-            ))}
+            <SelectTrigger id="event-select" className="w-full">
+              <SelectValue placeholder="-- Select event --" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none">-- Select event --</SelectItem>
+              {events.map((event) => (
+                <SelectItem key={event.id} value={event.id}>
+                  {event.name} — {new Date(event.startDate).toLocaleDateString()}
+                </SelectItem>
+              ))}
+            </SelectContent>
           </Select>
-        </div>
+        </CardContent>
+      </Card>
 
-        {selectedEventId && (
-          <>
-            {/* Statistics */}
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
-              <div className="bg-gray-900 rounded-lg p-4">
-                <div className="text-2xl font-bold">{stats.total}</div>
-                <div className="text-xs text-gray-400">Total Entries</div>
-              </div>
-              <div className="bg-gray-900 rounded-lg p-4">
-                <div className="text-2xl font-bold text-gray-300">{stats.draft}</div>
-                <div className="text-xs text-gray-400">Draft</div>
-              </div>
-              <div className="bg-gray-900 rounded-lg p-4">
-                <div className="text-2xl font-bold text-amber-300">{stats.submitted}</div>
-                <div className="text-xs text-gray-400">Pending</div>
-              </div>
-              <div className="bg-gray-900 rounded-lg p-4">
-                <div className="text-2xl font-bold text-green-300">{stats.approved}</div>
-                <div className="text-xs text-gray-400">Approved</div>
-              </div>
-              <div className="bg-gray-900 rounded-lg p-4">
-                <div className="text-2xl font-bold text-red-300">{stats.returned}</div>
-                <div className="text-xs text-gray-400">Returned</div>
-              </div>
-            </div>
+      {selectedEventId && (
+        <>
+          {/* Stats */}
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
+            {(Object.keys(stats) as Array<keyof typeof stats>).map((key) => (
+              <Card key={key}>
+                <CardContent className="py-3">
+                  <p
+                    className={cn(
+                      "font-display text-2xl sm:text-3xl tracking-wide leading-none",
+                      statTone[key],
+                    )}
+                  >
+                    {stats[key]}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {statLabel[key]}
+                  </p>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
 
-            {/* Filters */}
-            <div className="bg-gray-900 rounded-lg p-4 mb-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+          {/* Filters */}
+          <Card className="mb-4">
+            <CardContent className="space-y-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
                 {isAdmin && (
                   <div>
-                    <label className="block text-sm text-gray-400 mb-1">Club</label>
-                    <Select value={filterClubId} onChange={(e) => setFilterClubId(e.target.value)}>
-                      <option value="">All Clubs</option>
-                      {clubs.map((club) => (
-                        <option key={club.id} value={club.id}>
-                          {club.name}
-                        </option>
-                      ))}
+                    <Label className="mb-1.5">Club</Label>
+                    <Select
+                      value={filterClubId || "all"}
+                      onValueChange={(v) =>
+                        setFilterClubId(v === "all" ? "" : v)
+                      }
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All clubs</SelectItem>
+                        {clubs.map((club) => (
+                          <SelectItem key={club.id} value={club.id}>
+                            {club.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
                     </Select>
                   </div>
                 )}
-
                 <div>
-                  <label className="block text-sm text-gray-400 mb-1">Division</label>
-                  <Select value={filterDivisionId} onChange={(e) => setFilterDivisionId(e.target.value)}>
-                    <option value="">All Divisions</option>
-                    {divisions.map((division) => (
-                      <option key={division.id} value={division.id}>
-                        {division.name} ({division.category})
-                      </option>
-                    ))}
+                  <Label className="mb-1.5">Division</Label>
+                  <Select
+                    value={filterDivisionId || "all"}
+                    onValueChange={(v) => setFilterDivisionId(v === "all" ? "" : v)}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All divisions</SelectItem>
+                      {divisions.map((d) => (
+                        <SelectItem key={d.id} value={d.id}>
+                          {d.name} ({d.category})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
                   </Select>
                 </div>
-
                 <div>
-                  <label className="block text-sm text-gray-400 mb-1">Status</label>
-                  <Select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
-                    <option value="ALL">All Status</option>
-                    <option value="DRAFT">Draft</option>
-                    <option value="SUBMITTED">Pending</option>
-                    <option value="APPROVED">Approved</option>
-                    <option value="RETURNED">Returned</option>
+                  <Label className="mb-1.5">Status</Label>
+                  <Select value={filterStatus} onValueChange={setFilterStatus}>
+                    <SelectTrigger className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="ALL">All status</SelectItem>
+                      <SelectItem value="DRAFT">Draft</SelectItem>
+                      <SelectItem value="SUBMITTED">Pending</SelectItem>
+                      <SelectItem value="APPROVED">Approved</SelectItem>
+                      <SelectItem value="RETURNED">Returned</SelectItem>
+                    </SelectContent>
                   </Select>
                 </div>
-
                 <div>
-                  <label className="block text-sm text-gray-400 mb-1">Entry Type</label>
-                  <Select value={filterEntryType} onChange={(e) => setFilterEntryType(e.target.value)}>
-                    <option value="ALL">All Types</option>
-                    <option value="KATA">Kata (Individual)</option>
-                    <option value="KUMITE">Kumite (Individual)</option>
-                    <option value="TEAM_KATA">Kata (Team)</option>
-                    <option value="TEAM_KUMITE">Kumite (Team)</option>
+                  <Label className="mb-1.5">Entry type</Label>
+                  <Select value={filterEntryType} onValueChange={setFilterEntryType}>
+                    <SelectTrigger className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="ALL">All types</SelectItem>
+                      <SelectItem value="KATA">Kata (Individual)</SelectItem>
+                      <SelectItem value="KUMITE">Kumite (Individual)</SelectItem>
+                      <SelectItem value="TEAM_KATA">Kata (Team)</SelectItem>
+                      <SelectItem value="TEAM_KUMITE">Kumite (Team)</SelectItem>
+                    </SelectContent>
                   </Select>
                 </div>
               </div>
-
-              <div>
-                <label className="block text-sm text-gray-400 mb-1">Search</label>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground pointer-events-none" />
                 <Input
-                  type="text"
                   placeholder="Search athletes, teams, clubs..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-9"
                 />
               </div>
-            </div>
+            </CardContent>
+          </Card>
 
-            {/* View Options */}
-            <div className="bg-gray-900 rounded-lg p-4 mb-6 flex justify-between items-center">
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setViewMode("grouped")}
-                  className={`px-3 py-1 rounded text-sm ${
-                    viewMode === "grouped" ? "bg-blue-600" : "bg-gray-700 hover:bg-gray-600"
-                  }`}
-                >
-                  Grouped by Division
-                </button>
-                <button
-                  onClick={() => setViewMode("table")}
-                  className={`px-3 py-1 rounded text-sm ${
-                    viewMode === "table" ? "bg-blue-600" : "bg-gray-700 hover:bg-gray-600"
-                  }`}
-                >
-                  Table View
-                </button>
-              </div>
-
-              {viewMode === "grouped" && (
-                <button
-                  onClick={toggleAllDivisions}
-                  className="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-sm"
-                >
-                  {expandedDivisions.size === divisions.length ? "Collapse All" : "Expand All"}
-                </button>
-              )}
-            </div>
-
-            {/* Entries Display */}
-            {loadingEntries ? (
-              <div className="bg-gray-900 rounded-lg p-4">
-                <SkeletonList count={5} />
-              </div>
-            ) : entries.length === 0 ? (
-              <div className="bg-gray-900 rounded-lg p-8 text-center text-gray-400">
-                No entries found. Try adjusting your filters or create entries from the Event Management page.
-              </div>
-            ) : viewMode === "grouped" ? (
-              <div className="space-y-4">
-                {allDivisionsWithEntries.map(({ division, entries: divisionEntries }) => {
-                  const isExpanded = expandedDivisions.has(division.id);
-                  const categoryStyle = CATEGORY_STYLES[division.category];
-
-                  return (
-                    <div key={division.id} className="bg-gray-900 rounded-lg overflow-hidden">
-                      <button
-                        onClick={() => toggleDivision(division.id)}
-                        className="w-full p-4 flex justify-between items-center hover:bg-gray-800 transition-colors"
-                      >
-                        <div className="flex items-center gap-3">
-                          <span className="text-xl">{categoryStyle.icon}</span>
-                          <div className="text-left">
-                            <h3 className="font-semibold">{division.name}</h3>
-                            <p className="text-xs text-gray-400">
-                              {division.gender} • Ages {division.minAge}-{division.maxAge} •{" "}
-                              <span className={categoryStyle.text}>{division.category}</span>
-                            </p>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-4">
-                          <span className="text-sm text-gray-400">
-                            {divisionEntries.length} {divisionEntries.length === 1 ? "entry" : "entries"}
-                          </span>
-                          <span className="text-gray-400">{isExpanded ? "▼" : "▶"}</span>
-                        </div>
-                      </button>
-
-                      {isExpanded && (
-                        <div className="p-4 pt-0 space-y-3">
-                          {divisionEntries.length === 0 ? (
-                            <p className="text-sm text-gray-500 italic py-4">No entries in this division</p>
-                          ) : (
-                            divisionEntries.map((entry) => (
-                              <EntryCard
-                                key={entry.id}
-                                entry={entry}
-                                onStatusChange={handleStatusChange}
-                                isAdmin={isAdmin}
-                              />
-                            ))
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <div className="bg-gray-900 rounded-lg overflow-hidden">
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead className="bg-gray-800">
-                      <tr>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-400">Name</th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-400">Club</th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-400">Division</th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-400">Category</th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-400">Type</th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-400">Weight</th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-400">Status</th>
-                        {isAdmin && <th className="px-4 py-3 text-left text-xs font-medium text-gray-400">Actions</th>}
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-800">
-                      {entries.map((entry) => {
-                        const isTeam = entry.entryType === "TEAM_KATA" || entry.entryType === "TEAM_KUMITE";
-                        return (
-                          <tr key={entry.id} className="hover:bg-gray-800">
-                            <td className="px-4 py-3 text-sm">
-                              {isTeam && entry.team
-                                ? entry.team.name
-                                : entry.athlete
-                                ? `${entry.athlete.firstName} ${entry.athlete.lastName}`
-                                : "Unknown"}
-                            </td>
-                            <td className="px-4 py-3 text-sm text-gray-400">{entry.club.name}</td>
-                            <td className="px-4 py-3 text-sm text-gray-400">{entry.division.name}</td>
-                            <td className="px-4 py-3 text-sm">
-                              <span className={CATEGORY_STYLES[entry.division.category].text}>
-                                {entry.division.category}
-                              </span>
-                            </td>
-                            <td className="px-4 py-3 text-sm text-gray-400">
-                              {isTeam ? "Team" : "Individual"}
-                            </td>
-                            <td className="px-4 py-3 text-sm text-gray-400">
-                              {entry.weightClass?.name || "-"}
-                            </td>
-                            <td className="px-4 py-3">
-                              <StatusBadge status={entry.status} />
-                            </td>
-                            {isAdmin && (
-                              <td className="px-4 py-3">
-                                {entry.status === "SUBMITTED" && (
-                                  <div className="flex gap-1">
-                                    <button
-                                      onClick={() => handleStatusChange(entry.id, "APPROVED")}
-                                      className="px-2 py-1 bg-green-600 hover:bg-green-500 rounded text-xs"
-                                    >
-                                      ✓
-                                    </button>
-                                    <button
-                                      onClick={() => handleStatusChange(entry.id, "RETURNED")}
-                                      className="px-2 py-1 bg-red-600 hover:bg-red-500 rounded text-xs"
-                                    >
-                                      ↩
-                                    </button>
-                                  </div>
-                                )}
-                              </td>
-                            )}
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
+          {/* View toggle */}
+          <div className="flex items-center justify-between mb-3">
+            <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as "grouped" | "table")}>
+              <TabsList>
+                <TabsTrigger value="grouped">Grouped</TabsTrigger>
+                <TabsTrigger value="table">Table</TabsTrigger>
+              </TabsList>
+            </Tabs>
+            {viewMode === "grouped" && (
+              <Button variant="outline" size="sm" onClick={toggleAll}>
+                {expandedDivisions.size === divisions.length ? "Collapse all" : "Expand all"}
+              </Button>
             )}
-          </>
-        )}
-      </div>
-    </div>
-  );
-};
+          </div>
 
-export default EntriesView;
+          {/* Entries */}
+          {loadingEntries && (
+            <div className="space-y-2">
+              {[0, 1, 2, 3].map((i) => (
+                <Skeleton key={i} className="h-24 w-full" />
+              ))}
+            </div>
+          )}
+
+          {!loadingEntries && entries.length === 0 && (
+            <Card>
+              <CardContent className="py-10 text-center text-sm text-muted-foreground">
+                No entries found. Try adjusting your filters.
+              </CardContent>
+            </Card>
+          )}
+
+          {!loadingEntries && entries.length > 0 && viewMode === "grouped" && (
+            <div className="space-y-3">
+              {allDivisionsWithEntries.map(({ division, entries: divisionEntries }) => {
+                const isExpanded = expandedDivisions.has(division.id)
+                return (
+                  <Card key={division.id}>
+                    <button
+                      type="button"
+                      onClick={() => toggleDivision(division.id)}
+                      className="w-full flex items-center justify-between p-4 text-left hover:bg-accent/40 transition-colors"
+                    >
+                      <div className="flex items-center gap-3">
+                        <ChevronRight
+                          className={cn(
+                            "size-4 text-muted-foreground transition-transform",
+                            isExpanded && "rotate-90",
+                          )}
+                        />
+                        <div>
+                          <p className="font-medium">{division.name}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {division.gender} · Ages {division.minAge}-{division.maxAge}
+                          </p>
+                        </div>
+                        <Badge
+                          variant="outline"
+                          className={cn(
+                            "font-normal text-[10px]",
+                            CATEGORY_STYLES[division.category],
+                          )}
+                        >
+                          {division.category}
+                        </Badge>
+                      </div>
+                      <span className="text-xs text-muted-foreground">
+                        {divisionEntries.length}{" "}
+                        {divisionEntries.length === 1 ? "entry" : "entries"}
+                      </span>
+                    </button>
+
+                    {isExpanded && (
+                      <CardContent className="space-y-2 pt-0">
+                        {divisionEntries.length === 0 ? (
+                          <p className="text-sm text-muted-foreground italic py-4">
+                            No entries in this division.
+                          </p>
+                        ) : (
+                          divisionEntries.map((entry) => (
+                            <EntryRow
+                              key={entry.id}
+                              entry={entry}
+                              onStatusChange={handleStatusChange}
+                              isAdmin={isAdmin}
+                            />
+                          ))
+                        )}
+                      </CardContent>
+                    )}
+                  </Card>
+                )
+              })}
+            </div>
+          )}
+
+          {!loadingEntries && entries.length > 0 && viewMode === "table" && (
+            <div className="rounded-md border bg-card overflow-hidden">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Name</TableHead>
+                    <TableHead className="hidden sm:table-cell">Club</TableHead>
+                    <TableHead className="hidden md:table-cell">Division</TableHead>
+                    <TableHead>Category</TableHead>
+                    <TableHead className="hidden lg:table-cell">Type</TableHead>
+                    <TableHead className="hidden xl:table-cell">Weight</TableHead>
+                    <TableHead>Status</TableHead>
+                    {isAdmin && <TableHead className="text-right">Actions</TableHead>}
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {entries.map((entry) => {
+                    const isTeam =
+                      entry.entryType === "TEAM_KATA" || entry.entryType === "TEAM_KUMITE"
+                    return (
+                      <TableRow key={entry.id}>
+                        <TableCell className="font-medium">
+                          {isTeam && entry.team
+                            ? entry.team.name
+                            : entry.athlete
+                            ? `${entry.athlete.firstName} ${entry.athlete.lastName}`
+                            : "Unknown"}
+                        </TableCell>
+                        <TableCell className="hidden sm:table-cell text-muted-foreground">
+                          {entry.club.name}
+                        </TableCell>
+                        <TableCell className="hidden md:table-cell text-muted-foreground">
+                          {entry.division.name}
+                        </TableCell>
+                        <TableCell>
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              "font-normal text-[10px]",
+                              CATEGORY_STYLES[entry.division.category],
+                            )}
+                          >
+                            {entry.division.category}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="hidden lg:table-cell text-muted-foreground">
+                          {isTeam ? "Team" : "Individual"}
+                        </TableCell>
+                        <TableCell className="hidden xl:table-cell text-muted-foreground">
+                          {entry.weightClass?.name || "—"}
+                        </TableCell>
+                        <TableCell>
+                          <StatusBadge status={entry.status} />
+                        </TableCell>
+                        {isAdmin && (
+                          <TableCell>
+                            {entry.status === "SUBMITTED" && (
+                              <div className="flex justify-end gap-1">
+                                <Button
+                                  size="icon-sm"
+                                  variant="outline"
+                                  onClick={() => handleStatusChange(entry.id, "APPROVED")}
+                                  aria-label="Approve"
+                                >
+                                  <Check />
+                                </Button>
+                                <Button
+                                  size="icon-sm"
+                                  variant="outline"
+                                  onClick={() => handleStatusChange(entry.id, "RETURNED")}
+                                  aria-label="Return"
+                                >
+                                  <Undo2 />
+                                </Button>
+                              </div>
+                            )}
+                          </TableCell>
+                        )}
+                      </TableRow>
+                    )
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </>
+      )}
+    </AppShell>
+  )
+}
+
+export default EntriesView

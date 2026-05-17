@@ -1,284 +1,569 @@
-﻿import { useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
-import { useAuth } from "../contexts/AuthContext";
-import { Button, Input, Label, Select, Textarea } from "../components/Input";
-import { Athlete, createAthlete, getAthlete, updateAthlete, Gender } from "../lib/athletes";
-import { listClubs, Club } from "../lib/clubs";
-import { listBelts, Belt } from "../lib/belts";
-import { DocumentSection } from "../components/DocumentSection";
+import { useEffect, useState } from "react"
+import { useNavigate, useParams } from "react-router-dom"
+import { ArrowLeft } from "lucide-react"
 
-type Mode = "create" | "edit";
+import { useAuth } from "@/contexts/AuthContext"
+import { AppShell } from "@/components/layout/AppShell"
+import { DocumentSection } from "@/components/DocumentSection"
+import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { cn } from "@/lib/utils"
+import {
+  type Athlete,
+  type Gender,
+  createAthlete,
+  getAthlete,
+  updateAthlete,
+} from "@/lib/athletes"
+import { listClubs, type Club } from "@/lib/clubs"
+import { listBelts, type Belt } from "@/lib/belts"
 
-const formatApiError = (err: any) => {
-  const data = err?.response?.data;
+type Mode = "create" | "edit"
+
+const formatApiError = (err: unknown) => {
+  const data = (err as { response?: { data?: { error?: string; issues?: Array<{ path?: string[]; message: string }> } } })?.response?.data
   if (data?.issues && Array.isArray(data.issues)) {
-    const details = data.issues.map((issue: any) => {
-      const path = Array.isArray(issue.path) && issue.path.length ? issue.path.join(".") : "field";
-      return `${path}: ${issue.message}`;
-    }).join("; ");
-    return `${data.error || "Validation failed"}: ${details}`;
+    const details = data.issues
+      .map((issue) => {
+        const path = Array.isArray(issue.path) && issue.path.length
+          ? issue.path.join(".")
+          : "field"
+        return `${path}: ${issue.message}`
+      })
+      .join("; ")
+    return `${data.error ?? "Validation failed"}: ${details}`
   }
-  return data?.error || err?.message || "Failed to save athlete";
-};
+  return data?.error ?? (err as Error)?.message ?? "Failed to save athlete"
+}
+
+const RequiredMark = () => (
+  <span className="text-destructive ml-0.5" aria-hidden>*</span>
+)
+
+const FieldLabel = ({
+  htmlFor,
+  required,
+  children,
+}: {
+  htmlFor?: string
+  required?: boolean
+  children: React.ReactNode
+}) => (
+  <Label htmlFor={htmlFor} className="mb-1.5">
+    {children}
+    {required && <RequiredMark />}
+  </Label>
+)
 
 const AthleteFormPage = () => {
-  const { id } = useParams<{ id: string }>();
-  const mode: Mode = id ? "edit" : "create";
-  const { role, clubId } = useAuth();
-  const nav = useNavigate();
-  const canManage = role === "CLUB_MANAGER" || role === "ADMIN" || role === "SUPERADMIN";
+  const { id } = useParams<{ id: string }>()
+  const mode: Mode = id ? "edit" : "create"
+  const { role, clubId } = useAuth()
+  const nav = useNavigate()
+  const canManage =
+    role === "CLUB_MANAGER" || role === "ADMIN" || role === "SUPERADMIN"
 
-  const [clubs, setClubs] = useState<Club[]>([]);
-  const [belts, setBelts] = useState<Belt[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [clubs, setClubs] = useState<Club[]>([])
+  const [belts, setBelts] = useState<Belt[]>([])
+  const [loading, setLoading] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   const [form, setForm] = useState<Partial<Athlete>>({
     clubId: clubId || undefined,
     gender: "Male",
-  });
+  })
 
   useEffect(() => {
-    if (!canManage) return;
-    setLoading(true); setError(null);
-    const promises: Promise<any>[] = [listBelts()];
-    if (role !== "CLUB_MANAGER") promises.push(listClubs());
+    if (!canManage) return
+    setLoading(true)
+    setError(null)
+    const promises: Promise<unknown>[] = [listBelts()]
+    if (role !== "CLUB_MANAGER") promises.push(listClubs())
     Promise.all(promises)
-      .then(([beltsData, clubsData]) => { setBelts(beltsData); if (clubsData) setClubs(clubsData); })
-      .catch((e:any) => setError(e?.response?.data?.error || e.message || "Failed to load lookups"))
-      .finally(() => setLoading(false));
-  }, [canManage, role]);
+      .then(([beltsData, clubsData]) => {
+        setBelts(beltsData as Belt[])
+        if (clubsData) setClubs(clubsData as Club[])
+      })
+      .catch((e) => setError(formatApiError(e)))
+      .finally(() => setLoading(false))
+  }, [canManage, role])
 
   useEffect(() => {
     if (mode === "edit" && id) {
-      setLoading(true); setError(null);
+      setLoading(true)
+      setError(null)
       getAthlete(id)
         .then((a) => setForm({ ...a }))
-        .catch((e:any)=> setError(e?.response?.data?.error || e.message || "Failed to load athlete"))
-        .finally(()=> setLoading(false));
+        .catch((e) => setError(formatApiError(e)))
+        .finally(() => setLoading(false))
     }
-  }, [mode, id]);
+  }, [mode, id])
 
   if (!canManage) {
     return (
-      <div className="min-h-screen bg-gray-950 text-gray-100">
-        <header className="sticky top-0 z-50 bg-gray-950/95 backdrop-blur border-b border-gray-800 px-4 py-3">
-          <div className="max-w-3xl mx-auto flex items-center justify-between">
-            <h1 className="text-xl md:text-2xl font-semibold">{mode === "create" ? "New Athlete" : "Edit Athlete"}</h1>
-            <button className="px-3 py-2 text-sm text-gray-400 hover:text-white" onClick={() => nav("/dashboard")}>Back to Dashboard</button>
-          </div>
-        </header>
-        <main className="p-4">
-          <p className="text-sm text-gray-400">You do not have permission to manage athletes.</p>
-        </main>
-      </div>
-    );
+      <AppShell title={mode === "create" ? "New athlete" : "Edit athlete"}>
+        <Card>
+          <CardContent className="py-10 text-center">
+            <p className="text-sm text-muted-foreground">
+              You don't have permission to manage athletes.
+            </p>
+          </CardContent>
+        </Card>
+      </AppShell>
+    )
   }
 
   async function onSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setError(null);
+    e.preventDefault()
+    setError(null)
+    setSaving(true)
     try {
-      const payload: any = { ...form };
-      if (typeof payload.weightKg === "string") payload.weightKg = Number(payload.weightKg) || undefined;
-      if (!payload.clubId && clubId) payload.clubId = clubId;
-      if (mode === "create") {
-        await createAthlete(payload);
-        nav("/athletes");
-      } else if (mode === "edit" && id) {
-        await updateAthlete(id, payload);
-        nav("/athletes");
+      const payload: Partial<Athlete> & { weightKg?: number } = { ...form }
+      if (typeof payload.weightKg === "string") {
+        payload.weightKg = Number(payload.weightKg) || undefined
       }
-    } catch (err: any) {
-      setError(formatApiError(err));
+      if (!payload.clubId && clubId) payload.clubId = clubId
+      if (mode === "create") {
+        await createAthlete(payload as Parameters<typeof createAthlete>[0])
+      } else if (mode === "edit" && id) {
+        await updateAthlete(id, payload)
+      }
+      nav("/athletes")
+    } catch (err) {
+      setError(formatApiError(err))
+    } finally {
+      setSaving(false)
     }
   }
 
+  const titleText = mode === "create" ? "NEW ATHLETE" : "EDIT ATHLETE"
+
   return (
-    <div className="min-h-screen bg-gray-950 text-gray-100">
-      {/* Sticky header */}
-      <header className="sticky top-0 z-50 bg-gray-950/95 backdrop-blur border-b border-gray-800 px-4 py-3">
-        <div className="max-w-3xl mx-auto flex items-center justify-between">
-          <h1 className="text-xl md:text-2xl font-semibold">{mode === "create" ? "New Athlete" : "Edit Athlete"}</h1>
-          <button className="px-3 py-2 text-sm text-gray-400 hover:text-white active:text-gray-300" onClick={() => nav("/athletes")}>Back</button>
+    <AppShell title={mode === "create" ? "New athlete" : "Edit athlete"}>
+      <div className="flex items-center gap-3 mb-4 sm:mb-6">
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => nav("/athletes")}
+          aria-label="Back to athletes"
+        >
+          <ArrowLeft />
+        </Button>
+        <h1 className="font-display text-3xl sm:text-4xl tracking-wider">
+          {titleText}
+        </h1>
+      </div>
+
+      {error && (
+        <div
+          role="alert"
+          className="mb-4 rounded-md border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive"
+        >
+          {error}
         </div>
-      </header>
+      )}
 
-      <main className="p-4 pb-8">
-        <div className="max-w-3xl mx-auto">
-          {loading && <p className="text-sm text-gray-400 py-4">Loading...</p>}
-          {error && (
-            <div className="bg-red-900/20 border border-red-800 rounded-xl p-4 mb-4">
-              <p className="text-sm text-red-400">{error}</p>
-            </div>
-          )}
+      <form
+        onSubmit={onSubmit}
+        className={cn(
+          "space-y-4 sm:space-y-6",
+          // Leave room for the mobile sticky save bar.
+          "pb-24 sm:pb-0",
+        )}
+      >
+        {role !== "CLUB_MANAGER" && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">
+                Club
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <FieldLabel htmlFor="club" required>
+                Club
+              </FieldLabel>
+              <Select
+                value={form.clubId || ""}
+                onValueChange={(v) => setForm({ ...form, clubId: v })}
+              >
+                <SelectTrigger id="club" className="w-full">
+                  <SelectValue placeholder="Select a club" />
+                </SelectTrigger>
+                <SelectContent>
+                  {clubs.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>
+                      {c.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </CardContent>
+          </Card>
+        )}
 
-          <form onSubmit={onSubmit} className="space-y-5">
-            {role !== "CLUB_MANAGER" && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">
+              Personal information
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <Label required>Club</Label>
-                <Select required value={form.clubId || ""} onChange={(e)=> setForm({ ...form, clubId: e.target.value })}>
-                  <option value="" disabled>Select a club</option>
-                  {clubs.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </Select>
-              </div>
-            )}
-
-            {/* Personal Information Section */}
-            <div className="bg-gray-900/50 rounded-xl p-4 space-y-4">
-              <h2 className="font-medium text-gray-300 text-sm uppercase tracking-wide">Personal Information</h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <Label required>First Name</Label>
-                  <Input required value={form.firstName || ""} onChange={(e)=> setForm({ ...form, firstName: e.target.value })} autoCapitalize="words" />
-                </div>
-                <div>
-                  <Label required>Last Name</Label>
-                  <Input required value={form.lastName || ""} onChange={(e)=> setForm({ ...form, lastName: e.target.value })} autoCapitalize="words" />
-                </div>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-                <div>
-                  <Label required>Date of Birth</Label>
-                  <Input required type="date" value={form.dob ? String(form.dob).slice(0,10) : ""} onChange={(e)=> setForm({ ...form, dob: e.target.value as any })} />
-                </div>
-                <div>
-                  <Label required>Gender</Label>
-                  <Select required value={(form.gender as Gender) || "Male"} onChange={(e)=> setForm({ ...form, gender: e.target.value as Gender })}>
-                    <option value="Male">Male</option>
-                    <option value="Female">Female</option>
-                  </Select>
-                </div>
-                <div className="sm:col-span-2 md:col-span-1">
-                  <Label required>Nationality</Label>
-                  <Input required value={form.nationality || ""} onChange={(e)=> setForm({ ...form, nationality: e.target.value })} />
-                </div>
-              </div>
-            </div>
-
-            {/* Identification Section */}
-            <div className="bg-gray-900/50 rounded-xl p-4 space-y-4">
-              <h2 className="font-medium text-gray-300 text-sm uppercase tracking-wide">Identification</h2>
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-                <div>
-                  <Label>ID Type</Label>
-                  <Input value={form.idType || ""} onChange={(e)=> setForm({ ...form, idType: e.target.value })} />
-                </div>
-                <div>
-                  <Label>ID Number</Label>
-                  <Input value={form.idNumber || ""} onChange={(e)=> setForm({ ...form, idNumber: e.target.value })} />
-                </div>
-                <div className="sm:col-span-2 md:col-span-1">
-                  <Label>Weight (kg)</Label>
-                  <Input type="number" inputMode="decimal" value={(form.weightKg as any) ?? ""} onChange={(e)=> setForm({ ...form, weightKg: Number(e.target.value) })} />
-                </div>
-              </div>
-            </div>
-
-            {/* Karate Information Section */}
-            <div className="bg-gray-900/50 rounded-xl p-4 space-y-4">
-              <h2 className="font-medium text-gray-300 text-sm uppercase tracking-wide">Karate Information</h2>
-              <div>
-                <Label required>Belt</Label>
-                <Select required value={form.beltId || ""} onChange={(e)=> setForm({ ...form, beltId: e.target.value })}>
-                  <option value="" disabled>Select a belt</option>
-                  {belts.map(b => <option key={b.id} value={b.id}>{b.name || b.colour || b.id}</option>)}
-                </Select>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <Label>Join Date</Label>
-                  <Input type="date" value={form.joinDate ? String(form.joinDate).slice(0,10) : ""} onChange={(e)=> setForm({ ...form, joinDate: e.target.value as any })} />
-                </div>
-                <div>
-                  <Label>Last Graded</Label>
-                  <Input type="date" value={form.lastGraded ? String(form.lastGraded).slice(0,10) : ""} onChange={(e)=> setForm({ ...form, lastGraded: e.target.value as any })} />
-                </div>
-              </div>
-              <label className="flex items-center gap-3 p-3 rounded-lg bg-gray-800/50 border border-gray-700 cursor-pointer">
-                <input
-                  type="checkbox"
-                  id="isActive"
-                  checked={form.isActive !== false}
-                  onChange={(e)=> setForm({ ...form, isActive: e.target.checked })}
-                  className="h-5 w-5 rounded border-gray-600 bg-gray-900 text-cyan-500 focus:ring-cyan-500 focus:ring-offset-0"
+                <FieldLabel htmlFor="firstName" required>First name</FieldLabel>
+                <Input
+                  id="firstName"
+                  required
+                  value={form.firstName || ""}
+                  onChange={(e) => setForm({ ...form, firstName: e.target.value })}
+                  autoCapitalize="words"
                 />
-                <div>
-                  <span className="text-sm text-gray-200">Active athlete</span>
-                  <p className="text-xs text-gray-500">Inactive athletes cannot be entered in events</p>
-                </div>
-              </label>
+              </div>
               <div>
-                <Label>Medical Notes</Label>
-                <Textarea rows={3} value={form.medicalNotes || ""} onChange={(e)=> setForm({ ...form, medicalNotes: e.target.value })} />
+                <FieldLabel htmlFor="lastName" required>Last name</FieldLabel>
+                <Input
+                  id="lastName"
+                  required
+                  value={form.lastName || ""}
+                  onChange={(e) => setForm({ ...form, lastName: e.target.value })}
+                  autoCapitalize="words"
+                />
               </div>
             </div>
-
-            {/* Contact Information Section */}
-            <div className="bg-gray-900/50 rounded-xl p-4 space-y-4">
-              <h2 className="font-medium text-gray-300 text-sm uppercase tracking-wide">Contact Information</h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <Label>Contact Email</Label>
-                  <Input type="email" inputMode="email" autoCapitalize="none" value={form.contactEmail || ""} onChange={(e)=> setForm({ ...form, contactEmail: e.target.value })} />
-                </div>
-                <div>
-                  <Label>Contact Phone</Label>
-                  <Input type="tel" inputMode="tel" value={form.contactPhone || ""} onChange={(e)=> setForm({ ...form, contactPhone: e.target.value })} />
-                </div>
-              </div>
-            </div>
-
-            {/* Guardian Information Section */}
-            <div className="bg-gray-900/50 rounded-xl p-4 space-y-4">
-              <h2 className="font-medium text-gray-300 text-sm uppercase tracking-wide">Guardian Information</h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <Label>Guardian Name 1</Label>
-                  <Input value={form.guardianName1 || ""} onChange={(e)=> setForm({ ...form, guardianName1: e.target.value })} autoCapitalize="words" />
-                </div>
-                <div>
-                  <Label>Guardian Phone 1</Label>
-                  <Input type="tel" inputMode="tel" value={form.guardianPhone1 || ""} onChange={(e)=> setForm({ ...form, guardianPhone1: e.target.value })} />
-                </div>
-                <div>
-                  <Label>Guardian Name 2</Label>
-                  <Input value={form.guardianName2 || ""} onChange={(e)=> setForm({ ...form, guardianName2: e.target.value })} autoCapitalize="words" />
-                </div>
-                <div>
-                  <Label>Guardian Phone 2</Label>
-                  <Input type="tel" inputMode="tel" value={form.guardianPhone2 || ""} onChange={(e)=> setForm({ ...form, guardianPhone2: e.target.value })} />
-                </div>
-              </div>
-            </div>
-
-            {/* Photo Section */}
-            <div className="bg-gray-900/50 rounded-xl p-4 space-y-4">
-              <h2 className="font-medium text-gray-300 text-sm uppercase tracking-wide">Photo</h2>
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
               <div>
-                <Label>Photo URL</Label>
-                <Input type="url" value={form.photoUrl || ""} onChange={(e)=> setForm({ ...form, photoUrl: e.target.value })} />
+                <FieldLabel htmlFor="dob" required>Date of birth</FieldLabel>
+                <Input
+                  id="dob"
+                  type="date"
+                  required
+                  value={form.dob ? String(form.dob).slice(0, 10) : ""}
+                  onChange={(e) =>
+                    setForm({ ...form, dob: e.target.value })
+                  }
+                />
+              </div>
+              <div>
+                <FieldLabel htmlFor="gender" required>Gender</FieldLabel>
+                <Select
+                  value={(form.gender as Gender) || "Male"}
+                  onValueChange={(v) => setForm({ ...form, gender: v as Gender })}
+                >
+                  <SelectTrigger id="gender" className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Male">Male</SelectItem>
+                    <SelectItem value="Female">Female</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="sm:col-span-2 md:col-span-1">
+                <FieldLabel htmlFor="nationality" required>Nationality</FieldLabel>
+                <Input
+                  id="nationality"
+                  required
+                  value={form.nationality || ""}
+                  onChange={(e) => setForm({ ...form, nationality: e.target.value })}
+                />
               </div>
             </div>
+          </CardContent>
+        </Card>
 
-            {/* Documents Section */}
-            {mode === "edit" && id && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">
+              Identification
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+            <div>
+              <FieldLabel htmlFor="idType">ID type</FieldLabel>
+              <Input
+                id="idType"
+                value={form.idType || ""}
+                onChange={(e) => setForm({ ...form, idType: e.target.value })}
+              />
+            </div>
+            <div>
+              <FieldLabel htmlFor="idNumber">ID number</FieldLabel>
+              <Input
+                id="idNumber"
+                value={form.idNumber || ""}
+                onChange={(e) => setForm({ ...form, idNumber: e.target.value })}
+              />
+            </div>
+            <div className="sm:col-span-2 md:col-span-1">
+              <FieldLabel htmlFor="weightKg">Weight (kg)</FieldLabel>
+              <Input
+                id="weightKg"
+                type="number"
+                inputMode="decimal"
+                value={form.weightKg ?? ""}
+                onChange={(e) =>
+                  setForm({ ...form, weightKg: Number(e.target.value) || undefined })
+                }
+              />
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">
+              Karate
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div>
+              <FieldLabel htmlFor="belt" required>Belt</FieldLabel>
+              <Select
+                value={form.beltId || ""}
+                onValueChange={(v) => setForm({ ...form, beltId: v })}
+              >
+                <SelectTrigger id="belt" className="w-full">
+                  <SelectValue placeholder="Select a belt" />
+                </SelectTrigger>
+                <SelectContent>
+                  {belts.map((b) => (
+                    <SelectItem key={b.id} value={b.id}>
+                      {b.name || b.colour || b.id}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <FieldLabel htmlFor="joinDate">Join date</FieldLabel>
+                <Input
+                  id="joinDate"
+                  type="date"
+                  value={form.joinDate ? String(form.joinDate).slice(0, 10) : ""}
+                  onChange={(e) =>
+                    setForm({ ...form, joinDate: e.target.value })
+                  }
+                />
+              </div>
+              <div>
+                <FieldLabel htmlFor="lastGraded">Last graded</FieldLabel>
+                <Input
+                  id="lastGraded"
+                  type="date"
+                  value={form.lastGraded ? String(form.lastGraded).slice(0, 10) : ""}
+                  onChange={(e) =>
+                    setForm({ ...form, lastGraded: e.target.value })
+                  }
+                />
+              </div>
+            </div>
+            <label className="flex items-center gap-3 rounded-md border bg-muted/30 p-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={form.isActive !== false}
+                onChange={(e) => setForm({ ...form, isActive: e.target.checked })}
+                className="size-4 rounded border-input accent-primary"
+              />
+              <div className="flex-1">
+                <p className="text-sm font-medium leading-none">
+                  Active athlete
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Inactive athletes can't be entered into events.
+                </p>
+              </div>
+            </label>
+            <div>
+              <FieldLabel htmlFor="medicalNotes">Medical notes</FieldLabel>
+              <Textarea
+                id="medicalNotes"
+                rows={3}
+                value={form.medicalNotes || ""}
+                onChange={(e) =>
+                  setForm({ ...form, medicalNotes: e.target.value })
+                }
+              />
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">
+              Contact
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <FieldLabel htmlFor="contactEmail">Email</FieldLabel>
+              <Input
+                id="contactEmail"
+                type="email"
+                inputMode="email"
+                autoCapitalize="none"
+                value={form.contactEmail || ""}
+                onChange={(e) =>
+                  setForm({ ...form, contactEmail: e.target.value })
+                }
+              />
+            </div>
+            <div>
+              <FieldLabel htmlFor="contactPhone">Phone</FieldLabel>
+              <Input
+                id="contactPhone"
+                type="tel"
+                inputMode="tel"
+                value={form.contactPhone || ""}
+                onChange={(e) =>
+                  setForm({ ...form, contactPhone: e.target.value })
+                }
+              />
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">
+              Guardians
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <FieldLabel htmlFor="guardianName1">Guardian 1 name</FieldLabel>
+              <Input
+                id="guardianName1"
+                value={form.guardianName1 || ""}
+                onChange={(e) =>
+                  setForm({ ...form, guardianName1: e.target.value })
+                }
+                autoCapitalize="words"
+              />
+            </div>
+            <div>
+              <FieldLabel htmlFor="guardianPhone1">Guardian 1 phone</FieldLabel>
+              <Input
+                id="guardianPhone1"
+                type="tel"
+                inputMode="tel"
+                value={form.guardianPhone1 || ""}
+                onChange={(e) =>
+                  setForm({ ...form, guardianPhone1: e.target.value })
+                }
+              />
+            </div>
+            <div>
+              <FieldLabel htmlFor="guardianName2">Guardian 2 name</FieldLabel>
+              <Input
+                id="guardianName2"
+                value={form.guardianName2 || ""}
+                onChange={(e) =>
+                  setForm({ ...form, guardianName2: e.target.value })
+                }
+                autoCapitalize="words"
+              />
+            </div>
+            <div>
+              <FieldLabel htmlFor="guardianPhone2">Guardian 2 phone</FieldLabel>
+              <Input
+                id="guardianPhone2"
+                type="tel"
+                inputMode="tel"
+                value={form.guardianPhone2 || ""}
+                onChange={(e) =>
+                  setForm({ ...form, guardianPhone2: e.target.value })
+                }
+              />
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">
+              Photo
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <FieldLabel htmlFor="photoUrl">Photo URL</FieldLabel>
+            <Input
+              id="photoUrl"
+              type="url"
+              value={form.photoUrl || ""}
+              onChange={(e) => setForm({ ...form, photoUrl: e.target.value })}
+            />
+          </CardContent>
+        </Card>
+
+        {mode === "edit" && id && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">
+                Documents
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
               <DocumentSection
                 entityFilter={{ athleteId: id }}
                 canUpload={canManage}
                 canDelete={role === "SUPERADMIN" || role === "ADMIN"}
               />
-            )}
+            </CardContent>
+          </Card>
+        )}
 
-            {/* Submit Button */}
-            <div className="pt-2">
-              <Button type="submit">{mode === "create" ? "Create Athlete" : "Save Changes"}</Button>
-            </div>
-          </form>
+        {/* Desktop save row (inline) */}
+        <div className="hidden sm:flex justify-end gap-2 pt-2">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => nav("/athletes")}
+          >
+            Cancel
+          </Button>
+          <Button type="submit" disabled={saving || loading}>
+            {saving ? "Saving..." : mode === "create" ? "Create athlete" : "Save changes"}
+          </Button>
         </div>
-      </main>
-    </div>
-  );
-};
 
-export default AthleteFormPage;
+        {/* Mobile sticky save bar */}
+        <div
+          className="sm:hidden fixed left-0 right-0 bottom-0 z-30 border-t bg-background/95 backdrop-blur px-3 py-3"
+          style={{ paddingBottom: "calc(0.75rem + var(--safe-area-inset-bottom, 0px))" }}
+        >
+          <div className="mx-auto max-w-7xl flex gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => nav("/athletes")}
+              className="flex-1"
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              disabled={saving || loading}
+              className="flex-[2]"
+            >
+              {saving ? "Saving..." : mode === "create" ? "Create" : "Save"}
+            </Button>
+          </div>
+        </div>
+      </form>
+    </AppShell>
+  )
+}
+
+export default AthleteFormPage

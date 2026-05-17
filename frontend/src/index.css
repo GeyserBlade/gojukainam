@@ -1,56 +1,149 @@
 @import "tailwindcss";
+@import "tw-animate-css";
 
-/* ===== Theme tokens ===== */
+/* Tailwind v4 dark-mode strategy: `.dark` class on <html>.
+   We keep the legacy `html.light` toggle working below for unconverted pages. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ===== Design tokens (Tailwind v4 @theme) ===== */
+@theme inline {
+  /* shadcn semantic tokens — read from CSS variables defined per-mode below */
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  /* Belt-rank ramp — Goju Kai progression */
+  --color-belt-white: var(--belt-white);
+  --color-belt-yellow: var(--belt-yellow);
+  --color-belt-orange: var(--belt-orange);
+  --color-belt-green: var(--belt-green);
+  --color-belt-blue: var(--belt-blue);
+  --color-belt-purple: var(--belt-purple);
+  --color-belt-brown: var(--belt-brown);
+  --color-belt-black: var(--belt-black);
+
+  /* Namibian flag accents */
+  --color-flag-red: var(--flag-red);
+  --color-flag-blue: var(--flag-blue);
+  --color-flag-green: var(--flag-green);
+
+  /* Typography */
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-display: "Bebas Neue", "Inter Variable", ui-sans-serif, system-ui,
+    sans-serif;
+
+  /* Radii */
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+/* ===== Dark mode (default) ===== */
 :root {
   color-scheme: dark;
 
-  --surface-0: #030712; /* gray-950 */
-  --surface-1: #111827; /* gray-900 */
-  --surface-2: #1f2937; /* gray-800 */
-  --border-subtle: #374151; /* gray-700 */
-  --text-primary: #f3f4f6; /* gray-100 */
-  --text-secondary: #9ca3af; /* gray-400 */
-  --text-muted: #6b7280; /* gray-500 */
+  /* shadcn semantic — dark karate ink palette */
+  --background: oklch(0.145 0 0); /* near-black ink */
+  --foreground: oklch(0.985 0 0); /* near-white */
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  /* Primary = Namibian flag red — high-energy accent for primary actions */
+  --primary: oklch(0.62 0.21 22);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --destructive-foreground: oklch(0.985 0 0);
+  --border: oklch(1 0 0 / 12%);
+  --input: oklch(1 0 0 / 14%);
+  --ring: oklch(0.556 0 0);
+  --radius: 0.625rem;
+
+  /* Belt-rank ramp */
+  --belt-white: #f8fafc;
+  --belt-yellow: #f5c518;
+  --belt-orange: #f97316;
+  --belt-green: #16a34a;
+  --belt-blue: #1d4ed8;
+  --belt-purple: #7c3aed;
+  --belt-brown: #78350f;
+  --belt-black: #0a0a0a;
+
+  /* Namibian flag */
+  --flag-red: #c8102e;
+  --flag-blue: #003580;
+  --flag-green: #009a44;
 }
 
+/* ===== Light mode — applied via `.light` (legacy) or `.dark` not present ===== */
 html.light {
   color-scheme: light;
 
-  --surface-0: #f9fafb;
-  --surface-1: #ffffff;
-  --surface-2: #f3f4f6;
-  --border-subtle: #e5e7eb;
-  --text-primary: #111827;
-  --text-secondary: #4b5563;
-  --text-muted: #6b7280;
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.55 0.22 22);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --destructive-foreground: oklch(0.985 0 0);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
 }
 
-/*
- * Light-mode palette overrides. The app is dark-by-default; when <html> has
- * `light`, we remap the common surface/text colors to their light equivalents.
- * This keeps existing Tailwind utilities working without rewriting every page.
- */
-html.light .bg-gray-950 { background-color: var(--surface-0) !important; }
-html.light .bg-gray-900,
-html.light .bg-gray-900\/50,
-html.light .bg-gray-900\/60,
-html.light .bg-gray-900\/95 { background-color: var(--surface-1) !important; }
-html.light .bg-gray-800,
-html.light .bg-gray-800\/60 { background-color: var(--surface-2) !important; }
-html.light .bg-gray-950\/95 { background-color: color-mix(in srgb, var(--surface-0) 95%, transparent) !important; }
-
-html.light .text-gray-100,
-html.light .text-gray-200 { color: var(--text-primary) !important; }
-html.light .text-gray-300,
-html.light .text-gray-400 { color: var(--text-secondary) !important; }
-html.light .text-gray-500,
-html.light .text-gray-600 { color: var(--text-muted) !important; }
-
-html.light .border-gray-700,
-html.light .border-gray-800 { border-color: var(--border-subtle) !important; }
-html.light .divide-gray-800 > * + * { border-color: var(--border-subtle) !important; }
-
-html.light .text-black { color: #0b1220 !important; }
+/* ===== Base layer ===== */
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-sans);
+  }
+  .font-display {
+    font-family: var(--font-display);
+    letter-spacing: 0.02em;
+  }
+}
 
 /* ===== Mobile-First Global Styles ===== */
 
@@ -62,13 +155,11 @@ html.light .text-black { color: #0b1220 !important; }
   --safe-area-inset-right: env(safe-area-inset-right, 0px);
 }
 
-/* Prevent pull-to-refresh on mobile */
 html, body {
   overscroll-behavior: none;
   -webkit-overflow-scrolling: touch;
 }
 
-/* Fix 100vh issue on iOS */
 html {
   height: -webkit-fill-available;
 }
@@ -78,7 +169,6 @@ body {
   min-height: -webkit-fill-available;
 }
 
-/* Apply safe area padding to the root container */
 #root {
   padding-top: var(--safe-area-inset-top);
   padding-bottom: var(--safe-area-inset-bottom);
@@ -88,32 +178,27 @@ body {
   min-height: -webkit-fill-available;
 }
 
-/* Smooth momentum scrolling for mobile */
 .mobile-scroll {
   -webkit-overflow-scrolling: touch;
   overflow-y: auto;
 }
 
-/* Prevent text selection on interactive elements */
 button, a, .no-select {
   -webkit-user-select: none;
   user-select: none;
   -webkit-tap-highlight-color: transparent;
 }
 
-/* Allow text selection on inputs and text areas */
 input, textarea, [contenteditable] {
   -webkit-user-select: text;
   user-select: text;
 }
 
-/* Minimum touch target size (44x44px per Apple/Google guidelines) */
 .touch-target {
   min-height: 44px;
   min-width: 44px;
 }
 
-/* Mobile-friendly scrollbar (hide on mobile, thin on desktop) */
 @media (max-width: 768px) {
   ::-webkit-scrollbar {
     width: 0;
@@ -126,29 +211,24 @@ input, textarea, [contenteditable] {
     width: 6px;
     height: 6px;
   }
-
   ::-webkit-scrollbar-track {
     background: transparent;
   }
-
   ::-webkit-scrollbar-thumb {
-    background: #374151;
+    background: var(--border);
     border-radius: 3px;
   }
-
   ::-webkit-scrollbar-thumb:hover {
-    background: #4b5563;
+    background: var(--muted-foreground);
   }
 }
 
-/* Fix for iOS input zoom - ensure font size is 16px+ */
 @media (max-width: 768px) {
   input, select, textarea {
     font-size: 16px !important;
   }
 }
 
-/* Active state for touch devices */
 @media (hover: none) and (pointer: coarse) {
   button:active,
   a:active,
@@ -158,26 +238,17 @@ input, textarea, [contenteditable] {
   }
 }
 
-/* Toast entry animation */
 @keyframes fadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
-/* Visible focus ring for keyboard navigation (a11y) */
 *:focus-visible {
-  outline: 2px solid #06b6d4;
+  outline: 2px solid var(--color-ring);
   outline-offset: 2px;
   border-radius: 4px;
 }
 
-/* Respect reduced motion preference */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;

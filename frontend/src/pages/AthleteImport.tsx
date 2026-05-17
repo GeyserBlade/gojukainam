@@ -1,224 +1,324 @@
-import { useEffect, useMemo, useRef, useState, type DragEvent, type FormEvent } from "react";
-import { useNavigate } from "react-router-dom";
-import { useAuth } from "../contexts/AuthContext";
-import { listClubs, type Club } from "../lib/clubs";
-import { importAthletes, type AthleteImportResult } from "../lib/athletes";
-import { Label, Select } from "../components/Input";
+import { useEffect, useMemo, useRef, useState, type DragEvent, type FormEvent } from "react"
+import { AlertCircle, CheckCircle2, FileSpreadsheet, Upload } from "lucide-react"
 
-type Failure = AthleteImportResult["failures"][number];
+import { useAuth } from "@/contexts/AuthContext"
+import { AppShell } from "@/components/layout/AppShell"
+import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Label } from "@/components/ui/label"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
+import { cn } from "@/lib/utils"
+import { listClubs, type Club } from "@/lib/clubs"
+import { importAthletes, type AthleteImportResult } from "@/lib/athletes"
 
 const ACCEPTED_TYPES = [
   "text/csv",
   "application/vnd.ms-excel",
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-];
-
-const ACCEPTED_EXTENSIONS = ".csv,.xls,.xlsx";
+]
+const ACCEPTED_EXTENSIONS = ".csv,.xls,.xlsx"
 
 const AthleteImportPage = () => {
-  const { role } = useAuth();
-  const navigate = useNavigate();
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const { role } = useAuth()
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
 
-  const [clubs, setClubs] = useState<Club[]>([]);
-  const [selectedClub, setSelectedClub] = useState<string>("");
-  const [clubError, setClubError] = useState<string | null>(null);
-  const [loadingClubs, setLoadingClubs] = useState(false);
-  const [clubsError, setClubsError] = useState<string | null>(null);
+  const [clubs, setClubs] = useState<Club[]>([])
+  const [selectedClub, setSelectedClub] = useState<string>("")
+  const [clubsError, setClubsError] = useState<string | null>(null)
+  const [loadingClubs, setLoadingClubs] = useState(false)
 
-  const [file, setFile] = useState<File | null>(null);
-  const [fileError, setFileError] = useState<string | null>(null);
+  const [file, setFile] = useState<File | null>(null)
+  const [fileError, setFileError] = useState<string | null>(null)
+  const [dragOver, setDragOver] = useState(false)
 
-  const [submitting, setSubmitting] = useState(false);
-  const [result, setResult] = useState<AthleteImportResult | null>(null);
+  const [submitting, setSubmitting] = useState(false)
+  const [result, setResult] = useState<AthleteImportResult | null>(null)
 
   useEffect(() => {
-    if (role !== "SUPERADMIN") return;
-    setLoadingClubs(true);
-    setClubsError(null);
+    if (role !== "SUPERADMIN") return
+    setLoadingClubs(true)
+    setClubsError(null)
     listClubs()
       .then((rows) => {
-        setClubs(rows);
-        setSelectedClub((prev) => prev || rows[0]?.id || "");
+        setClubs(rows)
+        setSelectedClub((prev) => prev || rows[0]?.id || "")
       })
-      .catch((e: any) => setClubsError(e?.response?.data?.error || e.message || "Failed to load clubs"))
-      .finally(() => setLoadingClubs(false));
-  }, [role]);
+      .catch((e) => {
+        const msg =
+          (e as { response?: { data?: { error?: string } } })?.response?.data?.error ??
+          (e as Error)?.message ??
+          "Failed to load clubs"
+        setClubsError(msg)
+      })
+      .finally(() => setLoadingClubs(false))
+  }, [role])
 
-  const acceptedTypes = useMemo(() => new Set(ACCEPTED_TYPES), []);
+  const acceptedTypes = useMemo(() => new Set(ACCEPTED_TYPES), [])
 
   const handleFiles = (files: FileList | null) => {
-    if (!files || files.length === 0) return;
-    const candidate = files[0];
-    const extension = candidate.name.split(".").pop()?.toLowerCase() ?? "";
-    if (!acceptedTypes.has(candidate.type) && !["csv", "xls", "xlsx"].includes(extension)) {
-      setFileError("Unsupported file type. Please upload CSV or Excel (.xls/.xlsx).");
-      setFile(null);
-      return;
+    if (!files || files.length === 0) return
+    const candidate = files[0]
+    const extension = candidate.name.split(".").pop()?.toLowerCase() ?? ""
+    if (
+      !acceptedTypes.has(candidate.type) &&
+      !["csv", "xls", "xlsx"].includes(extension)
+    ) {
+      setFileError("Unsupported file. Upload CSV or Excel (.xls/.xlsx).")
+      setFile(null)
+      return
     }
-    setFile(candidate);
-    setFileError(null);
-  };
+    setFile(candidate)
+    setFileError(null)
+  }
 
   const onDrop = (event: DragEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    handleFiles(event.dataTransfer.files);
-  };
-
-  const onBrowseClick = () => {
-    fileInputRef.current?.click();
-  };
+    event.preventDefault()
+    setDragOver(false)
+    handleFiles(event.dataTransfer.files)
+  }
 
   const onSubmit = async (event: FormEvent) => {
-    event.preventDefault();
-    setResult(null);
-    if (!selectedClub) {
-      setClubError("Select a club before importing.");
-      return;
-    }
-    setClubError(null);
+    event.preventDefault()
+    setResult(null)
+    if (!selectedClub) return
     if (!file) {
-      setFileError("Select a file to import.");
-      return;
+      setFileError("Select a file to import.")
+      return
     }
-    setFileError(null);
-    setSubmitting(true);
+    setSubmitting(true)
     try {
-      const summary = await importAthletes({ clubId: selectedClub, file });
-      setResult(summary);
-    } catch (err: any) {
-      const message = err?.response?.data?.error || err.message || "Failed to import athletes";
+      const summary = await importAthletes({ clubId: selectedClub, file })
+      setResult(summary)
+    } catch (err) {
+      const msg =
+        (err as { response?: { data?: { error?: string } } })?.response?.data?.error ??
+        (err as Error)?.message ??
+        "Failed to import athletes"
       setResult({
         insertedCount: 0,
         failedCount: 1,
-        failures: [{ rowNumber: 0, reason: message }],
-      });
+        failures: [{ rowNumber: 0, reason: msg }],
+      })
     } finally {
-      setSubmitting(false);
+      setSubmitting(false)
     }
-  };
+  }
 
   if (role !== "SUPERADMIN") {
     return (
-      <div className="min-h-screen bg-gray-950 text-gray-100 p-6">
-        <div className="max-w-4xl mx-auto">
-          <div className="flex items-center justify-between mb-6">
-            <h1 className="text-2xl font-semibold">Import Athletes</h1>
-            <button className="text-sm text-gray-400 hover:text-white" onClick={() => navigate("/dashboard")}>
-              Back
-            </button>
-          </div>
-          <p className="text-sm text-gray-400">Only SUPERADMIN users may import athletes.</p>
-        </div>
-      </div>
-    );
+      <AppShell title="Import athletes">
+        <Card>
+          <CardContent className="py-10 text-center">
+            <p className="text-sm text-muted-foreground">
+              Only SUPERADMIN users may import athletes.
+            </p>
+          </CardContent>
+        </Card>
+      </AppShell>
+    )
   }
 
   return (
-    <div className="min-h-screen bg-gray-950 text-gray-100 p-6">
-      <div className="max-w-4xl mx-auto">
-        <div className="flex items-center justify-between mb-6">
-          <h1 className="text-2xl font-semibold">Import Athletes</h1>
-          <button className="text-sm text-gray-400 hover:text-white" onClick={() => navigate("/dashboard")}>
-            Back
-          </button>
+    <AppShell title="Import athletes">
+      <div className="max-w-3xl mx-auto">
+        <div className="mb-6">
+          <h1 className="font-display text-3xl sm:text-4xl tracking-wider">
+            IMPORT ATHLETES
+          </h1>
+          <p className="text-sm text-muted-foreground mt-2">
+            Upload a CSV or Excel file with column headers matching the athlete
+            schema (firstName, lastName, dob, gender, beltId, etc.). Invalid rows
+            are skipped and reported below.
+          </p>
         </div>
 
-        <p className="text-sm text-gray-400 mb-4">
-          Upload a CSV or Excel file with column headers matching the athlete schema (e.g., firstName, lastName, dob,
-          gender, beltId, etc.). Invalid rows are skipped and reported.
-        </p>
+        <Card>
+          <CardContent>
+            <form onSubmit={onSubmit} className="space-y-5">
+              <div>
+                <Label htmlFor="club" className="mb-1.5">
+                  Club <span className="text-destructive">*</span>
+                </Label>
+                <Select
+                  value={selectedClub}
+                  onValueChange={setSelectedClub}
+                  disabled={loadingClubs}
+                >
+                  <SelectTrigger id="club" className="w-full">
+                    <SelectValue placeholder="Select a club" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {clubs.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>
+                        {c.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {clubsError && (
+                  <p className="mt-1 text-xs text-destructive">{clubsError}</p>
+                )}
+              </div>
 
-        <form onSubmit={onSubmit} className="space-y-6">
-          <div>
-            <Label required>Club</Label>
-            <Select
-              disabled={loadingClubs}
-              value={selectedClub}
-              onChange={(e) => setSelectedClub(e.target.value)}
-            >
-              <option value="" disabled>Select club</option>
-              {clubs.map((club) => (
-                <option key={club.id} value={club.id}>{club.name}</option>
-              ))}
-            </Select>
-            {clubError && <p className="text-xs text-red-400 mt-1">{clubError}</p>}
-            {clubsError && <p className="text-xs text-red-400 mt-1">{clubsError}</p>}
-          </div>
+              <div>
+                <Label className="mb-1.5">
+                  File <span className="text-destructive">*</span>
+                </Label>
+                <div
+                  onDragOver={(e) => {
+                    e.preventDefault()
+                    setDragOver(true)
+                  }}
+                  onDragLeave={() => setDragOver(false)}
+                  onDrop={onDrop}
+                  onClick={() => fileInputRef.current?.click()}
+                  className={cn(
+                    "border-2 border-dashed rounded-md p-8 text-center cursor-pointer transition-colors",
+                    dragOver
+                      ? "border-primary bg-primary/5"
+                      : "border-border hover:border-foreground/30 hover:bg-muted/30",
+                  )}
+                >
+                  <div className="flex flex-col items-center gap-2">
+                    <div className="flex size-12 items-center justify-center rounded-full bg-primary/10 text-primary">
+                      <Upload className="size-5" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium">
+                        Drag & drop or click to browse
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        CSV, XLS, or XLSX
+                      </p>
+                    </div>
+                  </div>
+                  {file && (
+                    <div className="mt-4 inline-flex items-center gap-2 rounded-md bg-muted px-3 py-1.5 text-xs">
+                      <FileSpreadsheet className="size-3.5" />
+                      <span className="font-medium">{file.name}</span>
+                      <span className="text-muted-foreground">
+                        ({(file.size / 1024).toFixed(1)} KB)
+                      </span>
+                    </div>
+                  )}
+                </div>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept={ACCEPTED_EXTENSIONS}
+                  className="hidden"
+                  onChange={(e) => handleFiles(e.target.files)}
+                />
+                {fileError && (
+                  <p className="mt-1 text-xs text-destructive">{fileError}</p>
+                )}
+              </div>
 
-          <div>
-            <Label required>File</Label>
-            <div
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={onDrop}
-              onClick={onBrowseClick}
-              className="border border-dashed border-cyan-600/60 rounded-2xl bg-gray-900/40 px-6 py-10 text-center cursor-pointer hover:bg-gray-900/60 transition"
-            >
-              <p className="text-sm text-gray-200">
-                Drag & drop CSV/XLS/XLSX here, or <span className="text-cyan-400 underline">browse</span>
-              </p>
-              {file && (
-                <p className="text-xs text-gray-400 mt-2">
-                  Selected: <span className="text-gray-200">{file.name}</span> ({(file.size / 1024).toFixed(1)} KB)
-                </p>
-              )}
-            </div>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept={ACCEPTED_EXTENSIONS}
-              className="hidden"
-              onChange={(e) => handleFiles(e.target.files)}
-            />
-            {fileError && <p className="text-xs text-red-400 mt-1">{fileError}</p>}
-          </div>
-
-          <div className="flex justify-end">
-            <button
-              type="submit"
-              disabled={submitting || !selectedClub || !file}
-              className="rounded-xl bg-cyan-500 hover:bg-cyan-400 text-black font-semibold px-6 py-2 transition disabled:opacity-50"
-            >
-              {submitting ? "Importing..." : "Start Import"}
-            </button>
-          </div>
-        </form>
+              <Button
+                type="submit"
+                disabled={submitting || !selectedClub || !file}
+                className="w-full sm:w-auto sm:min-w-32"
+                size="lg"
+              >
+                {submitting ? "Importing..." : "Start import"}
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
 
         {result && (
-          <div className="mt-6 p-4 rounded-2xl border border-gray-800 bg-gray-900/40">
-            <h2 className="font-semibold mb-2 text-gray-200">Import Summary</h2>
-            <p className="text-sm text-gray-300">
-              Inserted: <span className="text-emerald-400 font-semibold">{result.insertedCount}</span> • Failed:{" "}
-              <span className="text-red-400 font-semibold">{result.failedCount}</span>
-            </p>
-            {result.failedCount > 0 && (
-              <div className="mt-4">
-                <h3 className="text-sm text-gray-300 font-semibold mb-2">Failed Rows</h3>
-                <div className="max-h-48 overflow-y-auto rounded-xl border border-gray-800">
-                  <table className="min-w-full text-xs">
-                    <thead className="bg-gray-900/60 text-gray-400 sticky top-0">
-                      <tr>
-                        <th className="text-left px-3 py-2">Row</th>
-                        <th className="text-left px-3 py-2">Reason</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-800">
-                      {result.failures.map((failure: Failure, idx) => (
-                        <tr key={`${failure.rowNumber}-${idx}`} className="bg-gray-900/20">
-                          <td className="px-3 py-2 text-gray-300">{failure.rowNumber}</td>
-                          <td className="px-3 py-2 text-gray-400">{failure.reason}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+          <Card className="mt-6">
+            <CardHeader>
+              <CardTitle className="text-base">Import summary</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="flex items-center gap-3 rounded-md border bg-belt-green/5 border-belt-green/30 px-4 py-3">
+                  <CheckCircle2 className="size-5 text-belt-green shrink-0" />
+                  <div>
+                    <p className="font-display text-2xl tracking-wide text-belt-green leading-none">
+                      {result.insertedCount}
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-1">Inserted</p>
+                  </div>
+                </div>
+                <div
+                  className={cn(
+                    "flex items-center gap-3 rounded-md border px-4 py-3",
+                    result.failedCount > 0
+                      ? "bg-destructive/5 border-destructive/30"
+                      : "bg-muted/40 border-border",
+                  )}
+                >
+                  <AlertCircle
+                    className={cn(
+                      "size-5 shrink-0",
+                      result.failedCount > 0
+                        ? "text-destructive"
+                        : "text-muted-foreground",
+                    )}
+                  />
+                  <div>
+                    <p
+                      className={cn(
+                        "font-display text-2xl tracking-wide leading-none",
+                        result.failedCount > 0
+                          ? "text-destructive"
+                          : "text-muted-foreground",
+                      )}
+                    >
+                      {result.failedCount}
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-1">Failed</p>
+                  </div>
                 </div>
               </div>
-            )}
-          </div>
+
+              {result.failedCount > 0 && (
+                <div>
+                  <p className="text-sm font-medium mb-2">Failed rows</p>
+                  <div className="rounded-md border max-h-64 overflow-y-auto">
+                    <Table>
+                      <TableHeader className="sticky top-0 bg-card">
+                        <TableRow>
+                          <TableHead className="w-16">Row</TableHead>
+                          <TableHead>Reason</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {result.failures.map((f, i) => (
+                          <TableRow key={`${f.rowNumber}-${i}`}>
+                            <TableCell className="tabular-nums">{f.rowNumber}</TableCell>
+                            <TableCell className="text-muted-foreground">
+                              {f.reason}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
         )}
       </div>
-    </div>
-  );
-};
+    </AppShell>
+  )
+}
 
-export default AthleteImportPage;
+export default AthleteImportPage

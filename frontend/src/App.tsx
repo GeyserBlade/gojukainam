@@ -3,6 +3,8 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { ToastProvider } from "./components/Toast";
+import { ConfirmProvider } from "./components/ConfirmDialog";
+import { TooltipProvider } from "./components/ui/tooltip";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { PageSpinner } from "./components/UIState";
 
@@ -57,13 +59,17 @@ const AppRoutes: React.FC = () => (
 const App: React.FC = () => (
   <ErrorBoundary>
     <ThemeProvider>
-      <BrowserRouter>
-        <AuthProvider>
-          <ToastProvider>
-            <AppRoutes />
-          </ToastProvider>
-        </AuthProvider>
-      </BrowserRouter>
+      <TooltipProvider delayDuration={150}>
+        <BrowserRouter>
+          <AuthProvider>
+            <ConfirmProvider>
+              <ToastProvider>
+                <AppRoutes />
+              </ToastProvider>
+            </ConfirmProvider>
+          </AuthProvider>
+        </BrowserRouter>
+      </TooltipProvider>
     </ThemeProvider>
   </ErrorBoundary>
 );

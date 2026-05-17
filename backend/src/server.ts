@@ -61,7 +61,7 @@ app.use("/api/auth/password-reset-request", authLimiter);
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
 const ALLOWED_ORIGINS = IS_PRODUCTION && process.env.FRONTEND_URL
   ? [process.env.FRONTEND_URL]
-  : ["http://localhost:5173", "http://localhost:3000"];
+  : ["http://localhost:5173", "http://localhost:5174", "http://localhost:3000"];
 
 app.use(cors({
   origin: (origin, callback) => {
