@@ -189,6 +189,7 @@ const AthleteFormPage = () => {
                 Club
               </FieldLabel>
               <Select
+                key={form.clubId || "no-club"}
                 value={form.clubId || ""}
                 onValueChange={(v) => setForm({ ...form, clubId: v })}
               >
