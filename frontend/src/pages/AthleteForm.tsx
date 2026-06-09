@@ -325,6 +325,7 @@ const AthleteFormPage = () => {
             <div>
               <FieldLabel htmlFor="belt" required>Belt</FieldLabel>
               <Select
+                key={form.beltId || "no-belt"}
                 value={form.beltId || ""}
                 onValueChange={(v) => setForm({ ...form, beltId: v })}
               >
