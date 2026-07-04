@@ -299,8 +299,11 @@ const EventManagement = () => {
 
   const createEntryMutation = useMutation({
     mutationFn: async (athleteId: string) => {
-      const effectiveClubId = filterClubId || clubId
-      if (!effectiveClubId) throw new Error("Club ID is required")
+      // The entry belongs to the athlete's own club; the club filter is
+      // only a view filter and admins may have no club at all.
+      const athlete = eligibleAthletes.find((a) => a.id === athleteId)
+      const effectiveClubId = athlete?.clubId || filterClubId || clubId
+      if (!effectiveClubId) throw new Error("Could not determine the athlete's club")
       const entryData: Parameters<typeof EntryService.create>[0] = {
         eventId: selectedEventId,
         clubId: effectiveClubId,
