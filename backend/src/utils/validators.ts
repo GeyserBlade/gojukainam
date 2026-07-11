@@ -140,6 +140,29 @@ export const IdParam = z.object({
   id: z.string().min(1),
 });
 
+export const EventIdQuery = z.object({
+  eventId: z.string().min(1),
+});
+
+export const CreateDraw = z.object({
+  eventId: z.string().min(1),
+  divisionId: z.string().min(1),
+  weightClassId: z.string().min(1).optional().nullable(),
+});
+
+export const RegenerateDraw = z.object({
+  force: z.boolean().optional(),
+});
+
+export const SetBoutWinner = z.object({
+  winnerEntryId: z.string().min(1).nullable(),
+});
+
+export const BoutParams = z.object({
+  id: z.string().min(1),
+  boutId: z.string().min(1),
+});
+
 export const ClubIdQuery = z.object({
   clubId: z.string().min(1),
 });

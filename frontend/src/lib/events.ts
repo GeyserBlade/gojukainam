@@ -59,6 +59,7 @@ export interface WeightClass {
 
 export interface EligibleAthlete {
   id: string;
+  clubId: string;
   firstName: string;
   lastName: string;
   dob: string;

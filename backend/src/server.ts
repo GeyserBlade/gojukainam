@@ -8,7 +8,7 @@ import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { prisma } from "./lib/prisma.js";
 import { errorHandler } from "./utils/error-handler.js";
-import { authMiddleware } from "./utils/auth.js";
+import { authMiddleware, ensureDevUser } from "./utils/auth.js";
 import { router as auth } from "./routes/auth.js";
 import { router as athletes } from "./routes/athletes.js";
 import { router as entries } from "./routes/entries.js";
@@ -20,6 +20,7 @@ import { router as clubs } from "./routes/clubs.js";
 import { router as users } from "./routes/users.js";
 import { router as belts } from "./routes/belts.js";
 import { router as documents } from "./routes/documents.js";
+import { router as draws } from "./routes/draws.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const { version: BACKEND_VERSION } = JSON.parse(
@@ -103,9 +104,13 @@ app.use("/api/clubs", clubs);
 app.use("/api/users", users);
 app.use("/api/belts", belts);
 app.use("/api/documents", documents);
+app.use("/api/draws", draws);
 
 app.use(errorHandler);
 
 const PORT = process.env.PORT ?? 4000;
-app.listen(PORT, () => console.log(`API on http://localhost:${PORT}`));
+app.listen(PORT, async () => {
+  await ensureDevUser().catch((e) => console.error("ensureDevUser failed:", e));
+  console.log(`API on http://localhost:${PORT}`);
+});
 

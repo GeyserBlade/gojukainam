@@ -1,11 +1,16 @@
 import type { Request, Response, NextFunction } from "express";
 import { AuthService } from "../services/auth.service.js";
+import { prisma } from "../lib/prisma.js";
 
 export type AuthUser = {
   id: string;
   role: "SUPERADMIN"|"ADMIN"|"CLUB_MANAGER"|"COACH"|"ATHLETE";
   clubId?: string | null;
 };
+
+// Stable id used by the dev-header auth stub. A matching User row is upserted
+// at startup (see ensureDevUser) so audit-log writes have a valid FK target.
+export const DEV_USER_ID = "dev-user";
 
 declare global {
   namespace Express {
@@ -33,11 +38,24 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction) 
   if (allowDevAuth && req.header("x-role")) {
     const role = (req.header("x-role") as AuthUser["role"]) || "SUPERADMIN";
     const clubId = req.header("x-club-id") || undefined;
-    req.user = { id: "dev-user", role, clubId };
+    req.user = { id: DEV_USER_ID, role, clubId };
     return next();
   }
 
   return res.status(401).json({ error: "Unauthorized" });
+}
+
+/**
+ * Ensure the dev-auth stub user exists so audit-log writes (which reference
+ * userId) succeed under header auth. No-op unless ALLOW_DEV_AUTH is enabled.
+ */
+export async function ensureDevUser() {
+  if (process.env.ALLOW_DEV_AUTH !== "true") return;
+  await prisma.user.upsert({
+    where: { id: DEV_USER_ID },
+    update: {},
+    create: { id: DEV_USER_ID, email: "dev-user@localhost", name: "Dev User", role: "SUPERADMIN" },
+  });
 }
 
 export function requireRoles(...roles: AuthUser["role"][]) {

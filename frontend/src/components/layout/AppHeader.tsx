@@ -1,5 +1,5 @@
 import { Link, useLocation, useNavigate } from "react-router-dom"
-import { LogOut, User2 } from "lucide-react"
+import { ChevronDown, LogOut, User2 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -26,7 +26,13 @@ export function AppHeader({ title }: AppHeaderProps) {
   const { role, user, logout } = useAuth()
   const location = useLocation()
   const navigate = useNavigate()
-  const items = visibleNavItems(role).slice(0, 5)
+  const allItems = visibleNavItems(role)
+  const items = allItems.slice(0, 5)
+  const overflowItems = allItems.slice(5)
+
+  const isItemActive = (to: string) =>
+    location.pathname === to || location.pathname.startsWith(to + "/")
+  const overflowActive = overflowItems.some((item) => isItemActive(item.to))
 
   const handleLogout = async () => {
     await logout()
@@ -56,25 +62,52 @@ export function AppHeader({ title }: AppHeaderProps) {
         )}
 
         <nav className="ml-4 hidden md:flex items-center gap-0.5">
-          {items.map((item) => {
-            const isActive =
-              location.pathname === item.to ||
-              location.pathname.startsWith(item.to + "/")
-            return (
-              <Button
-                key={item.to}
-                asChild
-                variant="ghost"
-                size="sm"
-                className={cn(
-                  "h-9",
-                  isActive && "bg-accent text-accent-foreground",
-                )}
-              >
-                <Link to={item.to}>{item.label}</Link>
-              </Button>
-            )
-          })}
+          {items.map((item) => (
+            <Button
+              key={item.to}
+              asChild
+              variant="ghost"
+              size="sm"
+              className={cn(
+                "h-9",
+                isItemActive(item.to) && "bg-accent text-accent-foreground",
+              )}
+            >
+              <Link to={item.to}>{item.label}</Link>
+            </Button>
+          ))}
+          {overflowItems.length > 0 && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className={cn(
+                    "h-9 gap-1",
+                    overflowActive && "bg-accent text-accent-foreground",
+                  )}
+                >
+                  More
+                  <ChevronDown className="size-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-48">
+                {overflowItems.map((item) => (
+                  <DropdownMenuItem key={item.to} asChild>
+                    <Link
+                      to={item.to}
+                      className={cn(
+                        isItemActive(item.to) && "bg-accent text-accent-foreground",
+                      )}
+                    >
+                      <item.icon className="size-4" />
+                      {item.label}
+                    </Link>
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
         </nav>
 
         <div className="ml-auto flex items-center gap-1">

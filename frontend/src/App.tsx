@@ -23,6 +23,7 @@ const AthleteExtractPage = lazy(() => import("./pages/AthleteExtract"));
 const EventManagementPage = lazy(() => import("./pages/EventManagement"));
 const EventsPage = lazy(() => import("./pages/Events"));
 const EntriesViewPage = lazy(() => import("./pages/EntriesView"));
+const DrawsPage = lazy(() => import("./pages/Draws"));
 
 
 const Protected: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -51,6 +52,7 @@ const AppRoutes: React.FC = () => (
       <Route path="/events/manage" element={<Protected><EventsPage /></Protected>} />
       <Route path="/events" element={<Protected><EventManagementPage /></Protected>} />
       <Route path="/entries/view" element={<Protected><EntriesViewPage /></Protected>} />
+      <Route path="/draws" element={<Protected><DrawsPage /></Protected>} />
       <Route path="*" element={<Navigate to="/signin" replace />} />
     </Routes>
   </Suspense>

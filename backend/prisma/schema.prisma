@@ -64,6 +64,17 @@ enum EventStatus {
   ARCHIVED    // Historical event
 }
 
+enum DrawStatus {
+  DRAWN       // Draw generated, no results captured yet
+  IN_PROGRESS // At least one result captured
+  COMPLETED   // All placements decided
+}
+
+enum BoutPhase {
+  MAIN
+  REPECHAGE
+}
+
 enum DocumentType {
   IDENTITY_DOCUMENT
   CLUB_MEMBERSHIP_FORM
@@ -159,6 +170,7 @@ model Event {
   teams         Team[]
   invoices      Invoice[]
   documents     Document[]
+  draws         Draw[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -186,6 +198,7 @@ model Division {
   entries       Entry[]
   teams         Team[]
   weightClasses WeightClass[] // Only populated for KUMITE divisions
+  draws         Draw[]
 
   @@index([eventId, key, gender])
   @@index([eventId, category, gender])
@@ -203,6 +216,7 @@ model WeightClass {
   maxKg      Float?
 
   entries Entry[]
+  draws   Draw[]
 
   @@index([eventId, gender])
   @@index([divisionId])
@@ -288,6 +302,11 @@ model Entry {
   feeCents Int         @default(0)
   notes    String?
 
+  drawSlots  DrawSlot[]
+  boutsAsAka Bout[]     @relation("BoutAka")
+  boutsAsAo  Bout[]     @relation("BoutAo")
+  boutsWon   Bout[]     @relation("BoutWinner")
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -364,6 +383,64 @@ model AuditLog {
   @@index([entityType, entityId])
   @@index([createdAt])
   @@index([userId])
+}
+
+model Draw {
+  id            String       @id @default(cuid())
+  eventId       String
+  event         Event        @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  divisionId    String
+  division      Division     @relation(fields: [divisionId], references: [id], onDelete: Cascade)
+  weightClassId String?
+  weightClass   WeightClass? @relation(fields: [weightClassId], references: [id], onDelete: Cascade)
+
+  size   Int // bracket size: 2, 4, 8, 16, 32
+  status DrawStatus @default(DRAWN)
+
+  slots DrawSlot[]
+  bouts Bout[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // One draw per category (division, or division+weight class for kumite).
+  // Postgres allows multiple NULL weightClassId rows, so the service also
+  // guards against duplicates before creating.
+  @@unique([eventId, divisionId, weightClassId])
+  @@index([eventId])
+}
+
+model DrawSlot {
+  id       String @id @default(cuid())
+  drawId   String
+  draw     Draw   @relation(fields: [drawId], references: [id], onDelete: Cascade)
+  position Int // 1..size; positions without a row are byes
+  entryId  String
+  entry    Entry  @relation(fields: [entryId], references: [id], onDelete: Cascade)
+
+  @@unique([drawId, position])
+  @@unique([drawId, entryId])
+}
+
+model Bout {
+  id     String    @id @default(cuid())
+  drawId String
+  draw   Draw      @relation(fields: [drawId], references: [id], onDelete: Cascade)
+  phase  BoutPhase @default(MAIN)
+  // MAIN: round 1..log2(size), position = 0-based bout index within the round.
+  // REPECHAGE: round = stage within the side, position = side (0 = top half, 1 = bottom half).
+  round    Int
+  position Int
+
+  akaEntryId    String?
+  akaEntry      Entry?  @relation("BoutAka", fields: [akaEntryId], references: [id], onDelete: SetNull)
+  aoEntryId     String?
+  aoEntry       Entry?  @relation("BoutAo", fields: [aoEntryId], references: [id], onDelete: SetNull)
+  winnerEntryId String?
+  winnerEntry   Entry?  @relation("BoutWinner", fields: [winnerEntryId], references: [id], onDelete: SetNull)
+
+  @@unique([drawId, phase, round, position])
+  @@index([drawId])
 }
 
 model Document {
