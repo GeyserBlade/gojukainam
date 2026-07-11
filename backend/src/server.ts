@@ -8,7 +8,7 @@ import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { prisma } from "./lib/prisma.js";
 import { errorHandler } from "./utils/error-handler.js";
-import { authMiddleware } from "./utils/auth.js";
+import { authMiddleware, ensureDevUser } from "./utils/auth.js";
 import { router as auth } from "./routes/auth.js";
 import { router as athletes } from "./routes/athletes.js";
 import { router as entries } from "./routes/entries.js";
@@ -109,5 +109,8 @@ app.use("/api/draws", draws);
 app.use(errorHandler);
 
 const PORT = process.env.PORT ?? 4000;
-app.listen(PORT, () => console.log(`API on http://localhost:${PORT}`));
+app.listen(PORT, async () => {
+  await ensureDevUser().catch((e) => console.error("ensureDevUser failed:", e));
+  console.log(`API on http://localhost:${PORT}`);
+});
 
