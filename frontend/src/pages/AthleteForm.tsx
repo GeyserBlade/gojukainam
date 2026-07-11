@@ -31,17 +31,12 @@ import { listBelts, type Belt } from "@/lib/belts"
 type Mode = "create" | "edit"
 
 const formatApiError = (err: unknown) => {
-  const data = (err as { response?: { data?: { error?: string; issues?: Array<{ path?: string[]; message: string }> } } })?.response?.data
-  if (data?.issues && Array.isArray(data.issues)) {
-    const details = data.issues
-      .map((issue) => {
-        const path = Array.isArray(issue.path) && issue.path.length
-          ? issue.path.join(".")
-          : "field"
-        return `${path}: ${issue.message}`
-      })
+  const data = (err as { response?: { data?: { error?: string; details?: Array<{ path?: string; message: string }> } } })?.response?.data
+  if (data?.details && Array.isArray(data.details) && data.details.length) {
+    const msg = data.details
+      .map((d) => `${d.path || "field"}: ${d.message}`)
       .join("; ")
-    return `${data.error ?? "Validation failed"}: ${details}`
+    return `${data.error ?? "Validation failed"}: ${msg}`
   }
   return data?.error ?? (err as Error)?.message ?? "Failed to save athlete"
 }
@@ -86,29 +81,29 @@ const AthleteFormPage = () => {
 
   useEffect(() => {
     if (!canManage) return
+    let cancelled = false
     setLoading(true)
     setError(null)
-    const promises: Promise<unknown>[] = [listBelts()]
-    if (role !== "CLUB_MANAGER") promises.push(listClubs())
-    Promise.all(promises)
-      .then(([beltsData, clubsData]) => {
+    const supportPromises: Promise<unknown>[] = [listBelts()]
+    if (role !== "CLUB_MANAGER") supportPromises.push(listClubs())
+    if (mode === "edit" && id) supportPromises.push(getAthlete(id))
+    Promise.all(supportPromises)
+      .then((results) => {
+        if (cancelled) return
+        const [beltsData, second, third] = results
         setBelts(beltsData as Belt[])
-        if (clubsData) setClubs(clubsData as Club[])
+        if (mode === "edit" && id) {
+          const athleteData = role !== "CLUB_MANAGER" ? third : second
+          setForm({ ...(athleteData as Athlete) })
+          if (role !== "CLUB_MANAGER") setClubs(second as Club[])
+        } else {
+          if (role !== "CLUB_MANAGER") setClubs(second as Club[])
+        }
       })
-      .catch((e) => setError(formatApiError(e)))
-      .finally(() => setLoading(false))
-  }, [canManage, role])
-
-  useEffect(() => {
-    if (mode === "edit" && id) {
-      setLoading(true)
-      setError(null)
-      getAthlete(id)
-        .then((a) => setForm({ ...a }))
-        .catch((e) => setError(formatApiError(e)))
-        .finally(() => setLoading(false))
-    }
-  }, [mode, id])
+      .catch((e) => { if (!cancelled) setError(formatApiError(e)) })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [canManage, role, mode, id])
 
   if (!canManage) {
     return (
@@ -194,6 +189,7 @@ const AthleteFormPage = () => {
                 Club
               </FieldLabel>
               <Select
+                key={form.clubId || "no-club"}
                 value={form.clubId || ""}
                 onValueChange={(v) => setForm({ ...form, clubId: v })}
               >
@@ -330,6 +326,7 @@ const AthleteFormPage = () => {
             <div>
               <FieldLabel htmlFor="belt" required>Belt</FieldLabel>
               <Select
+                key={form.beltId || "no-belt"}
                 value={form.beltId || ""}
                 onValueChange={(v) => setForm({ ...form, beltId: v })}
               >

@@ -1,6 +1,7 @@
 import { ListFilter } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
   Select,
@@ -19,17 +20,30 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet"
+import type { Belt } from "@/lib/belts"
 import type { Club } from "@/lib/clubs"
 
 export interface AthletesFilters {
   clubId: string
+  beltId: string
+  minAge: string
+  maxAge: string
   showInactive: boolean
 }
+
+export const defaultFilters = (clubId?: string | null): AthletesFilters => ({
+  clubId: clubId ?? "",
+  beltId: "",
+  minAge: "",
+  maxAge: "",
+  showInactive: false,
+})
 
 interface AthletesFiltersSheetProps {
   filters: AthletesFilters
   onChange: (next: AthletesFilters) => void
   clubs: Club[]
+  belts: Belt[]
   showClubFilter: boolean
 }
 
@@ -37,10 +51,15 @@ export function AthletesFiltersSheet({
   filters,
   onChange,
   clubs,
+  belts,
   showClubFilter,
 }: AthletesFiltersSheetProps) {
   const activeCount =
-    (filters.clubId ? 1 : 0) + (filters.showInactive ? 1 : 0)
+    (filters.clubId ? 1 : 0) +
+    (filters.beltId ? 1 : 0) +
+    (filters.minAge ? 1 : 0) +
+    (filters.maxAge ? 1 : 0) +
+    (filters.showInactive ? 1 : 0)
 
   return (
     <Sheet>
@@ -88,6 +107,48 @@ export function AthletesFiltersSheet({
             </div>
           )}
 
+          <div className="space-y-2">
+            <Label htmlFor="filter-belt">Belt</Label>
+            <Select
+              value={filters.beltId || "all"}
+              onValueChange={(v) =>
+                onChange({ ...filters, beltId: v === "all" ? "" : v })
+              }
+            >
+              <SelectTrigger id="filter-belt" className="w-full">
+                <SelectValue placeholder="All belts" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All belts</SelectItem>
+                {belts.map((b) => (
+                  <SelectItem key={b.id} value={b.id}>
+                    {b.name ?? `Belt ${b.order}`}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Age range</Label>
+            <div className="grid grid-cols-2 gap-2">
+              <Input
+                type="number"
+                min="0"
+                placeholder="Min age"
+                value={filters.minAge}
+                onChange={(e) => onChange({ ...filters, minAge: e.target.value })}
+              />
+              <Input
+                type="number"
+                min="0"
+                placeholder="Max age"
+                value={filters.maxAge}
+                onChange={(e) => onChange({ ...filters, maxAge: e.target.value })}
+              />
+            </div>
+          </div>
+
           <label className="flex items-center gap-3 rounded-md border bg-card p-3 cursor-pointer">
             <input
               type="checkbox"
@@ -109,9 +170,9 @@ export function AthletesFiltersSheet({
         <SheetFooter>
           <Button
             variant="outline"
-            onClick={() => onChange({ clubId: "", showInactive: false })}
+            onClick={() => onChange(defaultFilters())}
           >
-            Reset
+            Clear filters
           </Button>
           <SheetClose asChild>
             <Button>Done</Button>
