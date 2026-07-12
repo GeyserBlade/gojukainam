@@ -286,12 +286,18 @@ async function recompute(tx: Tx, drawId: string) {
       existing.aoEntryId !== bout.aoEntryId ||
       existing.winnerEntryId !== bout.winnerEntryId
     ) {
+      // Fighters or winner changed: any captured score detail no longer
+      // describes this bout, so it is invalidated along with the result.
       await tx.bout.update({
         where: { id: existing.id },
         data: {
           akaEntryId: bout.akaEntryId,
           aoEntryId: bout.aoEntryId,
           winnerEntryId: bout.winnerEntryId,
+          akaScore: null,
+          aoScore: null,
+          outcome: null,
+          scoreJson: null,
         },
       });
     }
@@ -562,7 +568,11 @@ export class DrawService {
     }
 
     await prisma.$transaction(async (tx) => {
-      await tx.bout.update({ where: { id: boutId }, data: { winnerEntryId } });
+      // Winner-only capture: any previous score detail no longer applies
+      await tx.bout.update({
+        where: { id: boutId },
+        data: { winnerEntryId, akaScore: null, aoScore: null, outcome: null, scoreJson: null },
+      });
       await recompute(tx, drawId);
       await tx.auditLog.create({
         data: {
@@ -571,6 +581,60 @@ export class DrawService {
           entityId: boutId,
           action: winnerEntryId ? "RESULT" : "RESULT_CLEARED",
           diffJson: JSON.stringify({ drawId, winnerEntryId }),
+        },
+      });
+    });
+    return DrawService.get(drawId);
+  }
+
+  /**
+   * Capture a fully scored WKF kumite result: points, outcome and detail,
+   * plus the winner, cascading the bracket exactly like setBoutWinner.
+   */
+  static async setBoutScore(
+    drawId: string,
+    boutId: string,
+    data: {
+      winnerEntryId: string;
+      outcome: string;
+      akaScore: number;
+      aoScore: number;
+      scoreJson?: string;
+    },
+    user: { id: string }
+  ) {
+    const bout = await prisma.bout.findUnique({ where: { id: boutId } });
+    if (!bout || bout.drawId !== drawId) throw { status: 404, message: "Bout not found" };
+    if (!bout.akaEntryId || !bout.aoEntryId)
+      throw { status: 409, message: "Both fighters must be known before capturing a result" };
+    if (data.winnerEntryId !== bout.akaEntryId && data.winnerEntryId !== bout.aoEntryId)
+      throw { status: 422, message: "Winner must be one of the bout's fighters" };
+
+    await prisma.$transaction(async (tx) => {
+      await tx.bout.update({
+        where: { id: boutId },
+        data: {
+          winnerEntryId: data.winnerEntryId,
+          akaScore: data.akaScore,
+          aoScore: data.aoScore,
+          outcome: data.outcome,
+          scoreJson: data.scoreJson ?? null,
+        },
+      });
+      await recompute(tx, drawId);
+      await tx.auditLog.create({
+        data: {
+          userId: user.id,
+          entityType: "Bout",
+          entityId: boutId,
+          action: "SCORE",
+          diffJson: JSON.stringify({
+            drawId,
+            winnerEntryId: data.winnerEntryId,
+            outcome: data.outcome,
+            akaScore: data.akaScore,
+            aoScore: data.aoScore,
+          }),
         },
       });
     });
@@ -645,6 +709,10 @@ export class DrawService {
           ao: b.aoEntryId ? entryById.get(b.aoEntryId) ?? null : null,
           winnerEntryId: b.winnerEntryId,
           isUserResult: b.isUserResult,
+          akaScore: stored?.akaScore ?? null,
+          aoScore: stored?.aoScore ?? null,
+          outcome: stored?.outcome ?? null,
+          scoreJson: stored?.scoreJson ?? null,
         };
       }),
       placements: {

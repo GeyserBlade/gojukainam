@@ -6,6 +6,8 @@ export interface DrawEntrySummary {
   clubName: string;
 }
 
+export type BoutOutcome = "POINTS" | "GAP" | "SENSHU" | "HANTEI" | "HANSOKU" | "KIKEN";
+
 export interface DrawBout {
   id: string | null;
   phase: "MAIN" | "REPECHAGE";
@@ -16,6 +18,11 @@ export interface DrawBout {
   ao: DrawEntrySummary | null;
   winnerEntryId: string | null;
   isUserResult: boolean;
+  /** WKF scoring detail — null for winner-only results */
+  akaScore: number | null;
+  aoScore: number | null;
+  outcome: BoutOutcome | null;
+  scoreJson: string | null;
 }
 
 export type DrawStatus = "DRAWN" | "IN_PROGRESS" | "COMPLETED";
@@ -87,6 +94,21 @@ export async function setBoutWinner(
   winnerEntryId: string | null
 ): Promise<DrawDetail> {
   const res = await api.put(`/draws/${drawId}/bouts/${boutId}`, { winnerEntryId });
+  return res.data;
+}
+
+export async function setBoutScore(
+  drawId: string,
+  boutId: string,
+  data: {
+    winnerEntryId: string;
+    outcome: BoutOutcome;
+    akaScore: number;
+    aoScore: number;
+    scoreJson?: string;
+  }
+): Promise<DrawDetail> {
+  const res = await api.put(`/draws/${drawId}/bouts/${boutId}/score`, data);
   return res.data;
 }
 

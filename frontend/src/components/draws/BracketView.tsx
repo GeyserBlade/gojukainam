@@ -1,4 +1,4 @@
-import { Check, Medal, Trophy } from "lucide-react"
+import { Check, Medal, Timer, Trophy } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -9,7 +9,18 @@ interface BracketViewProps {
   draw: DrawDetail
   canManage: boolean
   onSetWinner: (bout: DrawBout, winnerEntryId: string | null) => void
+  /** When provided (kumite draws), ready bouts get a "score" button. */
+  onOpenScoreboard?: (bout: DrawBout) => void
   busy?: boolean
+}
+
+const OUTCOME_LABEL: Record<string, string> = {
+  POINTS: "points",
+  GAP: "gap",
+  SENSHU: "senshu",
+  HANTEI: "hantei",
+  HANSOKU: "hansoku",
+  KIKEN: "kiken",
 }
 
 function roundLabel(round: number, totalRounds: number, size: number): string {
@@ -67,13 +78,16 @@ interface BoutCardProps {
   canManage: boolean
   busy?: boolean
   onSetWinner: (bout: DrawBout, winnerEntryId: string | null) => void
+  onOpenScoreboard?: (bout: DrawBout) => void
 }
 
-const BoutCard = ({ bout, isRound1, canManage, busy, onSetWinner }: BoutCardProps) => {
+const BoutCard = ({ bout, isRound1, canManage, busy, onSetWinner, onOpenScoreboard }: BoutCardProps) => {
   const decided = bout.isUserResult
   const bothPresent = !!bout.aka && !!bout.ao
   const clickableFor = (fighter: DrawEntrySummary | null) =>
     canManage && !busy && bothPresent && !!bout.id && !!fighter
+  const hasScore = bout.akaScore !== null && bout.aoScore !== null
+  const scoreable = canManage && !busy && bothPresent && !!bout.id && !!onOpenScoreboard
 
   const handleClick = (fighter: DrawEntrySummary | null) => {
     if (!fighter || !bout.id) return
@@ -106,6 +120,33 @@ const BoutCard = ({ bout, isRound1, canManage, busy, onSetWinner }: BoutCardProp
         clickable={clickableFor(bout.ao)}
         onClick={() => handleClick(bout.ao)}
       />
+      {(hasScore || scoreable) && (
+        <div className="flex items-center justify-between gap-1 bg-muted/40 px-2 py-0.5">
+          {hasScore ? (
+            <p className="text-[10px] font-medium tabular-nums text-muted-foreground">
+              <span className="text-flag-red">{bout.akaScore}</span>
+              {" – "}
+              <span className="text-belt-blue">{bout.aoScore}</span>
+              {bout.outcome && (
+                <span className="ml-1 opacity-70">· {OUTCOME_LABEL[bout.outcome] ?? bout.outcome}</span>
+              )}
+            </p>
+          ) : (
+            <span />
+          )}
+          {scoreable && (
+            <button
+              type="button"
+              title={decided ? "Re-score this bout" : "Score this bout"}
+              onClick={() => onOpenScoreboard!(bout)}
+              className="flex items-center gap-1 rounded px-1 py-0.5 text-[10px] font-medium text-primary hover:bg-accent"
+            >
+              <Timer className="h-3 w-3" />
+              Score
+            </button>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -124,7 +165,7 @@ const Connectors = ({ count }: { count: number }) => (
   </div>
 )
 
-export const BracketView = ({ draw, canManage, onSetWinner, busy }: BracketViewProps) => {
+export const BracketView = ({ draw, canManage, onSetWinner, onOpenScoreboard, busy }: BracketViewProps) => {
   const totalRounds = Math.log2(draw.size)
   const mainBouts = draw.bouts.filter((b) => b.phase === "MAIN")
   const rounds = Array.from({ length: totalRounds }, (_, i) =>
@@ -160,6 +201,7 @@ export const BracketView = ({ draw, canManage, onSetWinner, busy }: BracketViewP
                     canManage={canManage}
                     busy={busy}
                     onSetWinner={onSetWinner}
+                    onOpenScoreboard={onOpenScoreboard}
                   />
                 </div>
               ))}
@@ -174,7 +216,7 @@ export const BracketView = ({ draw, canManage, onSetWinner, busy }: BracketViewP
 
 const REPECHAGE_SIDE_LABEL = ["Top half", "Bottom half"]
 
-export const RepechageView = ({ draw, canManage, onSetWinner, busy }: BracketViewProps) => {
+export const RepechageView = ({ draw, canManage, onSetWinner, onOpenScoreboard, busy }: BracketViewProps) => {
   const repBouts = draw.bouts.filter((b) => b.phase === "REPECHAGE")
   if (repBouts.length === 0) return null
 
@@ -212,6 +254,7 @@ export const RepechageView = ({ draw, canManage, onSetWinner, busy }: BracketVie
                     canManage={canManage}
                     busy={busy}
                     onSetWinner={onSetWinner}
+                    onOpenScoreboard={onOpenScoreboard}
                   />
                 </div>
               ))}

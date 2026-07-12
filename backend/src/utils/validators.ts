@@ -158,6 +158,16 @@ export const SetBoutWinner = z.object({
   winnerEntryId: z.string().min(1).nullable(),
 });
 
+export const BOUT_OUTCOMES = ["POINTS", "GAP", "SENSHU", "HANTEI", "HANSOKU", "KIKEN"] as const;
+
+export const SetBoutScore = z.object({
+  winnerEntryId: z.string().min(1),
+  outcome: z.enum(BOUT_OUTCOMES),
+  akaScore: z.number().int().min(0).max(99),
+  aoScore: z.number().int().min(0).max(99),
+  scoreJson: z.string().max(20000).optional(),
+});
+
 export const BoutParams = z.object({
   id: z.string().min(1),
   boutId: z.string().min(1),

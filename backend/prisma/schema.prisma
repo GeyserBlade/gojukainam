@@ -439,6 +439,12 @@ model Bout {
   winnerEntryId String?
   winnerEntry   Entry?  @relation("BoutWinner", fields: [winnerEntryId], references: [id], onDelete: SetNull)
 
+  // Optional WKF kumite scoring detail (winner-only results leave these null)
+  akaScore  Int?
+  aoScore   Int?
+  outcome   String? // POINTS | GAP | SENSHU | HANTEI | HANSOKU | KIKEN
+  scoreJson String? // full per-side breakdown + action log
+
   @@unique([drawId, phase, round, position])
   @@index([drawId])
 }

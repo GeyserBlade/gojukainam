@@ -6,6 +6,7 @@ import {
   CreateDraw,
   RegenerateDraw,
   SetBoutWinner,
+  SetBoutScore,
   EventIdQuery,
   IdParam,
   BoutParams,
@@ -64,6 +65,22 @@ router.put("/:id/bouts/:boutId", requireRoles(...MANAGE_ROLES), validateMultiple
       getParam(req.params.id),
       getParam(req.params.boutId),
       req.body.winnerEntryId,
+      { id: req.user!.id }
+    );
+    res.json(row);
+  } catch (err: any) {
+    if (err.status && err.message) return res.status(err.status).json({ error: err.message });
+    next(err);
+  }
+});
+
+// Capture a fully scored WKF kumite result (points, outcome, detail)
+router.put("/:id/bouts/:boutId/score", requireRoles(...MANAGE_ROLES), validateMultiple({ params: BoutParams, body: SetBoutScore }), async (req, res, next) => {
+  try {
+    const row = await DrawService.setBoutScore(
+      getParam(req.params.id),
+      getParam(req.params.boutId),
+      req.body,
       { id: req.user!.id }
     );
     res.json(row);
