@@ -39,7 +39,12 @@ import {
 } from "@/components/ui/table"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { cn } from "@/lib/utils"
-import { EntryService, type Entry, type EntryFilters } from "@/lib/entries"
+import {
+  EntryService,
+  type Entry,
+  type EntryFilters,
+  type Division as EntryDivision,
+} from "@/lib/entries"
 import { listEvents, getDivisions, type Division } from "@/lib/events"
 import { listClubs } from "@/lib/clubs"
 
@@ -184,7 +189,7 @@ const EntriesView = () => {
 
   const { data: events = [] } = useQuery({
     queryKey: ["events"],
-    queryFn: listEvents,
+    queryFn: () => listEvents(),
   })
 
   const { data: clubs = [] } = useQuery({
@@ -250,7 +255,7 @@ const EntriesView = () => {
   )
 
   const groupedEntries = useMemo(() => {
-    const groups: { [id: string]: { division: Division; entries: Entry[] } } = {}
+    const groups: { [id: string]: { division: EntryDivision; entries: Entry[] } } = {}
     entries.forEach((entry) => {
       if (!groups[entry.divisionId]) {
         groups[entry.divisionId] = { division: entry.division, entries: [] }
