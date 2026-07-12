@@ -123,6 +123,63 @@ async function main() {
   check("regenerated back to DRAWN", regenerated.status === "DRAWN");
   check("regenerated round 1 fully paired (no byes)", regenerated.bouts.filter((b) => b.phase === "MAIN" && b.round === 1).every((b) => b.aka && b.ao));
 
+  console.log("— WKF scoring (setBoutScore) —");
+  // fresh 8-slot bracket: score round-1 bout 0 with full detail
+  let scored = regenerated;
+  const r1b0 = scored.bouts.find((b) => b.phase === "MAIN" && b.round === 1 && b.position === 0)!;
+  const scoreDetail = JSON.stringify({
+    aka: { yuko: 1, wazaari: 2, ippon: 0, penalty: 1, senshu: true },
+    ao: { yuko: 3, wazaari: 0, ippon: 0, penalty: 0, senshu: false },
+    durationMs: 120000, winByGap: 8, log: [],
+  });
+  scored = await DrawService.setBoutScore(
+    scored.id,
+    r1b0.id!,
+    { winnerEntryId: r1b0.aka!.entryId, outcome: "POINTS", akaScore: 5, aoScore: 3, scoreJson: scoreDetail },
+    user
+  );
+  let b = scored.bouts.find((x) => x.phase === "MAIN" && x.round === 1 && x.position === 0)!;
+  check("scored bout persists points", b.akaScore === 5 && b.aoScore === 3, b);
+  check("scored bout persists outcome", b.outcome === "POINTS", b.outcome);
+  check("scored bout persists detail json", b.scoreJson === scoreDetail);
+  check("scored winner cascades to round 2", scored.bouts.some((x) => x.phase === "MAIN" && x.round === 2 && (x.aka?.entryId === r1b0.aka!.entryId || x.ao?.entryId === r1b0.aka!.entryId)));
+
+  // winner must be a fighter of the bout
+  let rejected = false;
+  try {
+    await DrawService.setBoutScore(scored.id, b.id!, { winnerEntryId: "not-a-fighter", outcome: "POINTS", akaScore: 1, aoScore: 0 }, user);
+  } catch (e: any) { rejected = e?.status === 422; }
+  check("score with foreign winner rejected", rejected);
+
+  // winner-only capture on another bout leaves score fields empty
+  const r1b1 = scored.bouts.find((x) => x.phase === "MAIN" && x.round === 1 && x.position === 1)!;
+  scored = await DrawService.setBoutWinner(scored.id, r1b1.id!, r1b1.ao!.entryId, user);
+  b = scored.bouts.find((x) => x.phase === "MAIN" && x.round === 1 && x.position === 1)!;
+  check("winner-only bout has no score fields", b.akaScore === null && b.outcome === null, b);
+
+  // overwriting a scored bout via winner-only clears the stale score detail
+  scored = await DrawService.setBoutWinner(scored.id, r1b0.id!, r1b0.ao!.entryId, user);
+  b = scored.bouts.find((x) => x.phase === "MAIN" && x.round === 1 && x.position === 0)!;
+  check("winner-only overwrite clears score detail", b.akaScore === null && b.scoreJson === null, b);
+
+  // score round 2, then correct round 1 -> downstream score must be wiped
+  scored = await DrawService.setBoutScore(
+    scored.id, r1b0.id!,
+    { winnerEntryId: r1b0.aka!.entryId, outcome: "GAP", akaScore: 8, aoScore: 0 },
+    user
+  );
+  const r2b0 = scored.bouts.find((x) => x.phase === "MAIN" && x.round === 2 && x.position === 0)!;
+  scored = await DrawService.setBoutScore(
+    scored.id, r2b0.id!,
+    { winnerEntryId: r1b0.aka!.entryId, outcome: "SENSHU", akaScore: 4, aoScore: 4 },
+    user
+  );
+  b = scored.bouts.find((x) => x.phase === "MAIN" && x.round === 2 && x.position === 0)!;
+  check("round-2 scored (senshu tie)", b.akaScore === 4 && b.aoScore === 4 && b.outcome === "SENSHU", b);
+  scored = await DrawService.setBoutWinner(scored.id, r1b0.id!, r1b0.ao!.entryId, user); // upstream correction
+  b = scored.bouts.find((x) => x.phase === "MAIN" && x.round === 2 && x.position === 0)!;
+  check("upstream correction wipes downstream score", b.akaScore === null && b.outcome === null && b.winnerEntryId === null, b);
+
   console.log("— category list —");
   const list = await DrawService.list(event.id);
   const row = list.find((r) => r.divisionId === division.id);

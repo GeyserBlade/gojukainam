@@ -124,7 +124,7 @@ const AthleteFormPage = () => {
     setError(null)
     setSaving(true)
     try {
-      const payload: Partial<Athlete> & { weightKg?: number } = { ...form }
+      const payload: Partial<Athlete> & { weightKg?: number | null } = { ...form }
       if (typeof payload.weightKg === "string") {
         payload.weightKg = Number(payload.weightKg) || undefined
       }

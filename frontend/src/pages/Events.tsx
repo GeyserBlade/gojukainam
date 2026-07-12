@@ -149,7 +149,7 @@ const EventsAdmin = () => {
 
   const { data: events = [], isLoading: loadingEvents } = useQuery({
     queryKey: ["events"],
-    queryFn: listEvents,
+    queryFn: () => listEvents(),
   })
 
   const { data: templates = [] } = useQuery({
@@ -888,7 +888,7 @@ const EventsAdmin = () => {
                 <Input
                   id="ev-start"
                   type="date"
-                  value={eventForm.startDate}
+                  value={eventForm.startDate as string}
                   onChange={(e) => setEventForm({ ...eventForm, startDate: e.target.value })}
                   required
                 />
@@ -900,7 +900,7 @@ const EventsAdmin = () => {
                 <Input
                   id="ev-regopen"
                   type="date"
-                  value={eventForm.regOpen}
+                  value={eventForm.regOpen as string}
                   onChange={(e) => setEventForm({ ...eventForm, regOpen: e.target.value })}
                   required
                 />
@@ -912,7 +912,7 @@ const EventsAdmin = () => {
                 <Input
                   id="ev-regclose"
                   type="date"
-                  value={eventForm.regClose}
+                  value={eventForm.regClose as string}
                   onChange={(e) => setEventForm({ ...eventForm, regClose: e.target.value })}
                   required
                 />

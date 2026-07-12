@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
+import { useNavigate } from "react-router-dom"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   AlertTriangle,
@@ -118,6 +119,7 @@ const CategoryCard = ({
 
 export default function DrawsPage() {
   const { role } = useAuth()
+  const navigate = useNavigate()
   const toast = useToast()
   const apiError = useApiErrorToast()
   const confirm = useConfirm()
@@ -209,6 +211,14 @@ export default function DrawsPage() {
     if (!bout.id) return
     winnerMutation.mutate({ boutId: bout.id, winnerEntryId })
   }
+
+  // Full WKF scoring is kumite-only; kata bouts keep click-the-winner
+  const openScoreboard =
+    draw?.division.category === "KUMITE"
+      ? (bout: DrawBout) => {
+          if (bout.id) navigate(`/scoreboard/${draw.id}/${bout.id}`)
+        }
+      : undefined
 
   const handleRegenerate = async () => {
     if (!draw) return
@@ -395,6 +405,7 @@ export default function DrawsPage() {
                     draw={draw}
                     canManage={canManage}
                     onSetWinner={handleSetWinner}
+                    onOpenScoreboard={openScoreboard}
                     busy={busy}
                   />
                 </CardContent>
@@ -404,6 +415,7 @@ export default function DrawsPage() {
                 draw={draw}
                 canManage={canManage}
                 onSetWinner={handleSetWinner}
+                onOpenScoreboard={openScoreboard}
                 busy={busy}
               />
             </>
