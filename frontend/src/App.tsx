@@ -1,6 +1,8 @@
 import React, { lazy, Suspense } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
+import { SelectedEventProvider } from "./contexts/SelectedEventContext";
+import { EventHubLayout } from "./components/layout/EventHubLayout";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { ToastProvider } from "./components/Toast";
 import { ConfirmProvider } from "./components/ConfirmDialog";
@@ -26,6 +28,8 @@ const EntriesViewPage = lazy(() => import("./pages/EntriesView"));
 const DrawsPage = lazy(() => import("./pages/Draws"));
 const RunPage = lazy(() => import("./pages/Run"));
 const ResultsPage = lazy(() => import("./pages/Results"));
+const HubOverviewPage = lazy(() => import("./pages/hub/Overview"));
+const HubSetupPage = lazy(() => import("./pages/hub/Setup"));
 const ScoreboardPage = lazy(() => import("./pages/Scoreboard"));
 const ScoreboardDisplayPage = lazy(() => import("./pages/ScoreboardDisplay"));
 
@@ -54,11 +58,25 @@ const AppRoutes: React.FC = () => (
       <Route path="/athletes/import" element={<Protected><AthleteImportPage /></Protected>} />
       <Route path="/athletes/extract" element={<Protected><AthleteExtractPage /></Protected>} />
       <Route path="/events/manage" element={<Protected><EventsPage /></Protected>} />
-      <Route path="/events" element={<Protected><EventManagementPage /></Protected>} />
-      <Route path="/entries/view" element={<Protected><EntriesViewPage /></Protected>} />
-      <Route path="/draws" element={<Protected><DrawsPage /></Protected>} />
-      <Route path="/run" element={<Protected><RunPage /></Protected>} />
-      <Route path="/results" element={<Protected><ResultsPage /></Protected>} />
+
+      {/* Event Hub — one selected event, worked through in-context tabs */}
+      <Route path="/hub" element={<Protected><EventHubLayout /></Protected>}>
+        <Route index element={<HubOverviewPage />} />
+        <Route path="setup" element={<HubSetupPage />} />
+        <Route path="entries" element={<EventManagementPage />} />
+        <Route path="review" element={<EntriesViewPage />} />
+        <Route path="draws" element={<DrawsPage />} />
+        <Route path="run" element={<RunPage />} />
+        <Route path="results" element={<ResultsPage />} />
+      </Route>
+
+      {/* Legacy paths → hub tabs */}
+      <Route path="/events" element={<Navigate to="/hub/entries" replace />} />
+      <Route path="/entries/view" element={<Navigate to="/hub/review" replace />} />
+      <Route path="/draws" element={<Navigate to="/hub/draws" replace />} />
+      <Route path="/run" element={<Navigate to="/hub/run" replace />} />
+      <Route path="/results" element={<Navigate to="/hub/results" replace />} />
+
       <Route path="/scoreboard/display" element={<Protected><ScoreboardDisplayPage /></Protected>} />
       <Route path="/scoreboard/:drawId/:boutId" element={<Protected><ScoreboardPage /></Protected>} />
       <Route path="*" element={<Navigate to="/signin" replace />} />
@@ -72,11 +90,13 @@ const App: React.FC = () => (
       <TooltipProvider delayDuration={150}>
         <BrowserRouter>
           <AuthProvider>
-            <ConfirmProvider>
-              <ToastProvider>
-                <AppRoutes />
-              </ToastProvider>
-            </ConfirmProvider>
+            <SelectedEventProvider>
+              <ConfirmProvider>
+                <ToastProvider>
+                  <AppRoutes />
+                </ToastProvider>
+              </ConfirmProvider>
+            </SelectedEventProvider>
           </AuthProvider>
         </BrowserRouter>
       </TooltipProvider>

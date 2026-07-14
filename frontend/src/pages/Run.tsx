@@ -15,9 +15,9 @@ import {
 } from "lucide-react"
 
 import { useAuth } from "@/contexts/AuthContext"
+import { useSelectedEvent } from "@/contexts/SelectedEventContext"
 import { useToast, useApiErrorToast } from "@/components/Toast"
 import { useConfirm } from "@/components/ConfirmDialog"
-import { AppShell } from "@/components/layout/AppShell"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -94,66 +94,25 @@ const Fighter = ({ side, entry }: { side: "AKA" | "AO"; entry: RunEntry }) => (
 export default function RunPage() {
   const { role } = useAuth()
   const canManage = role === "ADMIN" || role === "SUPERADMIN"
-  const [eventId, setEventId] = useState<string>("")
+  const { eventId } = useSelectedEvent()
   const [tab, setTab] = useState<TabKey>("run")
 
-  const { data: events, isLoading: eventsLoading } = useQuery({
-    queryKey: ["events"],
-    queryFn: () => listEvents(),
-  })
-
-  useEffect(() => {
-    if (!eventId && events?.length) {
-      const preferred = events.find((e) => e.status === "ACTIVE" || e.status === "CLOSED")
-      setEventId((preferred ?? events[0]).id)
-    }
-  }, [events, eventId])
+  if (!eventId) return null
 
   return (
-    <AppShell title="Run Sheet">
-      <div className="mb-4 sm:mb-6">
-        <h1 className="font-display text-3xl sm:text-4xl tracking-wider">RUN SHEET</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Plan categories onto mats, check athletes in, and work each mat's running order.
-        </p>
-      </div>
+    <>
+      <Tabs value={tab} onValueChange={(v) => setTab(v as TabKey)} className="mb-4">
+        <TabsList>
+          <TabsTrigger value="run">Run</TabsTrigger>
+          <TabsTrigger value="checkin">Check-in</TabsTrigger>
+          <TabsTrigger value="plan">Plan</TabsTrigger>
+        </TabsList>
+      </Tabs>
 
-      <div className="mb-4 max-w-md">
-        <Label className="mb-1.5 block text-xs text-muted-foreground">Event</Label>
-        {eventsLoading ? (
-          <Skeleton className="h-9 w-full" />
-        ) : (
-          <Select value={eventId} onValueChange={setEventId}>
-            <SelectTrigger>
-              <SelectValue placeholder="Select an event" />
-            </SelectTrigger>
-            <SelectContent>
-              {events?.map((e) => (
-                <SelectItem key={e.id} value={e.id}>
-                  {e.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        )}
-      </div>
-
-      {eventId && (
-        <>
-          <Tabs value={tab} onValueChange={(v) => setTab(v as TabKey)} className="mb-4">
-            <TabsList>
-              <TabsTrigger value="run">Run</TabsTrigger>
-              <TabsTrigger value="checkin">Check-in</TabsTrigger>
-              <TabsTrigger value="plan">Plan</TabsTrigger>
-            </TabsList>
-          </Tabs>
-
-          {tab === "run" && <RunTab eventId={eventId} canManage={canManage} />}
-          {tab === "checkin" && <CheckInTab eventId={eventId} canManage={canManage} />}
-          {tab === "plan" && <PlanTab eventId={eventId} canManage={canManage} />}
-        </>
-      )}
-    </AppShell>
+      {tab === "run" && <RunTab eventId={eventId} canManage={canManage} />}
+      {tab === "checkin" && <CheckInTab eventId={eventId} canManage={canManage} />}
+      {tab === "plan" && <PlanTab eventId={eventId} canManage={canManage} />}
+    </>
   )
 }
 

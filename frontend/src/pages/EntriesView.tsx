@@ -13,9 +13,9 @@ import {
 } from "lucide-react"
 
 import { useAuth } from "@/contexts/AuthContext"
+import { useSelectedEvent } from "@/contexts/SelectedEventContext"
 import { useToast, useApiErrorToast } from "@/components/Toast"
 import { useConfirm } from "@/components/ConfirmDialog"
-import { AppShell } from "@/components/layout/AppShell"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -242,7 +242,7 @@ const EntriesView = () => {
   const isAdmin = role === "SUPERADMIN" || role === "ADMIN"
   const isClub = role === "CLUB_MANAGER" || role === "COACH"
 
-  const [selectedEventId, setSelectedEventId] = useState<string>("")
+  const { eventId: selectedEventId } = useSelectedEvent()
   const [filterClubId, setFilterClubId] = useState<string>(clubId || "")
   const [filterDivisionId, setFilterDivisionId] = useState<string>("")
   const [filterStatus, setFilterStatus] = useState<string>("ALL")
@@ -256,11 +256,6 @@ const EntriesView = () => {
   const [returnTarget, setReturnTarget] = useState<string[] | null>(null)
   const [returnReason, setReturnReason] = useState("")
   const [acting, setActing] = useState(false)
-
-  const { data: events = [] } = useQuery({
-    queryKey: ["events"],
-    queryFn: () => listEvents(),
-  })
 
   const { data: clubs = [] } = useQuery({
     queryKey: ["clubs"],
@@ -464,15 +459,13 @@ const EntriesView = () => {
 
   if (!isAdmin && !clubId) {
     return (
-      <AppShell title="Entries">
-        <Card>
-          <CardContent className="py-10 text-center">
-            <p className="text-sm text-muted-foreground">
-              You don't have permission to access this page.
-            </p>
-          </CardContent>
-        </Card>
-      </AppShell>
+      <Card>
+        <CardContent className="py-10 text-center">
+          <p className="text-sm text-muted-foreground">
+            You don't have permission to access this page.
+          </p>
+        </CardContent>
+      </Card>
     )
   }
 
@@ -501,42 +494,15 @@ const EntriesView = () => {
   const selectedCount = selected.size
 
   return (
-    <AppShell title="Entries">
-      <div className="mb-4 sm:mb-6">
-        <h1 className="font-display text-3xl sm:text-4xl tracking-wider">
-          ALL ENTRIES
-        </h1>
+    <>
+      <div className="mb-4">
+        <h2 className="font-display text-xl tracking-wide sm:text-2xl">Review entries</h2>
         <p className="text-sm text-muted-foreground mt-1">
           {isAdmin
             ? "Review, approve or return entries across all clubs."
             : "Review and submit your club's entries for approval."}
         </p>
       </div>
-
-      <Card className="mb-4">
-        <CardContent>
-          <Label htmlFor="event-select" className="mb-1.5">Select event</Label>
-          <Select
-            value={selectedEventId || "none"}
-            onValueChange={(v) => {
-              setSelectedEventId(v === "none" ? "" : v)
-              setFilterDivisionId("")
-            }}
-          >
-            <SelectTrigger id="event-select" className="w-full">
-              <SelectValue placeholder="-- Select event --" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="none">-- Select event --</SelectItem>
-              {events.map((event) => (
-                <SelectItem key={event.id} value={event.id}>
-                  {event.name} — {new Date(event.startDate).toLocaleDateString()}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </CardContent>
-      </Card>
 
       {selectedEventId && (
         <>
@@ -1037,7 +1003,7 @@ const EntriesView = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </AppShell>
+    </>
   )
 }
 

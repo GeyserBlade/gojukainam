@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import {
   DndContext,
@@ -18,9 +18,9 @@ import {
 } from "lucide-react"
 
 import { useAuth } from "@/contexts/AuthContext"
+import { useSelectedEvent } from "@/contexts/SelectedEventContext"
 import { useToast, useApiErrorToast } from "@/components/Toast"
 import { useConfirm } from "@/components/ConfirmDialog"
-import { AppShell } from "@/components/layout/AppShell"
 import { BeltBadge } from "@/components/athletes/BeltBadge"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -254,7 +254,7 @@ const EventManagement = () => {
   const confirm = useConfirm()
   const isAdmin = role === "SUPERADMIN" || role === "ADMIN"
 
-  const [selectedEventId, setSelectedEventId] = useState<string>("")
+  const { eventId: selectedEventId } = useSelectedEvent()
   const [selectedDivisionId, setSelectedDivisionId] = useState<string>("")
   const [filterClubId, setFilterClubId] = useState<string>(clubId || "")
   const [searchQuery, setSearchQuery] = useState("")
@@ -262,10 +262,11 @@ const EventManagement = () => {
   const [selectedWeightClassId, setSelectedWeightClassId] = useState<string>("")
   const [draggedAthlete, setDraggedAthlete] = useState<EligibleAthlete | null>(null)
 
-  const { data: events = [] } = useQuery({
-    queryKey: ["events", "active"],
-    queryFn: () => listEvents(true),
-  })
+  // Reset division/weight when the hub switches events.
+  useEffect(() => {
+    setSelectedDivisionId("")
+    setSelectedWeightClassId("")
+  }, [selectedEventId])
 
   const { data: clubs = [] } = useQuery({
     queryKey: ["clubs"],
@@ -388,15 +389,13 @@ const EventManagement = () => {
 
   if (!isAdmin && !clubId) {
     return (
-      <AppShell title="Entry management">
-        <Card>
-          <CardContent className="py-10 text-center">
-            <p className="text-sm text-muted-foreground">
-              You don't have permission to access this page.
-            </p>
-          </CardContent>
-        </Card>
-      </AppShell>
+      <Card>
+        <CardContent className="py-10 text-center">
+          <p className="text-sm text-muted-foreground">
+            You don't have permission to access this page.
+          </p>
+        </CardContent>
+      </Card>
     )
   }
 
@@ -406,43 +405,18 @@ const EventManagement = () => {
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
     >
-      <AppShell title="Entry management">
-        <div className="mb-4 sm:mb-6">
-          <h1 className="font-display text-3xl sm:text-4xl tracking-wider">
-            ENTRY MANAGEMENT
-          </h1>
+      <>
+        <div className="mb-4">
+          <h2 className="font-display text-xl tracking-wide sm:text-2xl">Entries</h2>
           <p className="text-sm text-muted-foreground mt-1">
             Add and manage athlete entries into event divisions.
           </p>
         </div>
 
-        {/* Event selection */}
-        <Card className="mb-4">
-          <CardContent className="space-y-3">
-            <div>
-              <Label className="mb-1.5">Event</Label>
-              <Select
-                value={selectedEventId || "none"}
-                onValueChange={(v) => {
-                  setSelectedEventId(v === "none" ? "" : v)
-                  setSelectedDivisionId("")
-                }}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="-- Select event --" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">-- Select event --</SelectItem>
-                  {events.map((event) => (
-                    <SelectItem key={event.id} value={event.id}>
-                      {event.name} — {new Date(event.startDate).toLocaleDateString()}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            {isAdmin && (
+        {/* Club filter (admin) */}
+        {isAdmin && (
+          <Card className="mb-4">
+            <CardContent className="space-y-3">
               <div>
                 <Label className="mb-1.5">Filter by club (optional)</Label>
                 <Select
@@ -462,9 +436,9 @@ const EventManagement = () => {
                   </SelectContent>
                 </Select>
               </div>
-            )}
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+        )}
 
         {selectedEventId && (
           <Card className="mb-4">
@@ -802,7 +776,7 @@ const EventManagement = () => {
             </div>
           </>
         )}
-      </AppShell>
+      </>
 
       <DragOverlay>
         {draggedAthlete ? (

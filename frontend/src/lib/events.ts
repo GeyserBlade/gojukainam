@@ -121,6 +121,19 @@ export async function getEvent(id: string): Promise<Event> {
   return res.data;
 }
 
+export interface EventReadiness {
+  entries: { draft: number; submitted: number; approved: number; returned: number; total: number };
+  draws: { generated: number; completed: number };
+  checkin: { done: number; total: number };
+  mats: number;
+  divisions: number;
+}
+
+export async function getReadiness(id: string): Promise<EventReadiness> {
+  const res = await api.get(`/events/${id}/readiness`);
+  return res.data;
+}
+
 export async function createEvent(data: CreateEventDto): Promise<Event> {
   const res = await api.post("/events", data);
   return res.data;

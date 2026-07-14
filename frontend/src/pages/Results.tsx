@@ -1,19 +1,11 @@
-import { useEffect, useMemo, useState } from "react"
+import { useMemo } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { Download, Medal, Printer, Trophy } from "lucide-react"
 
-import { AppShell } from "@/components/layout/AppShell"
+import { useSelectedEvent } from "@/contexts/SelectedEventContext"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Label } from "@/components/ui/label"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
   Table,
@@ -24,7 +16,6 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { cn } from "@/lib/utils"
-import { listEvents } from "@/lib/events"
 import { getEventResults, type ResultCategory, type ResultEntry } from "@/lib/results"
 
 const categoryTitle = (c: ResultCategory) =>
@@ -51,27 +42,13 @@ const PlaceRow = ({ style, entry }: { style: (typeof PLACE_STYLES)[number]; entr
 const csvCell = (v: string | number) => `"${String(v).replace(/"/g, '""')}"`
 
 export default function ResultsPage() {
-  const [eventId, setEventId] = useState<string>("")
-
-  const { data: events, isLoading: eventsLoading } = useQuery({
-    queryKey: ["events"],
-    queryFn: () => listEvents(),
-  })
-
-  useEffect(() => {
-    if (!eventId && events?.length) {
-      const preferred = events.find((e) => e.status === "ACTIVE" || e.status === "CLOSED")
-      setEventId((preferred ?? events[0]).id)
-    }
-  }, [events, eventId])
+  const { eventId, event: selectedEvent } = useSelectedEvent()
 
   const { data: results, isLoading } = useQuery({
     queryKey: ["event-results", eventId],
     queryFn: () => getEventResults(eventId),
     enabled: !!eventId,
   })
-
-  const selectedEvent = events?.find((e) => e.id === eventId)
 
   const decidedCategories = useMemo(
     () => results?.categories.filter((c) => c.first || c.second || c.thirds.length > 0) ?? [],
@@ -100,14 +77,9 @@ export default function ResultsPage() {
   }
 
   return (
-    <AppShell title="Results">
-      <div className="mb-4 flex flex-wrap items-end justify-between gap-3 sm:mb-6">
-        <div>
-          <h1 className="font-display text-3xl tracking-wider sm:text-4xl">RESULTS</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {selectedEvent?.name ?? "Event"} — medal tally and podiums across every category.
-          </p>
-        </div>
+    <>
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <h2 className="font-display text-xl tracking-wide sm:text-2xl">Results</h2>
         <div className="flex items-center gap-2 print:hidden">
           <Button variant="outline" size="sm" onClick={() => window.print()} disabled={!results}>
             <Printer />
@@ -118,26 +90,6 @@ export default function ResultsPage() {
             Export CSV
           </Button>
         </div>
-      </div>
-
-      <div className="mb-4 max-w-md print:hidden">
-        <Label className="mb-1.5 block text-xs text-muted-foreground">Event</Label>
-        {eventsLoading ? (
-          <Skeleton className="h-9 w-full" />
-        ) : (
-          <Select value={eventId} onValueChange={setEventId}>
-            <SelectTrigger>
-              <SelectValue placeholder="Select an event" />
-            </SelectTrigger>
-            <SelectContent>
-              {events?.map((e) => (
-                <SelectItem key={e.id} value={e.id}>
-                  {e.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        )}
       </div>
 
       {isLoading ? (
@@ -248,6 +200,6 @@ export default function ResultsPage() {
           </div>
         </div>
       )}
-    </AppShell>
+    </>
   )
 }

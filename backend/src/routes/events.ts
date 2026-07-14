@@ -40,6 +40,15 @@ router.get("/templates", (_req, res) => {
   res.json(EventService.listTemplates());
 });
 
+// readiness snapshot for the event hub (any logged user)
+router.get("/:id/readiness", validate(IdParam, "params"), async (req, res, next) => {
+  try {
+    res.json(await EventService.getReadiness(getParam(req.params.id)));
+  } catch (err) {
+    next(err);
+  }
+});
+
 // get single event by id
 router.get("/:id", validate(IdParam, "params"), async (req, res, next) => {
   try {

@@ -6,6 +6,38 @@ import type { Gender } from "@prisma/client";
 
 export class EventService {
   // ============ Events ============
+
+  /** Aggregate readiness snapshot for the event hub Overview. */
+  static async getReadiness(eventId: string) {
+    const [statusGroups, generated, completed, approvedTotal, checkedIn, mats, divisions] =
+      await Promise.all([
+        prisma.entry.groupBy({ by: ["status"], where: { eventId }, _count: true }),
+        prisma.draw.count({ where: { eventId } }),
+        prisma.draw.count({ where: { eventId, status: "COMPLETED" } }),
+        prisma.entry.count({ where: { eventId, status: "APPROVED" } }),
+        prisma.entry.count({ where: { eventId, status: "APPROVED", checkedIn: true } }),
+        prisma.mat.count({ where: { eventId } }),
+        prisma.division.count({ where: { eventId } }),
+      ]);
+
+    const byStatus = (s: string) => statusGroups.find((g) => g.status === s)?._count ?? 0;
+    const entries = {
+      draft: byStatus("DRAFT"),
+      submitted: byStatus("SUBMITTED"),
+      approved: byStatus("APPROVED"),
+      returned: byStatus("RETURNED"),
+      total: statusGroups.reduce((sum, g) => sum + g._count, 0),
+    };
+
+    return {
+      entries,
+      draws: { generated, completed },
+      checkin: { done: checkedIn, total: approvedTotal },
+      mats,
+      divisions,
+    };
+  }
+
   static async getAll() {
     return prisma.event.findMany({
       orderBy: { startDate: "desc" },

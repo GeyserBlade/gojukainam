@@ -12,9 +12,9 @@ import {
 } from "lucide-react"
 
 import { useAuth } from "@/contexts/AuthContext"
+import { useSelectedEvent } from "@/contexts/SelectedEventContext"
 import { useToast, useApiErrorToast } from "@/components/Toast"
 import { useConfirm } from "@/components/ConfirmDialog"
-import { AppShell } from "@/components/layout/AppShell"
 import { BracketView, PodiumView, RepechageView } from "@/components/draws/BracketView"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -128,20 +128,11 @@ export default function DrawsPage() {
 
   const canManage = role === "ADMIN" || role === "SUPERADMIN"
 
-  const [eventId, setEventId] = useState<string>("")
+  const { eventId } = useSelectedEvent()
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
 
-  const { data: events, isLoading: eventsLoading } = useQuery({
-    queryKey: ["events"],
-    queryFn: () => listEvents(),
-  })
-
-  useEffect(() => {
-    if (!eventId && events?.length) {
-      const preferred = events.find((e) => e.status === "ACTIVE" || e.status === "CLOSED")
-      setEventId((preferred ?? events[0]).id)
-    }
-  }, [events, eventId])
+  // Reset the selected category when the hub switches events.
+  useEffect(() => setSelectedKey(null), [eventId])
 
   const { data: categories, isLoading: categoriesLoading } = useQuery({
     queryKey: ["draw-categories", eventId],
@@ -255,38 +246,12 @@ export default function DrawsPage() {
     winnerMutation.isPending
 
   return (
-    <AppShell title="Draws">
-      <div className="mb-4 sm:mb-6">
-        <h1 className="font-display text-3xl sm:text-4xl tracking-wider">DRAWS & RESULTS</h1>
+    <>
+      <div className="mb-4">
+        <h2 className="font-display text-xl tracking-wide sm:text-2xl">Draws &amp; Results</h2>
         <p className="mt-1 text-sm text-muted-foreground">
           Generate random draws per category, capture results and follow each athlete's progression.
         </p>
-      </div>
-
-      <div className="mb-4 max-w-md print:hidden">
-        <Label className="mb-1.5 block text-xs text-muted-foreground">Event</Label>
-        {eventsLoading ? (
-          <Skeleton className="h-9 w-full" />
-        ) : (
-          <Select
-            value={eventId}
-            onValueChange={(v) => {
-              setEventId(v)
-              setSelectedKey(null)
-            }}
-          >
-            <SelectTrigger>
-              <SelectValue placeholder="Select an event" />
-            </SelectTrigger>
-            <SelectContent>
-              {events?.map((e) => (
-                <SelectItem key={e.id} value={e.id}>
-                  {e.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        )}
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[300px_1fr]">
@@ -429,6 +394,6 @@ export default function DrawsPage() {
           )}
         </div>
       </div>
-    </AppShell>
+    </>
   )
 }
