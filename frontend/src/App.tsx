@@ -25,6 +25,7 @@ const EventsPage = lazy(() => import("./pages/Events"));
 const EntriesViewPage = lazy(() => import("./pages/EntriesView"));
 const DrawsPage = lazy(() => import("./pages/Draws"));
 const RunPage = lazy(() => import("./pages/Run"));
+const ResultsPage = lazy(() => import("./pages/Results"));
 const ScoreboardPage = lazy(() => import("./pages/Scoreboard"));
 const ScoreboardDisplayPage = lazy(() => import("./pages/ScoreboardDisplay"));
 
@@ -57,6 +58,7 @@ const AppRoutes: React.FC = () => (
       <Route path="/entries/view" element={<Protected><EntriesViewPage /></Protected>} />
       <Route path="/draws" element={<Protected><DrawsPage /></Protected>} />
       <Route path="/run" element={<Protected><RunPage /></Protected>} />
+      <Route path="/results" element={<Protected><ResultsPage /></Protected>} />
       <Route path="/scoreboard/display" element={<Protected><ScoreboardDisplayPage /></Protected>} />
       <Route path="/scoreboard/:drawId/:boutId" element={<Protected><ScoreboardPage /></Protected>} />
       <Route path="*" element={<Navigate to="/signin" replace />} />

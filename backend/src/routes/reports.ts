@@ -1,8 +1,18 @@
 import { Router } from "express";
 import { prisma } from "../lib/prisma.js";
 import { requireRoles } from "../utils/auth.js";
+import { DrawService } from "../services/draw.service.js";
 
 export const router = Router();
+
+// Event-wide results: per-category podiums + club medal tally
+router.get("/results", requireRoles("CLUB_MANAGER", "COACH", "ATHLETE", "ADMIN", "SUPERADMIN"), async (req, res, next) => {
+  try {
+    const { eventId } = req.query as { eventId?: string };
+    if (!eventId) return res.status(400).json({ error: "eventId required" });
+    res.json(await DrawService.eventResults(eventId));
+  } catch (err) { next(err); }
+});
 
 // ... existing code ...
 

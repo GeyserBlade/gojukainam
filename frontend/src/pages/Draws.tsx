@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   AlertTriangle,
+  Printer,
   RefreshCw,
   Shuffle,
   Swords,
@@ -262,7 +263,7 @@ export default function DrawsPage() {
         </p>
       </div>
 
-      <div className="mb-4 max-w-md">
+      <div className="mb-4 max-w-md print:hidden">
         <Label className="mb-1.5 block text-xs text-muted-foreground">Event</Label>
         {eventsLoading ? (
           <Skeleton className="h-9 w-full" />
@@ -290,7 +291,7 @@ export default function DrawsPage() {
 
       <div className="grid gap-4 lg:grid-cols-[300px_1fr]">
         {/* Category list */}
-        <div className="space-y-2 lg:max-h-[calc(100vh-16rem)] lg:overflow-y-auto lg:pr-1">
+        <div className="space-y-2 lg:max-h-[calc(100vh-16rem)] lg:overflow-y-auto lg:pr-1 print:hidden">
           {categoriesLoading ? (
             Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-20 w-full" />)
           ) : !categories?.length ? (
@@ -361,18 +362,24 @@ export default function DrawsPage() {
                     {STATUS_LABEL[draw.status]}
                   </Badge>
                 </div>
-                {canManage && (
-                  <div className="flex items-center gap-2">
-                    <Button variant="outline" size="sm" onClick={handleRegenerate} disabled={busy}>
-                      <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
-                      Regenerate
-                    </Button>
-                    <Button variant="outline" size="sm" onClick={handleDelete} disabled={busy}>
-                      <Trash2 className="mr-1.5 h-3.5 w-3.5 text-flag-red" />
-                      Delete
-                    </Button>
-                  </div>
-                )}
+                <div className="flex items-center gap-2 print:hidden">
+                  <Button variant="outline" size="sm" onClick={() => window.print()}>
+                    <Printer className="mr-1.5 h-3.5 w-3.5" />
+                    Print
+                  </Button>
+                  {canManage && (
+                    <>
+                      <Button variant="outline" size="sm" onClick={handleRegenerate} disabled={busy}>
+                        <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+                        Regenerate
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={handleDelete} disabled={busy}>
+                        <Trash2 className="mr-1.5 h-3.5 w-3.5 text-flag-red" />
+                        Delete
+                      </Button>
+                    </>
+                  )}
+                </div>
               </div>
 
               {/* Out-of-sync warning */}

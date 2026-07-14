@@ -35,6 +35,7 @@ export const NAV_ITEMS: NavItem[] = [
   { to: "/entries/view", label: "All Entries", icon: Eye, roles: MANAGE_ROLES, accent: "flag-blue" },
   { to: "/draws", label: "Draws & Results", icon: Swords, accent: "primary" },
   { to: "/run", label: "Run Sheet", icon: Play, accent: "belt-orange" },
+  { to: "/results", label: "Results", icon: Medal, accent: "belt-orange" },
   { to: "/athletes/extract", label: "Athlete Extract", icon: Upload, roles: MANAGE_ROLES },
   { to: "/athletes/import", label: "Import Athletes", icon: Upload, roles: ["SUPERADMIN"] },
   { to: "/users", label: "Users", icon: UserCog, roles: MANAGE_ROLES, accent: "belt-blue" },

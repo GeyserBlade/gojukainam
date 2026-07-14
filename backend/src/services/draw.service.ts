@@ -738,4 +738,86 @@ export class DrawService {
       },
     };
   }
+
+  /**
+   * Event-wide results: every drawn category's podium plus a club medal tally.
+   * Placements come straight from the bracket compute, so partially-run
+   * categories return whatever is already decided (rest null).
+   */
+  static async eventResults(eventId: string) {
+    const draws = await prisma.draw.findMany({
+      where: { eventId },
+      include: {
+        division: true,
+        weightClass: true,
+        slots: { include: { entry: { include: ENTRY_INCLUDE } } },
+        bouts: true,
+      },
+      orderBy: [{ division: { category: "asc" } }, { division: { name: "asc" } }],
+    });
+
+    type ResultEntry = { entryId: string; name: string; clubId: string; clubName: string };
+    const summary = (entry: {
+      id: string;
+      athlete: { firstName: string; lastName: string } | null;
+      team: { name: string } | null;
+      club: { id: string; name: string } | null;
+    }): ResultEntry => ({
+      entryId: entry.id,
+      name: entry.athlete
+        ? `${entry.athlete.firstName} ${entry.athlete.lastName}`
+        : entry.team?.name ?? "Unknown",
+      clubId: entry.club?.id ?? "",
+      clubName: entry.club?.name ?? "",
+    });
+
+    const tally = new Map<string, { clubId: string; clubName: string; gold: number; silver: number; bronze: number }>();
+    const medal = (e: ResultEntry | null, kind: "gold" | "silver" | "bronze") => {
+      if (!e || !e.clubId) return;
+      const row = tally.get(e.clubId) ?? { clubId: e.clubId, clubName: e.clubName, gold: 0, silver: 0, bronze: 0 };
+      row[kind] += 1;
+      tally.set(e.clubId, row);
+    };
+
+    const categories = draws.map((draw) => {
+      const slotByPosition = new Map<number, string>();
+      const entryById = new Map<string, ResultEntry>();
+      for (const s of draw.slots) {
+        slotByPosition.set(s.position, s.entryId);
+        entryById.set(s.entryId, summary(s.entry));
+      }
+      const storedWinners = new Map<BoutKey, string>();
+      for (const b of draw.bouts) {
+        if (b.winnerEntryId) storedWinners.set(boutKey(b.phase, b.round, b.position), b.winnerEntryId);
+      }
+      const state = computeDrawState(draw.size, slotByPosition, storedWinners);
+      const lookup = (id: string | null) => (id ? entryById.get(id) ?? null : null);
+
+      const first = lookup(state.placements.firstEntryId);
+      const second = lookup(state.placements.secondEntryId);
+      const thirds = state.placements.thirdEntryIds.map(lookup).filter((e): e is ResultEntry => !!e);
+
+      medal(first, "gold");
+      medal(second, "silver");
+      for (const t of thirds) medal(t, "bronze");
+
+      return {
+        drawId: draw.id,
+        divisionName: draw.division.name,
+        weightClassName: draw.weightClass?.name ?? null,
+        category: draw.division.category,
+        gender: draw.division.gender,
+        status: state.status,
+        first,
+        second,
+        thirds,
+      };
+    });
+
+    const clubTally = [...tally.values()]
+      .map((c) => ({ ...c, total: c.gold + c.silver + c.bronze }))
+      .sort((a, b) => b.gold - a.gold || b.silver - a.silver || b.bronze - a.bronze || a.clubName.localeCompare(b.clubName));
+
+    return { categories, clubTally };
+  }
 }
