@@ -427,6 +427,8 @@ export class DrawService {
                 size: draw.size,
                 status: draw.status,
                 inSync: sync!.added === 0 && sync!.removed === 0,
+                matId: draw.matId,
+                matOrder: draw.matOrder,
               }
             : null,
         });

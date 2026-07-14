@@ -65,6 +65,7 @@ export interface Entry {
   feeCents: number;
   status: "DRAFT" | "SUBMITTED" | "APPROVED" | "RETURNED";
   statusReason?: string | null;
+  checkedIn?: boolean;
   notes?: string | null;
   createdAt: string;
   updatedAt: string;
@@ -138,6 +139,12 @@ export class EntryService {
     reason?: string,
   ): Promise<{ updatedCount: number }> {
     const res = await api.post("/review/bulk", { eventId, ids, status, reason });
+    return res.data;
+  }
+
+  // Day-of presence: tick an entry present/absent for the run board.
+  static async setCheckIn(id: string, checkedIn: boolean): Promise<Entry> {
+    const res = await api.patch(`/run/entries/${id}/checkin`, { checkedIn });
     return res.data;
   }
 }

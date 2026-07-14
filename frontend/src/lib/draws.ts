@@ -61,6 +61,8 @@ export interface DrawCategoryRow {
     size: number;
     status: DrawStatus;
     inSync: boolean;
+    matId: string | null;
+    matOrder: number | null;
   } | null;
 }
 

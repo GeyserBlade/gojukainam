@@ -171,6 +171,7 @@ model Event {
   invoices      Invoice[]
   documents     Document[]
   draws         Draw[]
+  mats          Mat[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -301,6 +302,8 @@ model Entry {
   status       EntryStatus @default(DRAFT)
   /// Admin's reason when an entry is RETURNED; shown to the club. Cleared on submit/approve.
   statusReason String?
+  /// Day-of presence flag; ticked at check-in, used by the run board.
+  checkedIn    Boolean     @default(false)
   feeCents     Int         @default(0)
   notes        String?
 
@@ -399,6 +402,11 @@ model Draw {
   size   Int // bracket size: 2, 4, 8, 16, 32
   status DrawStatus @default(DRAWN)
 
+  // Day-of running: which mat this category runs on, and its order within the mat.
+  matId    String?
+  mat      Mat?    @relation(fields: [matId], references: [id], onDelete: SetNull)
+  matOrder Int?
+
   slots DrawSlot[]
   bouts Bout[]
 
@@ -447,8 +455,30 @@ model Bout {
   outcome   String? // POINTS | GAP | SENSHU | HANTEI | HANSOKU | KIKEN
   scoreJson String? // full per-side breakdown + action log
 
+  // Per-bout mat override; null = inherit the draw's mat. Survives recompute
+  // (recompute never writes matId), lost only if the bout row is deleted.
+  matId String?
+  mat   Mat?   @relation(fields: [matId], references: [id], onDelete: SetNull)
+
   @@unique([drawId, phase, round, position])
   @@index([drawId])
+}
+
+// A competition mat/tatami within an event. Categories (draws) are planned
+// onto mats for day-of running; individual bouts may override the mat.
+model Mat {
+  id      String @id @default(cuid())
+  eventId String
+  event   Event  @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  name    String
+  order   Int    @default(0)
+
+  draws Draw[]
+  bouts Bout[]
+
+  createdAt DateTime @default(now())
+
+  @@index([eventId])
 }
 
 model Document {

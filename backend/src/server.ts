@@ -21,6 +21,7 @@ import { router as users } from "./routes/users.js";
 import { router as belts } from "./routes/belts.js";
 import { router as documents } from "./routes/documents.js";
 import { router as draws } from "./routes/draws.js";
+import { router as run } from "./routes/run.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const { version: BACKEND_VERSION } = JSON.parse(
@@ -105,6 +106,7 @@ app.use("/api/users", users);
 app.use("/api/belts", belts);
 app.use("/api/documents", documents);
 app.use("/api/draws", draws);
+app.use("/api/run", run);
 
 app.use(errorHandler);
 
