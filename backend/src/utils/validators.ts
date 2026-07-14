@@ -55,7 +55,12 @@ export const CreateEntry = z.object({
 export const UpdateEntryStatus = z.object({
   id: z.string(),
   status: z.enum(["SUBMITTED","APPROVED","RETURNED"]),
-  reason: z.string().optional(), // stored in AuditLog
+  reason: z.string().optional(), // stored in AuditLog + on entry when RETURNED
+});
+
+export const BulkSubmitEntries = z.object({
+  eventId: z.string(),
+  ids: z.array(z.string()).min(1),
 });
 
 export const DocumentTypeEnum = z.enum([

@@ -207,6 +207,11 @@ const EnteredEntryCard: React.FC<EnteredEntryCardProps> = ({ entry, onDelete, is
             {beltName && ` · ${beltName}`}
             {entry.weightClass && ` · ${entry.weightClass.name}`}
           </p>
+          {entry.status === "RETURNED" && entry.statusReason && (
+            <p className="mt-1 text-xs text-flag-red">
+              <span className="font-medium">Returned:</span> {entry.statusReason}
+            </p>
+          )}
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
           <Badge

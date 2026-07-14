@@ -298,9 +298,11 @@ model Entry {
   weightClassId String?
   weightClass   WeightClass? @relation(fields: [weightClassId], references: [id])
 
-  status   EntryStatus @default(DRAFT)
-  feeCents Int         @default(0)
-  notes    String?
+  status       EntryStatus @default(DRAFT)
+  /// Admin's reason when an entry is RETURNED; shown to the club. Cleared on submit/approve.
+  statusReason String?
+  feeCents     Int         @default(0)
+  notes        String?
 
   drawSlots  DrawSlot[]
   boutsAsAka Bout[]     @relation("BoutAka")

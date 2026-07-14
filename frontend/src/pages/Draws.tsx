@@ -329,7 +329,7 @@ export default function DrawsPage() {
                 <p className="mb-1 text-sm font-medium">{categoryTitle(selected)}</p>
                 <p className="mb-4 text-sm text-muted-foreground">
                   {selected.entryCount < 2
-                    ? "At least 2 submitted or approved entries are needed to generate a draw."
+                    ? "At least 2 approved entries are needed to generate a draw."
                     : `${selected.entryCount} entries ready — generate a random draw.`}
                 </p>
                 {canManage && (

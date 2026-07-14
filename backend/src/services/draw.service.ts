@@ -1,8 +1,9 @@
 import { randomInt } from "crypto";
 import { prisma } from "../lib/prisma.js";
 
-// Entry statuses that take part in a draw
-const ELIGIBLE_STATUSES = ["SUBMITTED", "APPROVED"] as const;
+// Entry statuses that take part in a draw. Only approved entries are drawn —
+// submission alone is not enough; an admin must approve first.
+const ELIGIBLE_STATUSES = ["APPROVED"] as const;
 
 const ENTRY_INCLUDE = {
   athlete: { select: { id: true, firstName: true, lastName: true } },

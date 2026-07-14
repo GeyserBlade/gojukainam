@@ -173,14 +173,18 @@ export class EntryService {
     if (isClub) {
       if (existing.clubId !== user.clubId) throw { status: 403, message: "Forbidden" };
       if (status !== "SUBMITTED") throw { status: 403, message: "Club can only submit" };
-      if (existing.status !== "DRAFT") {
-        throw { status: 409, message: "Only DRAFT entries can be submitted" };
+      if (existing.status !== "DRAFT" && existing.status !== "RETURNED") {
+        throw { status: 409, message: "Only DRAFT or RETURNED entries can be submitted" };
       }
     }
     if (!isAdmin && !isClub) throw { status: 403, message: "Forbidden" };
 
+    // Track the return reason on the entry so the club can see it; clear it
+    // once the entry moves forward (submit) or is accepted (approve).
+    const statusReason = status === "RETURNED" ? (reason ?? null) : null;
+
     return prisma.$transaction(async (tx) => {
-      const u = await tx.entry.update({ where: { id }, data: { status } });
+      const u = await tx.entry.update({ where: { id }, data: { status, statusReason } });
       await tx.auditLog.create({
         data: {
           userId: user.id, entityType: "Entry", entityId: id,
@@ -188,6 +192,44 @@ export class EntryService {
         }
       });
       return u;
+    });
+  }
+
+  // Club-side bulk submit: DRAFT/RETURNED -> SUBMITTED for the given ids.
+  // Non-admins are constrained to their own club. Clears any prior return reason.
+  static async bulkSubmit(
+    eventId: string,
+    ids: string[],
+    user: { id: string; role: string; clubId?: string | null },
+  ) {
+    const isAdmin = user.role === "SUPERADMIN" || user.role === "ADMIN";
+    const where: any = {
+      eventId,
+      id: { in: ids },
+      status: { in: ["DRAFT", "RETURNED"] },
+    };
+    if (!isAdmin) {
+      if (!user.clubId) throw { status: 400, message: "clubId missing for scoped request" };
+      where.clubId = user.clubId;
+    }
+
+    return prisma.$transaction(async (tx) => {
+      const updated = await tx.entry.updateMany({
+        where,
+        data: { status: "SUBMITTED", statusReason: null },
+      });
+      if (updated.count > 0) {
+        await tx.auditLog.create({
+          data: {
+            userId: user.id,
+            entityType: "Entry",
+            entityId: `bulk:${Date.now()}`,
+            action: "BULK_SUBMITTED",
+            diffJson: JSON.stringify({ eventId, ids, count: updated.count }),
+          },
+        });
+      }
+      return { updatedCount: updated.count };
     });
   }
 }

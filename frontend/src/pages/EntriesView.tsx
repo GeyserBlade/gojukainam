@@ -1,17 +1,20 @@
-import { useState, useMemo } from "react"
+import { useState, useMemo, useEffect } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   Check,
   ChevronRight,
   Search,
+  Send,
   Undo2,
   Users as UsersIcon,
   Weight as WeightIcon,
   User as UserIcon,
+  X,
 } from "lucide-react"
 
 import { useAuth } from "@/contexts/AuthContext"
 import { useToast, useApiErrorToast } from "@/components/Toast"
+import { useConfirm } from "@/components/ConfirmDialog"
 import { AppShell } from "@/components/layout/AppShell"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -19,6 +22,14 @@ import {
   Card,
   CardContent,
 } from "@/components/ui/card"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
@@ -38,6 +49,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Textarea } from "@/components/ui/textarea"
 import { cn } from "@/lib/utils"
 import {
   EntryService,
@@ -75,78 +87,123 @@ const StatusBadge = ({ status }: { status: StatusKey }) => (
   </Badge>
 )
 
+// A small native checkbox styled to match the design tokens.
+const SelectBox = ({
+  checked,
+  onChange,
+  "aria-label": ariaLabel,
+}: {
+  checked: boolean
+  onChange: () => void
+  "aria-label": string
+}) => (
+  <input
+    type="checkbox"
+    checked={checked}
+    onChange={onChange}
+    onClick={(e) => e.stopPropagation()}
+    aria-label={ariaLabel}
+    className="size-4 shrink-0 cursor-pointer accent-primary"
+  />
+)
+
 const EntryRow = ({
   entry,
-  onStatusChange,
+  selectable,
+  selected,
+  onToggleSelect,
+  onSubmit,
+  onApprove,
+  onReturn,
   isAdmin,
+  isClub,
+  busy,
 }: {
   entry: Entry
-  onStatusChange?: (id: string, next: StatusKey) => void
+  selectable: boolean
+  selected: boolean
+  onToggleSelect: () => void
+  onSubmit: () => void
+  onApprove: () => void
+  onReturn: () => void
   isAdmin: boolean
+  isClub: boolean
+  busy: boolean
 }) => {
   const isTeam = entry.entryType === "TEAM_KATA" || entry.entryType === "TEAM_KUMITE"
   const cat = entry.division.category
+  const canSubmit = isClub && (entry.status === "DRAFT" || entry.status === "RETURNED")
+  const canReview = isAdmin && entry.status === "SUBMITTED"
 
   return (
-    <Card>
+    <Card className={cn(selected && "border-primary/50 ring-1 ring-primary/30")}>
       <CardContent className="space-y-2 px-4 py-3">
         <div className="flex justify-between items-start gap-3">
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2 mb-0.5">
-              {isTeam ? (
-                <UsersIcon className="size-4 text-muted-foreground" />
-              ) : (
-                <UserIcon className="size-4 text-muted-foreground" />
-              )}
-              <h3 className="font-medium truncate">
-                {isTeam && entry.team
-                  ? entry.team.name
-                  : entry.athlete
-                  ? `${entry.athlete.firstName} ${entry.athlete.lastName}`
-                  : "Unknown"}
-              </h3>
-            </div>
-            <div className="flex items-center gap-2 flex-wrap text-xs text-muted-foreground">
-              <span>{entry.club.name}</span>
-              <span aria-hidden>·</span>
-              <Badge variant="outline" className={cn("font-normal text-[10px]", CATEGORY_STYLES[cat])}>
-                {cat}
-              </Badge>
-              {entry.weightClass && (
-                <Badge variant="outline" className="font-normal text-[10px] gap-1">
-                  <WeightIcon className="size-3" />
-                  {entry.weightClass.name}
-                </Badge>
-              )}
-              {!isTeam && entry.athlete?.belt && (
-                <span>{entry.athlete.belt.name}</span>
-              )}
-            </div>
-            {isTeam && entry.team && (
-              <p className="mt-1 text-xs text-muted-foreground">
-                Members: {entry.team.members.filter((m) => !m.isReserve).length}
-                {entry.team.members.some((m) => m.isReserve) &&
-                  ` (+${entry.team.members.filter((m) => m.isReserve).length} reserve)`}
-              </p>
+          <div className="flex min-w-0 flex-1 items-start gap-2.5">
+            {selectable && (
+              <div className="pt-0.5">
+                <SelectBox
+                  checked={selected}
+                  onChange={onToggleSelect}
+                  aria-label="Select entry"
+                />
+              </div>
             )}
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2 mb-0.5">
+                {isTeam ? (
+                  <UsersIcon className="size-4 text-muted-foreground" />
+                ) : (
+                  <UserIcon className="size-4 text-muted-foreground" />
+                )}
+                <h3 className="font-medium truncate">
+                  {isTeam && entry.team
+                    ? entry.team.name
+                    : entry.athlete
+                    ? `${entry.athlete.firstName} ${entry.athlete.lastName}`
+                    : "Unknown"}
+                </h3>
+              </div>
+              <div className="flex items-center gap-2 flex-wrap text-xs text-muted-foreground">
+                <span>{entry.club.name}</span>
+                <span aria-hidden>·</span>
+                <Badge variant="outline" className={cn("font-normal text-[10px]", CATEGORY_STYLES[cat])}>
+                  {cat}
+                </Badge>
+                {entry.weightClass && (
+                  <Badge variant="outline" className="font-normal text-[10px] gap-1">
+                    <WeightIcon className="size-3" />
+                    {entry.weightClass.name}
+                  </Badge>
+                )}
+                {!isTeam && entry.athlete?.belt && (
+                  <span>{entry.athlete.belt.name}</span>
+                )}
+              </div>
+              {isTeam && entry.team && (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Members: {entry.team.members.filter((m) => !m.isReserve).length}
+                  {entry.team.members.some((m) => m.isReserve) &&
+                    ` (+${entry.team.members.filter((m) => m.isReserve).length} reserve)`}
+                </p>
+              )}
+            </div>
           </div>
           <div className="flex flex-col items-end gap-2">
             <StatusBadge status={entry.status} />
-            {isAdmin && entry.status === "SUBMITTED" && onStatusChange && (
+            {canSubmit && (
+              <Button size="xs" variant="outline" onClick={onSubmit} disabled={busy}>
+                <Send />
+                Submit
+              </Button>
+            )}
+            {canReview && (
               <div className="flex gap-1">
-                <Button
-                  size="xs"
-                  variant="outline"
-                  onClick={() => onStatusChange(entry.id, "APPROVED")}
-                >
+                <Button size="xs" variant="outline" onClick={onApprove} disabled={busy}>
                   <Check />
                   Approve
                 </Button>
-                <Button
-                  size="xs"
-                  variant="outline"
-                  onClick={() => onStatusChange(entry.id, "RETURNED")}
-                >
+                <Button size="xs" variant="outline" onClick={onReturn} disabled={busy}>
                   <Undo2 />
                   Return
                 </Button>
@@ -154,6 +211,11 @@ const EntryRow = ({
             )}
           </div>
         </div>
+        {entry.status === "RETURNED" && entry.statusReason && (
+          <p className="text-xs text-flag-red">
+            <span className="font-medium">Returned:</span> {entry.statusReason}
+          </p>
+        )}
         <div className="text-xs text-muted-foreground pt-2 border-t flex justify-between">
           <span>Division: {entry.division.name}</span>
           <span>
@@ -176,7 +238,9 @@ const EntriesView = () => {
   const queryClient = useQueryClient()
   const toast = useToast()
   const showApiError = useApiErrorToast()
+  const confirm = useConfirm()
   const isAdmin = role === "SUPERADMIN" || role === "ADMIN"
+  const isClub = role === "CLUB_MANAGER" || role === "COACH"
 
   const [selectedEventId, setSelectedEventId] = useState<string>("")
   const [filterClubId, setFilterClubId] = useState<string>(clubId || "")
@@ -186,6 +250,12 @@ const EntriesView = () => {
   const [searchQuery, setSearchQuery] = useState("")
   const [viewMode, setViewMode] = useState<"grouped" | "table">("grouped")
   const [expandedDivisions, setExpandedDivisions] = useState<Set<string>>(new Set())
+
+  // Bulk selection + return dialog
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [returnTarget, setReturnTarget] = useState<string[] | null>(null)
+  const [returnReason, setReturnReason] = useState("")
+  const [acting, setActing] = useState(false)
 
   const { data: events = [] } = useQuery({
     queryKey: ["events"],
@@ -220,14 +290,125 @@ const EntriesView = () => {
     enabled: !!selectedEventId,
   })
 
-  const handleStatusChange = async (entryId: string, newStatus: StatusKey) => {
+  // Whether the current user can act on an entry (and therefore select it).
+  const canSelect = (entry: Entry) =>
+    isClub
+      ? entry.status === "DRAFT" || entry.status === "RETURNED"
+      : isAdmin
+      ? entry.status === "SUBMITTED"
+      : false
+
+  const selectableIds = useMemo(
+    () => entries.filter(canSelect).map((e) => e.id),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [entries, isAdmin, isClub],
+  )
+
+  // Clear selection whenever the working set changes.
+  useEffect(() => {
+    setSelected(new Set())
+  }, [selectedEventId, filterClubId, filterDivisionId, filterStatus, filterEntryType, searchQuery])
+
+  // Drop any selected ids that are no longer selectable (e.g. after a refetch).
+  useEffect(() => {
+    setSelected((prev) => {
+      if (prev.size === 0) return prev
+      const valid = new Set(selectableIds)
+      let changed = false
+      const next = new Set<string>()
+      prev.forEach((id) => {
+        if (valid.has(id)) next.add(id)
+        else changed = true
+      })
+      return changed ? next : prev
+    })
+  }, [selectableIds])
+
+  const toggleOne = (id: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+
+  const toggleMany = (ids: string[]) =>
+    setSelected((prev) => {
+      const next = new Set(prev)
+      const allSelected = ids.length > 0 && ids.every((id) => next.has(id))
+      if (allSelected) ids.forEach((id) => next.delete(id))
+      else ids.forEach((id) => next.add(id))
+      return next
+    })
+
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ["entries"] })
+
+  // --- Actions (single + bulk share these paths) ---
+  const runSubmit = async (ids: string[]) => {
+    if (ids.length === 0) return
+    setActing(true)
     try {
-      await EntryService.updateStatus(entryId, newStatus)
-      queryClient.invalidateQueries({ queryKey: ["entries"] })
-      toast.success("Entry status updated")
+      const { updatedCount } = await EntryService.bulkSubmit(selectedEventId, ids)
+      invalidate()
+      setSelected(new Set())
+      toast.success(`${updatedCount} ${updatedCount === 1 ? "entry" : "entries"} submitted`)
     } catch (e) {
-      showApiError(e, "Failed to update status")
+      showApiError(e, "Failed to submit entries")
+    } finally {
+      setActing(false)
     }
+  }
+
+  const runApprove = async (ids: string[]) => {
+    if (ids.length === 0) return
+    setActing(true)
+    try {
+      const { updatedCount } = await EntryService.bulkReview(selectedEventId, ids, "APPROVED")
+      invalidate()
+      setSelected(new Set())
+      toast.success(`${updatedCount} ${updatedCount === 1 ? "entry" : "entries"} approved`)
+    } catch (e) {
+      showApiError(e, "Failed to approve entries")
+    } finally {
+      setActing(false)
+    }
+  }
+
+  const runReturn = async (ids: string[], reason: string) => {
+    if (ids.length === 0) return
+    setActing(true)
+    try {
+      const { updatedCount } = await EntryService.bulkReview(selectedEventId, ids, "RETURNED", reason)
+      invalidate()
+      setSelected(new Set())
+      toast.success(`${updatedCount} ${updatedCount === 1 ? "entry" : "entries"} returned`)
+    } catch (e) {
+      showApiError(e, "Failed to return entries")
+    } finally {
+      setActing(false)
+    }
+  }
+
+  const openReturnDialog = (ids: string[]) => {
+    setReturnTarget(ids)
+    setReturnReason("")
+  }
+
+  const confirmReturn = async () => {
+    if (!returnTarget) return
+    const ids = returnTarget
+    setReturnTarget(null)
+    await runReturn(ids, returnReason.trim())
+  }
+
+  const handleApproveAll = async () => {
+    const ids = entries.filter((e) => e.status === "SUBMITTED").map((e) => e.id)
+    if (ids.length === 0) return
+    const ok = await confirm({
+      title: `Approve ${ids.length} pending ${ids.length === 1 ? "entry" : "entries"}?`,
+      description: "All currently listed pending entries will be approved.",
+      confirmText: "Approve all",
+    })
+    if (ok) runApprove(ids)
   }
 
   const toggleDivision = (id: string) => {
@@ -253,6 +434,13 @@ const EntriesView = () => {
     }),
     [entries],
   )
+
+  // Counts that drive the one-click shortcuts (from the currently listed entries).
+  const submittableCount = useMemo(
+    () => entries.filter((e) => e.status === "DRAFT" || e.status === "RETURNED").length,
+    [entries],
+  )
+  const pendingCount = stats.submitted
 
   const groupedEntries = useMemo(() => {
     const groups: { [id: string]: { division: EntryDivision; entries: Entry[] } } = {}
@@ -302,6 +490,15 @@ const EntriesView = () => {
     approved: "Approved",
     returned: "Returned",
   }
+  const statFilter: Record<keyof typeof stats, string> = {
+    total: "ALL",
+    draft: "DRAFT",
+    submitted: "SUBMITTED",
+    approved: "APPROVED",
+    returned: "RETURNED",
+  }
+
+  const selectedCount = selected.size
 
   return (
     <AppShell title="Entries">
@@ -310,7 +507,9 @@ const EntriesView = () => {
           ALL ENTRIES
         </h1>
         <p className="text-sm text-muted-foreground mt-1">
-          View and manage competition entries across all events.
+          {isAdmin
+            ? "Review, approve or return entries across all clubs."
+            : "Review and submit your club's entries for approval."}
         </p>
       </div>
 
@@ -341,26 +540,65 @@ const EntriesView = () => {
 
       {selectedEventId && (
         <>
-          {/* Stats */}
+          {/* Stats — click to filter by that status */}
           <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
-            {(Object.keys(stats) as Array<keyof typeof stats>).map((key) => (
-              <Card key={key}>
-                <CardContent className="py-3">
-                  <p
-                    className={cn(
-                      "font-display text-2xl sm:text-3xl tracking-wide leading-none",
-                      statTone[key],
-                    )}
-                  >
-                    {stats[key]}
-                  </p>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    {statLabel[key]}
-                  </p>
-                </CardContent>
-              </Card>
-            ))}
+            {(Object.keys(stats) as Array<keyof typeof stats>).map((key) => {
+              const target = statFilter[key]
+              const active = filterStatus === target
+              return (
+                <Card
+                  key={key}
+                  className={cn(
+                    "cursor-pointer transition-colors hover:border-primary/40",
+                    active && "border-primary ring-1 ring-primary/30",
+                  )}
+                  onClick={() => setFilterStatus(target)}
+                >
+                  <CardContent className="py-3">
+                    <p
+                      className={cn(
+                        "font-display text-2xl sm:text-3xl tracking-wide leading-none",
+                        statTone[key],
+                      )}
+                    >
+                      {stats[key]}
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {statLabel[key]}
+                    </p>
+                  </CardContent>
+                </Card>
+              )
+            })}
           </div>
+
+          {/* One-click shortcuts */}
+          {(isClub && submittableCount > 0) || (isAdmin && pendingCount > 0) ? (
+            <div className="mb-4 flex flex-wrap gap-2">
+              {isClub && submittableCount > 0 && (
+                <Button
+                  size="sm"
+                  onClick={() =>
+                    runSubmit(
+                      entries
+                        .filter((e) => e.status === "DRAFT" || e.status === "RETURNED")
+                        .map((e) => e.id),
+                    )
+                  }
+                  disabled={acting}
+                >
+                  <Send />
+                  Submit all drafts ({submittableCount})
+                </Button>
+              )}
+              {isAdmin && pendingCount > 0 && (
+                <Button size="sm" onClick={handleApproveAll} disabled={acting}>
+                  <Check />
+                  Approve all pending ({pendingCount})
+                </Button>
+              )}
+            </div>
+          ) : null}
 
           {/* Filters */}
           <Card className="mb-4">
@@ -451,19 +689,32 @@ const EntriesView = () => {
             </CardContent>
           </Card>
 
-          {/* View toggle */}
-          <div className="flex items-center justify-between mb-3">
+          {/* View toggle + select-all */}
+          <div className="flex items-center justify-between mb-3 gap-2">
             <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as "grouped" | "table")}>
               <TabsList>
                 <TabsTrigger value="grouped">Grouped</TabsTrigger>
                 <TabsTrigger value="table">Table</TabsTrigger>
               </TabsList>
             </Tabs>
-            {viewMode === "grouped" && (
-              <Button variant="outline" size="sm" onClick={toggleAll}>
-                {expandedDivisions.size === divisions.length ? "Collapse all" : "Expand all"}
-              </Button>
-            )}
+            <div className="flex items-center gap-2">
+              {selectableIds.length > 0 && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => toggleMany(selectableIds)}
+                >
+                  {selectableIds.every((id) => selected.has(id))
+                    ? "Deselect all"
+                    : `Select all (${selectableIds.length})`}
+                </Button>
+              )}
+              {viewMode === "grouped" && (
+                <Button variant="outline" size="sm" onClick={toggleAll}>
+                  {expandedDivisions.size === divisions.length ? "Collapse all" : "Expand all"}
+                </Button>
+              )}
+            </div>
           </div>
 
           {/* Entries */}
@@ -484,44 +735,56 @@ const EntriesView = () => {
           )}
 
           {!loadingEntries && entries.length > 0 && viewMode === "grouped" && (
-            <div className="space-y-3">
+            <div className="space-y-3 pb-24">
               {allDivisionsWithEntries.map(({ division, entries: divisionEntries }) => {
                 const isExpanded = expandedDivisions.has(division.id)
+                const groupSelectable = divisionEntries.filter(canSelect).map((e) => e.id)
+                const groupAllSelected =
+                  groupSelectable.length > 0 && groupSelectable.every((id) => selected.has(id))
                 return (
                   <Card key={division.id}>
-                    <button
-                      type="button"
-                      onClick={() => toggleDivision(division.id)}
-                      className="w-full flex items-center justify-between p-4 text-left hover:bg-accent/40 transition-colors"
-                    >
-                      <div className="flex items-center gap-3">
-                        <ChevronRight
-                          className={cn(
-                            "size-4 text-muted-foreground transition-transform",
-                            isExpanded && "rotate-90",
-                          )}
+                    <div className="flex items-center gap-2 p-4">
+                      {groupSelectable.length > 0 && (
+                        <SelectBox
+                          checked={groupAllSelected}
+                          onChange={() => toggleMany(groupSelectable)}
+                          aria-label={`Select all in ${division.name}`}
                         />
-                        <div>
-                          <p className="font-medium">{division.name}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {division.gender} · Ages {division.minAge}-{division.maxAge}
-                          </p>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => toggleDivision(division.id)}
+                        className="flex flex-1 items-center justify-between text-left"
+                      >
+                        <div className="flex items-center gap-3">
+                          <ChevronRight
+                            className={cn(
+                              "size-4 text-muted-foreground transition-transform",
+                              isExpanded && "rotate-90",
+                            )}
+                          />
+                          <div>
+                            <p className="font-medium">{division.name}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {division.gender} · Ages {division.minAge}-{division.maxAge}
+                            </p>
+                          </div>
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              "font-normal text-[10px]",
+                              CATEGORY_STYLES[division.category],
+                            )}
+                          >
+                            {division.category}
+                          </Badge>
                         </div>
-                        <Badge
-                          variant="outline"
-                          className={cn(
-                            "font-normal text-[10px]",
-                            CATEGORY_STYLES[division.category],
-                          )}
-                        >
-                          {division.category}
-                        </Badge>
-                      </div>
-                      <span className="text-xs text-muted-foreground">
-                        {divisionEntries.length}{" "}
-                        {divisionEntries.length === 1 ? "entry" : "entries"}
-                      </span>
-                    </button>
+                        <span className="text-xs text-muted-foreground">
+                          {divisionEntries.length}{" "}
+                          {divisionEntries.length === 1 ? "entry" : "entries"}
+                        </span>
+                      </button>
+                    </div>
 
                     {isExpanded && (
                       <CardContent className="space-y-2 pt-0">
@@ -534,8 +797,15 @@ const EntriesView = () => {
                             <EntryRow
                               key={entry.id}
                               entry={entry}
-                              onStatusChange={handleStatusChange}
+                              selectable={canSelect(entry)}
+                              selected={selected.has(entry.id)}
+                              onToggleSelect={() => toggleOne(entry.id)}
+                              onSubmit={() => runSubmit([entry.id])}
+                              onApprove={() => runApprove([entry.id])}
+                              onReturn={() => openReturnDialog([entry.id])}
                               isAdmin={isAdmin}
+                              isClub={isClub}
+                              busy={acting}
                             />
                           ))
                         )}
@@ -548,10 +818,19 @@ const EntriesView = () => {
           )}
 
           {!loadingEntries && entries.length > 0 && viewMode === "table" && (
-            <div className="rounded-md border bg-card overflow-hidden">
+            <div className="rounded-md border bg-card overflow-hidden mb-24">
               <Table>
                 <TableHeader>
                   <TableRow>
+                    <TableHead className="w-10">
+                      {selectableIds.length > 0 && (
+                        <SelectBox
+                          checked={selectableIds.every((id) => selected.has(id))}
+                          onChange={() => toggleMany(selectableIds)}
+                          aria-label="Select all entries"
+                        />
+                      )}
+                    </TableHead>
                     <TableHead>Name</TableHead>
                     <TableHead className="hidden sm:table-cell">Club</TableHead>
                     <TableHead className="hidden md:table-cell">Division</TableHead>
@@ -559,21 +838,42 @@ const EntriesView = () => {
                     <TableHead className="hidden lg:table-cell">Type</TableHead>
                     <TableHead className="hidden xl:table-cell">Weight</TableHead>
                     <TableHead>Status</TableHead>
-                    {isAdmin && <TableHead className="text-right">Actions</TableHead>}
+                    <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {entries.map((entry) => {
                     const isTeam =
                       entry.entryType === "TEAM_KATA" || entry.entryType === "TEAM_KUMITE"
+                    const selectable = canSelect(entry)
+                    const canSubmit =
+                      isClub && (entry.status === "DRAFT" || entry.status === "RETURNED")
+                    const canReview = isAdmin && entry.status === "SUBMITTED"
                     return (
-                      <TableRow key={entry.id}>
+                      <TableRow
+                        key={entry.id}
+                        className={cn(selected.has(entry.id) && "bg-primary/5")}
+                      >
+                        <TableCell>
+                          {selectable && (
+                            <SelectBox
+                              checked={selected.has(entry.id)}
+                              onChange={() => toggleOne(entry.id)}
+                              aria-label="Select entry"
+                            />
+                          )}
+                        </TableCell>
                         <TableCell className="font-medium">
                           {isTeam && entry.team
                             ? entry.team.name
                             : entry.athlete
                             ? `${entry.athlete.firstName} ${entry.athlete.lastName}`
                             : "Unknown"}
+                          {entry.status === "RETURNED" && entry.statusReason && (
+                            <span className="block text-xs font-normal text-flag-red">
+                              {entry.statusReason}
+                            </span>
+                          )}
                         </TableCell>
                         <TableCell className="hidden sm:table-cell text-muted-foreground">
                           {entry.club.name}
@@ -601,14 +901,27 @@ const EntriesView = () => {
                         <TableCell>
                           <StatusBadge status={entry.status} />
                         </TableCell>
-                        {isAdmin && (
-                          <TableCell>
-                            {entry.status === "SUBMITTED" && (
-                              <div className="flex justify-end gap-1">
+                        <TableCell>
+                          <div className="flex justify-end gap-1">
+                            {canSubmit && (
+                              <Button
+                                size="icon-sm"
+                                variant="outline"
+                                onClick={() => runSubmit([entry.id])}
+                                disabled={acting}
+                                aria-label="Submit"
+                                title="Submit for approval"
+                              >
+                                <Send />
+                              </Button>
+                            )}
+                            {canReview && (
+                              <>
                                 <Button
                                   size="icon-sm"
                                   variant="outline"
-                                  onClick={() => handleStatusChange(entry.id, "APPROVED")}
+                                  onClick={() => runApprove([entry.id])}
+                                  disabled={acting}
                                   aria-label="Approve"
                                 >
                                   <Check />
@@ -616,15 +929,16 @@ const EntriesView = () => {
                                 <Button
                                   size="icon-sm"
                                   variant="outline"
-                                  onClick={() => handleStatusChange(entry.id, "RETURNED")}
+                                  onClick={() => openReturnDialog([entry.id])}
+                                  disabled={acting}
                                   aria-label="Return"
                                 >
                                   <Undo2 />
                                 </Button>
-                              </div>
+                              </>
                             )}
-                          </TableCell>
-                        )}
+                          </div>
+                        </TableCell>
                       </TableRow>
                     )
                   })}
@@ -634,6 +948,95 @@ const EntriesView = () => {
           )}
         </>
       )}
+
+      {/* Sticky bulk-action bar */}
+      {selectedCount > 0 && (
+        <div className="fixed inset-x-0 bottom-0 z-30 border-t bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+          <div className="mx-auto flex max-w-7xl items-center gap-3 px-3 py-3 sm:px-4">
+            <span className="text-sm font-medium">
+              {selectedCount} selected
+            </span>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setSelected(new Set())}
+              className="text-muted-foreground"
+            >
+              <X />
+              Clear
+            </Button>
+            <div className="ml-auto flex items-center gap-2">
+              {isClub && (
+                <Button
+                  size="sm"
+                  onClick={() => runSubmit([...selected])}
+                  disabled={acting}
+                >
+                  <Send />
+                  Submit selected
+                </Button>
+              )}
+              {isAdmin && (
+                <>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => openReturnDialog([...selected])}
+                    disabled={acting}
+                  >
+                    <Undo2 />
+                    Return selected…
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={() => runApprove([...selected])}
+                    disabled={acting}
+                  >
+                    <Check />
+                    Approve selected
+                  </Button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Return-with-reason dialog */}
+      <Dialog open={returnTarget !== null} onOpenChange={(o) => !o && setReturnTarget(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              Return {returnTarget && returnTarget.length > 1 ? `${returnTarget.length} entries` : "entry"}
+            </DialogTitle>
+            <DialogDescription>
+              The reason is shown to the club so they can fix and resubmit.
+            </DialogDescription>
+          </DialogHeader>
+          <div>
+            <Label htmlFor="return-reason" className="mb-1.5">
+              Reason <span className="text-destructive">*</span>
+            </Label>
+            <Textarea
+              id="return-reason"
+              value={returnReason}
+              onChange={(e) => setReturnReason(e.target.value)}
+              placeholder="e.g. Wrong weight category, missing medical clearance…"
+              rows={3}
+              autoFocus
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setReturnTarget(null)} disabled={acting}>
+              Cancel
+            </Button>
+            <Button onClick={confirmReturn} disabled={acting || !returnReason.trim()}>
+              <Undo2 />
+              Return
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </AppShell>
   )
 }

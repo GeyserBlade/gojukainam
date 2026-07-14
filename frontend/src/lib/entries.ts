@@ -64,6 +64,7 @@ export interface Entry {
   teamId?: string | null;
   feeCents: number;
   status: "DRAFT" | "SUBMITTED" | "APPROVED" | "RETURNED";
+  statusReason?: string | null;
   notes?: string | null;
   createdAt: string;
   updatedAt: string;
@@ -121,5 +122,22 @@ export class EntryService {
 
   static async delete(id: string): Promise<void> {
     await api.delete(`/entries/${id}`);
+  }
+
+  // Club-side bulk submit: DRAFT/RETURNED -> SUBMITTED.
+  static async bulkSubmit(eventId: string, ids: string[]): Promise<{ updatedCount: number }> {
+    const res = await api.post("/entries/bulk-submit", { eventId, ids });
+    return res.data;
+  }
+
+  // Admin-side bulk review: SUBMITTED -> APPROVED/RETURNED (reason shown on return).
+  static async bulkReview(
+    eventId: string,
+    ids: string[],
+    status: "APPROVED" | "RETURNED",
+    reason?: string,
+  ): Promise<{ updatedCount: number }> {
+    const res = await api.post("/review/bulk", { eventId, ids, status, reason });
+    return res.data;
   }
 }
