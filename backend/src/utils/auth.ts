@@ -12,6 +12,12 @@ export type AuthUser = {
 // at startup (see ensureDevUser) so audit-log writes have a valid FK target.
 export const DEV_USER_ID = "dev-user";
 
+// Header auth grants any role without credentials — never allow it in production.
+const ALLOW_DEV_AUTH = process.env.ALLOW_DEV_AUTH === "true";
+if (ALLOW_DEV_AUTH && process.env.NODE_ENV === "production") {
+  throw new Error("FATAL: ALLOW_DEV_AUTH must not be enabled in production");
+}
+
 declare global {
   namespace Express {
     interface Request {
@@ -34,8 +40,7 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction) 
   }
 
   // 2. Try Dev Auth (Headers) — only when explicitly enabled via env var
-  const allowDevAuth = process.env.ALLOW_DEV_AUTH === "true";
-  if (allowDevAuth && req.header("x-role")) {
+  if (ALLOW_DEV_AUTH && req.header("x-role")) {
     const role = (req.header("x-role") as AuthUser["role"]) || "SUPERADMIN";
     const clubId = req.header("x-club-id") || undefined;
     req.user = { id: DEV_USER_ID, role, clubId };
@@ -50,7 +55,7 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction) 
  * userId) succeed under header auth. No-op unless ALLOW_DEV_AUTH is enabled.
  */
 export async function ensureDevUser() {
-  if (process.env.ALLOW_DEV_AUTH !== "true") return;
+  if (!ALLOW_DEV_AUTH) return;
   await prisma.user.upsert({
     where: { id: DEV_USER_ID },
     update: {},
