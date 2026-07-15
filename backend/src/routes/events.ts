@@ -16,6 +16,7 @@ import {
   WeightClassIdParam,
   EligibleAthletesQuery,
   ApplyTemplate,
+  SetPublicAccess,
 } from "../utils/validators.js";
 
 export const router = Router();
@@ -84,6 +85,16 @@ router.put("/:id", requireRoles("SUPERADMIN", "ADMIN"), validateMultiple({ param
 router.patch("/:id/status", requireRoles("SUPERADMIN", "ADMIN"), validateMultiple({ params: IdParam, body: UpdateEventStatus }), async (req, res, next) => {
   try {
     const event = await EventService.updateStatus(getParam(req.params.id), req.body.status);
+    res.json(event);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// enable/disable (rotate) the read-only public board token (admin only)
+router.post("/:id/public-token", requireRoles("SUPERADMIN", "ADMIN"), validateMultiple({ params: IdParam, body: SetPublicAccess }), async (req, res, next) => {
+  try {
+    const event = await EventService.setPublicAccess(getParam(req.params.id), req.body.enabled);
     res.json(event);
   } catch (err) {
     next(err);

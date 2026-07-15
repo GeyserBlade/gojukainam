@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { prisma } from "../lib/prisma.js";
 import { CreateEvent, UpdateEvent, CreateDivision, UpdateDivision, CreateWeightClass, UpdateWeightClass } from "../utils/validators.js";
 import { ageOn } from "../utils/eligibility.js";
@@ -85,6 +86,16 @@ export class EventService {
       where: { id },
       data: { status }
     });
+  }
+
+  /**
+   * Enable/disable (and rotate) the read-only public board token. Enabling
+   * always mints a fresh token, so re-enabling revokes any previously shared
+   * link. Disabling clears it entirely.
+   */
+  static async setPublicAccess(id: string, enabled: boolean) {
+    const publicToken = enabled ? randomBytes(12).toString("hex") : null;
+    return prisma.event.update({ where: { id }, data: { publicToken } });
   }
 
   static async getActiveEvents() {

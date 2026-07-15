@@ -32,6 +32,7 @@ const HubOverviewPage = lazy(() => import("./pages/hub/Overview"));
 const HubSetupPage = lazy(() => import("./pages/hub/Setup"));
 const ScoreboardPage = lazy(() => import("./pages/Scoreboard"));
 const ScoreboardDisplayPage = lazy(() => import("./pages/ScoreboardDisplay"));
+const PublicBoardPage = lazy(() => import("./pages/PublicBoard"));
 
 
 const Protected: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -44,6 +45,9 @@ const Protected: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 const AppRoutes: React.FC = () => (
   <Suspense fallback={<PageSpinner />}>
     <Routes>
+      {/* Public read-only spectator board (no auth) */}
+      <Route path="/board/:token" element={<PublicBoardPage />} />
+
       <Route path="/signin" element={<SignInPage />} />
       <Route path="/magic-login" element={<MagicLoginPage />} />
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />

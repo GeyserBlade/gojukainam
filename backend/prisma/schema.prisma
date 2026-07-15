@@ -163,6 +163,9 @@ model Event {
   status     EventStatus @default(ACTIVE)
   /// JSON string of your YAML config (persisted snapshot)
   configJson String
+  /// When set, a read-only public board is reachable at /board/<token>.
+  /// null = public board disabled. Rotating the token revokes old links.
+  publicToken String? @unique
 
   divisions     Division[]
   weightClasses WeightClass[]

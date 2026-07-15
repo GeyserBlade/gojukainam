@@ -211,6 +211,10 @@ export const ReorderMatQueue = z.object({
   boutIds: z.array(z.string().min(1)).min(1),
 });
 
+export const SetPublicAccess = z.object({
+  enabled: z.boolean(),
+});
+
 export const SetCheckIn = z.object({
   checkedIn: z.boolean(),
 });

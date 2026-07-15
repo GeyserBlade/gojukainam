@@ -10,9 +10,11 @@ import {
   Trophy,
 } from "lucide-react"
 
+import { useAuth } from "@/contexts/AuthContext"
 import { useSelectedEvent } from "@/contexts/SelectedEventContext"
 import { Card, CardContent } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
+import { PublicBoardShare } from "@/components/events/PublicBoardShare"
 import { cn } from "@/lib/utils"
 import { getReadiness } from "@/lib/events"
 
@@ -38,6 +40,8 @@ const Stat = ({
 
 export default function Overview() {
   const { eventId, event } = useSelectedEvent()
+  const { role } = useAuth()
+  const isAdmin = role === "SUPERADMIN" || role === "ADMIN"
 
   const { data: r, isLoading } = useQuery({
     queryKey: ["event-readiness", eventId],
@@ -130,6 +134,8 @@ export default function Overview() {
         <CheckCircle2 className="size-3.5" />
         {r.divisions} division{r.divisions === 1 ? "" : "s"} configured.
       </p>
+
+      {isAdmin && event && <PublicBoardShare event={event} />}
     </div>
   )
 }

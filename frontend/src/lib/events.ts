@@ -13,6 +13,7 @@ export interface Event {
   regClose: string;
   status: EventStatus;
   configJson: string;
+  publicToken?: string | null;
   createdAt: string;
   updatedAt: string;
   _count?: {
@@ -180,6 +181,12 @@ export async function updateEventStatus(id: string, status: EventStatus): Promis
 
 export async function deleteEvent(id: string): Promise<void> {
   await api.delete(`/events/${id}`);
+}
+
+// Enable/disable (and rotate) the read-only public board token.
+export async function setPublicAccess(id: string, enabled: boolean): Promise<Event> {
+  const res = await api.post(`/events/${id}/public-token`, { enabled });
+  return res.data;
 }
 
 // ============ Divisions ============
