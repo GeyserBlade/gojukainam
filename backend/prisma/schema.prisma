@@ -326,6 +326,12 @@ model Entry {
   // Fast filters
   @@index([eventId, divisionId, entryType, status])
   @@index([clubId, status])
+  // Bare-FK lookups (referential actions on athlete/team delete; division and
+  // weight-class delete guards count by these columns alone)
+  @@index([athleteId])
+  @@index([teamId])
+  @@index([divisionId])
+  @@index([weightClassId])
 }
 
 model Team {
@@ -423,6 +429,7 @@ model Draw {
   // guards against duplicates before creating.
   @@unique([eventId, divisionId, weightClassId])
   @@index([eventId])
+  @@index([matId])
 }
 
 model DrawSlot {
@@ -435,6 +442,8 @@ model DrawSlot {
 
   @@unique([drawId, position])
   @@unique([drawId, entryId])
+  // Entry-delete cascade scans by entryId alone; [drawId, entryId] can't serve it.
+  @@index([entryId])
 }
 
 model Bout {
@@ -472,6 +481,11 @@ model Bout {
 
   @@unique([drawId, phase, round, position])
   @@index([drawId])
+  // Bare-FK lookups for SetNull referential actions on entry/mat delete
+  @@index([akaEntryId])
+  @@index([aoEntryId])
+  @@index([winnerEntryId])
+  @@index([matId])
 }
 
 // A competition mat/tatami within an event. Categories (draws) are planned
