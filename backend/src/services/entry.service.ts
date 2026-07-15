@@ -1,6 +1,7 @@
 import { prisma } from "../lib/prisma.js";
 import { CreateEntry, UpdateEntryStatus } from "../utils/validators.js";
 import { assertNoDuplicateEntry, validateWeightClass, validateAthleteEligibility, validateAthleteWeight } from "../utils/eligibility.js";
+import { assertRegistrationOpen } from "../utils/regWindow.js";
 
 export class EntryService {
   static async list(eventId: string, filters?: {
@@ -75,8 +76,14 @@ export class EntryService {
     });
   }
 
-  static async create(data: unknown) {
+  static async create(data: unknown, user: { role: string }) {
     const body = CreateEntry.parse(data);
+
+    // Registration window: clubs can only add entries while registration is
+    // open; admins bypass so organizers can add/correct entries late.
+    const event = await prisma.event.findUnique({ where: { id: body.eventId } });
+    if (!event) throw { status: 404, message: "Event not found" };
+    assertRegistrationOpen(event, user);
 
     // individual path
     if (body.entryType === "KATA" || body.entryType === "KUMITE") {
@@ -176,6 +183,10 @@ export class EntryService {
       if (existing.status !== "DRAFT" && existing.status !== "RETURNED") {
         throw { status: 409, message: "Only DRAFT or RETURNED entries can be submitted" };
       }
+      // Registration must be open for a club to submit.
+      const event = await prisma.event.findUnique({ where: { id: existing.eventId } });
+      if (!event) throw { status: 404, message: "Event not found" };
+      assertRegistrationOpen(event, user);
     }
     if (!isAdmin && !isClub) throw { status: 403, message: "Forbidden" };
 
@@ -211,6 +222,10 @@ export class EntryService {
     if (!isAdmin) {
       if (!user.clubId) throw { status: 400, message: "clubId missing for scoped request" };
       where.clubId = user.clubId;
+      // Registration must be open for a club to submit.
+      const event = await prisma.event.findUnique({ where: { id: eventId } });
+      if (!event) throw { status: 404, message: "Event not found" };
+      assertRegistrationOpen(event, user);
     }
 
     return prisma.$transaction(async (tx) => {

@@ -11,6 +11,7 @@ import {
 import { SortableContext, verticalListSortingStrategy, useSortable } from "@dnd-kit/sortable"
 import { CSS } from "@dnd-kit/utilities"
 import {
+  AlertTriangle,
   Inbox,
   PlusCircle,
   Search,
@@ -41,6 +42,7 @@ import {
   getEvent,
   getDivisions,
   getEligibleAthletes,
+  registrationState,
   type EligibleAthlete,
 } from "@/lib/events"
 import { EntryService, type Entry } from "@/lib/entries"
@@ -353,6 +355,10 @@ const EventManagement = () => {
 
   const selectedDivision = divisions.find((d) => d.id === selectedDivisionId)
 
+  // Clubs can only add entries while registration is open; admins bypass it.
+  const reg = registrationState(selectedEvent)
+  const addBlocked = !isAdmin && !reg.open
+
   const handleDragStart = (event: DragStartEvent) => {
     const athlete = eligibleAthletes.find((a) => a.id === event.active.id)
     setDraggedAthlete(athlete || null)
@@ -360,6 +366,7 @@ const EventManagement = () => {
 
   const handleDragEnd = (event: DragEndEvent) => {
     setDraggedAthlete(null)
+    if (addBlocked) return
     if (event.over?.id === "drop-zone") {
       const athleteId = event.active.id as string
       const athlete = eligibleAthletes.find((a) => a.id === athleteId)
@@ -370,6 +377,7 @@ const EventManagement = () => {
   }
 
   const handleAddEntry = (athleteId: string) => {
+    if (addBlocked) return
     const athlete = eligibleAthletes.find((a) => a.id === athleteId)
     if (athlete && !athlete.isEntered) createEntryMutation.mutate(athleteId)
   }
@@ -438,6 +446,18 @@ const EventManagement = () => {
               </div>
             </CardContent>
           </Card>
+        )}
+
+        {selectedEventId && addBlocked && reg.message && (
+          <div className="mb-4 flex items-start gap-2 rounded-md border border-belt-orange/30 bg-belt-orange/10 px-3 py-2.5 text-sm">
+            <AlertTriangle className="mt-0.5 size-4 shrink-0 text-belt-orange" />
+            <div>
+              <span className="font-medium">{reg.message}</span>{" "}
+              <span className="text-muted-foreground">
+                Adding entries is disabled until the organizer reopens registration.
+              </span>
+            </div>
+          </div>
         )}
 
         {selectedEventId && (
@@ -608,7 +628,7 @@ const EventManagement = () => {
                         key={athlete.id}
                         athlete={athlete}
                         onAdd={() => handleAddEntry(athlete.id)}
-                        isAdding={createEntryMutation.isPending}
+                        isAdding={createEntryMutation.isPending || addBlocked}
                       />
                     ))}
                   </div>
@@ -695,7 +715,7 @@ const EventManagement = () => {
                             key={athlete.id}
                             athlete={athlete}
                             onAdd={() => handleAddEntry(athlete.id)}
-                            isAdding={createEntryMutation.isPending}
+                            isAdding={createEntryMutation.isPending || addBlocked}
                           />
                         ))}
                       </SortableContext>

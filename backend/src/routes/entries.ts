@@ -52,7 +52,7 @@ router.post("/", requireRoles("CLUB_MANAGER", "ADMIN", "SUPERADMIN"), validate(C
       if (req.user.clubId !== clubId) return res.status(403).json({ error: "Forbidden" });
     }
 
-    const row = await EntryService.create(req.body);
+    const row = await EntryService.create(req.body, { role: req.user!.role });
     res.status(201).json(row);
   } catch (err: any) {
     if (err.status && err.message) {

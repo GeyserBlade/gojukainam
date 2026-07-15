@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import {
+  AlertTriangle,
   Check,
   ChevronRight,
   Search,
@@ -57,7 +58,7 @@ import {
   type EntryFilters,
   type Division as EntryDivision,
 } from "@/lib/entries"
-import { listEvents, getDivisions, type Division } from "@/lib/events"
+import { getDivisions, registrationState, type Division } from "@/lib/events"
 import { listClubs } from "@/lib/clubs"
 
 type StatusKey = "DRAFT" | "SUBMITTED" | "APPROVED" | "RETURNED"
@@ -118,6 +119,7 @@ const EntryRow = ({
   isAdmin,
   isClub,
   busy,
+  submitDisabled,
 }: {
   entry: Entry
   selectable: boolean
@@ -129,6 +131,7 @@ const EntryRow = ({
   isAdmin: boolean
   isClub: boolean
   busy: boolean
+  submitDisabled?: boolean
 }) => {
   const isTeam = entry.entryType === "TEAM_KATA" || entry.entryType === "TEAM_KUMITE"
   const cat = entry.division.category
@@ -192,7 +195,13 @@ const EntryRow = ({
           <div className="flex flex-col items-end gap-2">
             <StatusBadge status={entry.status} />
             {canSubmit && (
-              <Button size="xs" variant="outline" onClick={onSubmit} disabled={busy}>
+              <Button
+                size="xs"
+                variant="outline"
+                onClick={onSubmit}
+                disabled={busy || submitDisabled}
+                title={submitDisabled ? "Registration is closed" : undefined}
+              >
                 <Send />
                 Submit
               </Button>
@@ -242,7 +251,11 @@ const EntriesView = () => {
   const isAdmin = role === "SUPERADMIN" || role === "ADMIN"
   const isClub = role === "CLUB_MANAGER" || role === "COACH"
 
-  const { eventId: selectedEventId } = useSelectedEvent()
+  const { eventId: selectedEventId, event: selectedEvent } = useSelectedEvent()
+
+  // Clubs can only submit while registration is open; admins bypass it.
+  const reg = registrationState(selectedEvent)
+  const submitBlocked = isClub && !reg.open
   const [filterClubId, setFilterClubId] = useState<string>(clubId || "")
   const [filterDivisionId, setFilterDivisionId] = useState<string>("")
   const [filterStatus, setFilterStatus] = useState<string>("ALL")
@@ -504,6 +517,19 @@ const EntriesView = () => {
         </p>
       </div>
 
+      {selectedEventId && submitBlocked && reg.message && (
+        <div className="mb-4 flex items-start gap-2 rounded-md border border-belt-orange/30 bg-belt-orange/10 px-3 py-2.5 text-sm">
+          <AlertTriangle className="mt-0.5 size-4 shrink-0 text-belt-orange" />
+          <div>
+            <span className="font-medium">{reg.message}</span>{" "}
+            <span className="text-muted-foreground">
+              You can still review your entries, but submitting is disabled until the
+              organizer reopens registration.
+            </span>
+          </div>
+        </div>
+      )}
+
       {selectedEventId && (
         <>
           {/* Stats — click to filter by that status */}
@@ -551,7 +577,8 @@ const EntriesView = () => {
                         .map((e) => e.id),
                     )
                   }
-                  disabled={acting}
+                  disabled={acting || submitBlocked}
+                  title={submitBlocked ? "Registration is closed" : undefined}
                 >
                   <Send />
                   Submit all drafts ({submittableCount})
@@ -772,6 +799,7 @@ const EntriesView = () => {
                               isAdmin={isAdmin}
                               isClub={isClub}
                               busy={acting}
+                              submitDisabled={submitBlocked}
                             />
                           ))
                         )}
@@ -874,9 +902,9 @@ const EntriesView = () => {
                                 size="icon-sm"
                                 variant="outline"
                                 onClick={() => runSubmit([entry.id])}
-                                disabled={acting}
+                                disabled={acting || submitBlocked}
                                 aria-label="Submit"
-                                title="Submit for approval"
+                                title={submitBlocked ? "Registration is closed" : "Submit for approval"}
                               >
                                 <Send />
                               </Button>
@@ -936,7 +964,8 @@ const EntriesView = () => {
                 <Button
                   size="sm"
                   onClick={() => runSubmit([...selected])}
-                  disabled={acting}
+                  disabled={acting || submitBlocked}
+                  title={submitBlocked ? "Registration is closed" : undefined}
                 >
                   <Send />
                   Submit selected
