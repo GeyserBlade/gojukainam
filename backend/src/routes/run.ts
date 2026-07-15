@@ -8,6 +8,7 @@ import {
   UpdateMat,
   AssignDrawMat,
   SetBoutMat,
+  ReorderMatQueue,
   SetCheckIn,
 } from "../utils/validators.js";
 import { getParam } from "../utils/params.js";
@@ -68,6 +69,14 @@ router.patch("/draws/:drawId/mat", requireRoles(...MANAGE_ROLES), validate(Assig
 router.patch("/bouts/:boutId/mat", requireRoles(...MANAGE_ROLES), validate(SetBoutMat), async (req, res, next) => {
   try {
     const row = await RunService.setBoutMat(getParam(req.params.boutId), req.body.matId, { id: req.user!.id });
+    res.json(row);
+  } catch (err: any) { handle(res, next, err); }
+});
+
+// Persist the organizer's manual running order for a mat
+router.put("/mats/:matId/order", requireRoles(...MANAGE_ROLES), validate(ReorderMatQueue), async (req, res, next) => {
+  try {
+    const row = await RunService.reorderMatQueue(getParam(req.params.matId), req.body.boutIds, { id: req.user!.id });
     res.json(row);
   } catch (err: any) { handle(res, next, err); }
 });

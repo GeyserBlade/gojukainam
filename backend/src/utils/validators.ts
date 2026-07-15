@@ -207,6 +207,10 @@ export const SetBoutMat = z.object({
   matId: z.string().min(1).nullable(),
 });
 
+export const ReorderMatQueue = z.object({
+  boutIds: z.array(z.string().min(1)).min(1),
+});
+
 export const SetCheckIn = z.object({
   checkedIn: z.boolean(),
 });

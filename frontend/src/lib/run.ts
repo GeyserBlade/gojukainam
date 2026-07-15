@@ -20,6 +20,7 @@ export interface RunQueueItem {
   ao: RunEntry
   matId: string | null
   drawMatOrder: number | null
+  queueOrder: number | null
 }
 
 export interface RunMat {
@@ -75,4 +76,9 @@ export async function assignDrawMat(
 
 export async function setBoutMat(boutId: string, matId: string | null): Promise<void> {
   await api.patch(`/run/bouts/${boutId}/mat`, { matId })
+}
+
+// Persist the manual running order for a mat (boutIds in the desired order).
+export async function reorderMatQueue(matId: string, boutIds: string[]): Promise<void> {
+  await api.put(`/run/mats/${matId}/order`, { boutIds })
 }

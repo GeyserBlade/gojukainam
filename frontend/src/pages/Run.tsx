@@ -6,6 +6,7 @@ import {
   ArrowUp,
   Check,
   Flag,
+  GripVertical,
   Lock,
   MonitorPlay,
   MoveRight,
@@ -14,6 +15,21 @@ import {
   Swords,
   Trash2,
 } from "lucide-react"
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core"
+import {
+  SortableContext,
+  verticalListSortingStrategy,
+  useSortable,
+  arrayMove,
+} from "@dnd-kit/sortable"
+import { CSS } from "@dnd-kit/utilities"
 
 import { useAuth } from "@/contexts/AuthContext"
 import { useSelectedEvent } from "@/contexts/SelectedEventContext"
@@ -50,14 +66,18 @@ import {
   deleteMat,
   getRunBoard,
   listMats,
+  reorderMatQueue,
   setBoutMat,
   updateMat,
   type Mat,
+  type RunBoard,
   type RunEntry,
   type RunQueueItem,
 } from "@/lib/run"
 
 type TabKey = "plan" | "checkin" | "run"
+
+const boutKeyOf = (i: RunQueueItem) => `${i.drawId}:${i.phase}:${i.round}:${i.position}`
 
 const roundLabel = (item: RunQueueItem) =>
   item.phase === "REPECHAGE" ? "Repechage" : `Round ${item.round}`
@@ -156,6 +176,36 @@ function RunTab({ eventId, canManage }: { eventId: string; canManage: boolean })
     onSuccess: invalidate,
     onError: (e) => apiError(e, "Could not move the bout"),
   })
+
+  const reorderMutation = useMutation({
+    mutationFn: ({ matId, boutIds }: { matId: string; boutIds: string[] }) =>
+      reorderMatQueue(matId, boutIds),
+    onError: (e) => {
+      apiError(e, "Could not save the running order")
+      invalidate()
+    },
+    onSettled: invalidate,
+  })
+
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
+
+  // Reorder a mat's queue: optimistic local move, then persist the new order.
+  const handleReorder = (matId: string, queue: RunQueueItem[]) => (event: DragEndEvent) => {
+    const { active, over } = event
+    if (!over || active.id === over.id) return
+    const ids = queue.map(boutKeyOf)
+    const oldIndex = ids.indexOf(String(active.id))
+    const newIndex = ids.indexOf(String(over.id))
+    if (oldIndex < 0 || newIndex < 0) return
+    const newQueue = arrayMove(queue, oldIndex, newIndex)
+    queryClient.setQueryData<RunBoard>(["run-board", eventId], (old) =>
+      old
+        ? { ...old, mats: old.mats.map((m) => (m.id === matId ? { ...m, queue: newQueue } : m)) }
+        : old,
+    )
+    const boutIds = newQueue.map((i) => i.boutId).filter((x): x is string => !!x)
+    reorderMutation.mutate({ matId, boutIds })
+  }
 
   const busy = winnerMutation.isPending || kikenMutation.isPending || moveMutation.isPending
   const allMats = board?.mats ?? []
@@ -299,6 +349,31 @@ function RunTab({ eventId, canManage }: { eventId: string; canManage: boolean })
     )
   }
 
+  // Draggable wrapper: a grip handle on the left reorders bouts within a mat.
+  const SortableBoutCard = ({ item, isNow }: { item: RunQueueItem; isNow: boolean }) => {
+    const id = boutKeyOf(item)
+    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id })
+    const style = {
+      transform: CSS.Transform.toString(transform),
+      transition,
+      opacity: isDragging ? 0.5 : 1,
+    }
+    return (
+      <div ref={setNodeRef} style={style} className="relative pl-5">
+        <button
+          type="button"
+          className="absolute inset-y-0 left-0 z-10 flex w-5 touch-none cursor-grab items-center justify-center rounded-l-lg text-muted-foreground hover:bg-muted active:cursor-grabbing"
+          aria-label="Drag to reorder"
+          {...attributes}
+          {...listeners}
+        >
+          <GripVertical className="size-3.5" />
+        </button>
+        <BoutCard item={item} isNow={isNow} />
+      </div>
+    )
+  }
+
   return (
     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
       {columns.map((col) => (
@@ -315,10 +390,27 @@ function RunTab({ eventId, canManage }: { eventId: string; canManage: boolean })
                 Nothing ready on this mat.
               </CardContent>
             </Card>
+          ) : canManage && col.id !== null && col.queue.length > 1 ? (
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragEnd={handleReorder(col.id, col.queue)}
+            >
+              <SortableContext
+                items={col.queue.map(boutKeyOf)}
+                strategy={verticalListSortingStrategy}
+              >
+                <div className="space-y-2">
+                  {col.queue.map((item, idx) => (
+                    <SortableBoutCard key={boutKeyOf(item)} item={item} isNow={idx === 0} />
+                  ))}
+                </div>
+              </SortableContext>
+            </DndContext>
           ) : (
             col.queue.map((item, idx) => (
               <BoutCard
-                key={`${item.drawId}:${item.phase}:${item.round}:${item.position}`}
+                key={boutKeyOf(item)}
                 item={item}
                 isNow={idx === 0 && col.id !== null}
               />

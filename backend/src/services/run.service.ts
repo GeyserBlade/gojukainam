@@ -50,6 +50,7 @@ interface QueueItem {
   ao: ReturnType<typeof summarise>;
   matId: string | null;
   drawMatOrder: number | null;
+  queueOrder: number | null;
 }
 
 export class RunService {
@@ -105,11 +106,15 @@ export class RunService {
           ao: entryById.get(cb.aoEntryId)!,
           matId: row?.matId ?? draw.matId ?? null,
           drawMatOrder: draw.matOrder ?? null,
+          queueOrder: row?.queueOrder ?? null,
         });
       }
     }
 
+    // Manual per-bout queueOrder wins (nulls last); otherwise the natural
+    // category/bracket order stands.
     const sortQueue = (a: QueueItem, b: QueueItem) =>
+      (a.queueOrder ?? Number.MAX_SAFE_INTEGER) - (b.queueOrder ?? Number.MAX_SAFE_INTEGER) ||
       (a.drawMatOrder ?? Number.MAX_SAFE_INTEGER) - (b.drawMatOrder ?? Number.MAX_SAFE_INTEGER) ||
       (PHASE_ORDER[a.phase] ?? 0) - (PHASE_ORDER[b.phase] ?? 0) ||
       a.round - b.round ||
@@ -201,6 +206,44 @@ export class RunService {
       },
     });
     return updated;
+  }
+
+  /**
+   * Persist the organizer's manual running order for a mat: queueOrder = index
+   * for each bout in the given order. Bouts must belong to the mat's event.
+   */
+  static async reorderMatQueue(matId: string, boutIds: string[], user: { id: string }) {
+    const mat = await prisma.mat.findUnique({ where: { id: matId } });
+    if (!mat) throw { status: 404, message: "Mat not found" };
+
+    const bouts = await prisma.bout.findMany({
+      where: { id: { in: boutIds } },
+      include: { draw: { select: { eventId: true } } },
+    });
+    const byId = new Map(bouts.map((b) => [b.id, b]));
+    for (const id of boutIds) {
+      const bout = byId.get(id);
+      if (!bout) throw { status: 404, message: "Bout not found" };
+      if (bout.draw.eventId !== mat.eventId)
+        throw { status: 400, message: "Bout does not belong to this mat's event" };
+    }
+
+    await prisma.$transaction([
+      ...boutIds.map((id, index) =>
+        prisma.bout.update({ where: { id }, data: { queueOrder: index } }),
+      ),
+      prisma.auditLog.create({
+        data: {
+          userId: user.id,
+          entityType: "Mat",
+          entityId: matId,
+          action: "REORDER_QUEUE",
+          diffJson: JSON.stringify({ boutIds }),
+        },
+      }),
+    ]);
+
+    return { updatedCount: boutIds.length };
   }
 
   // ---- Check-in ----

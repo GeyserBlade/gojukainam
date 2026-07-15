@@ -462,6 +462,11 @@ model Bout {
   matId String?
   mat   Mat?   @relation(fields: [matId], references: [id], onDelete: SetNull)
 
+  // Manual within-mat running order set by the organizer on run day. null =
+  // not manually ordered (sorts after ordered bouts, by natural bracket order).
+  // Survives recompute like matId; lost only if the bout row is deleted.
+  queueOrder Int?
+
   @@unique([drawId, phase, round, position])
   @@index([drawId])
 }
