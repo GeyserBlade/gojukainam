@@ -34,6 +34,7 @@ export interface DrawDetail {
   weightClass: { id: string; name: string } | null;
   size: number;
   status: DrawStatus;
+  locked: boolean;
   slots: { position: number; entry: DrawEntrySummary }[];
   bouts: DrawBout[];
   placements: {
@@ -61,6 +62,9 @@ export interface DrawCategoryRow {
     size: number;
     status: DrawStatus;
     inSync: boolean;
+    locked: boolean;
+    matId: string | null;
+    matOrder: number | null;
   } | null;
 }
 
@@ -109,6 +113,11 @@ export async function setBoutScore(
   }
 ): Promise<DrawDetail> {
   const res = await api.put(`/draws/${drawId}/bouts/${boutId}/score`, data);
+  return res.data;
+}
+
+export async function setDrawLock(id: string, locked: boolean): Promise<DrawDetail> {
+  const res = await api.put(`/draws/${id}/lock`, { locked });
   return res.data;
 }
 

@@ -7,6 +7,7 @@ import {
   RegenerateDraw,
   SetBoutWinner,
   SetBoutScore,
+  SetDrawLock,
   EventIdQuery,
   IdParam,
   BoutParams,
@@ -41,6 +42,17 @@ router.post("/", requireRoles(...MANAGE_ROLES), validate(CreateDraw), async (req
   try {
     const row = await DrawService.create(req.body, { id: req.user!.id });
     res.status(201).json(row);
+  } catch (err: any) {
+    if (err.status && err.message) return res.status(err.status).json({ error: err.message });
+    next(err);
+  }
+});
+
+// Lock (publish) or unlock a draw
+router.put("/:id/lock", requireRoles(...MANAGE_ROLES), validateMultiple({ params: IdParam, body: SetDrawLock }), async (req, res, next) => {
+  try {
+    const row = await DrawService.setLock(getParam(req.params.id), req.body.locked, { id: req.user!.id });
+    res.json(row);
   } catch (err: any) {
     if (err.status && err.message) return res.status(err.status).json({ error: err.message });
     next(err);

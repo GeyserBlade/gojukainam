@@ -163,6 +163,9 @@ model Event {
   status     EventStatus @default(ACTIVE)
   /// JSON string of your YAML config (persisted snapshot)
   configJson String
+  /// When set, a read-only public board is reachable at /board/<token>.
+  /// null = public board disabled. Rotating the token revokes old links.
+  publicToken String? @unique
 
   divisions     Division[]
   weightClasses WeightClass[]
@@ -171,6 +174,7 @@ model Event {
   invoices      Invoice[]
   documents     Document[]
   draws         Draw[]
+  mats          Mat[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -298,9 +302,13 @@ model Entry {
   weightClassId String?
   weightClass   WeightClass? @relation(fields: [weightClassId], references: [id])
 
-  status   EntryStatus @default(DRAFT)
-  feeCents Int         @default(0)
-  notes    String?
+  status       EntryStatus @default(DRAFT)
+  /// Admin's reason when an entry is RETURNED; shown to the club. Cleared on submit/approve.
+  statusReason String?
+  /// Day-of presence flag; ticked at check-in, used by the run board.
+  checkedIn    Boolean     @default(false)
+  feeCents     Int         @default(0)
+  notes        String?
 
   drawSlots  DrawSlot[]
   boutsAsAka Bout[]     @relation("BoutAka")
@@ -396,6 +404,13 @@ model Draw {
 
   size   Int // bracket size: 2, 4, 8, 16, 32
   status DrawStatus @default(DRAWN)
+  /// When true the bracket is frozen: regenerate/delete are blocked until unlocked.
+  locked Boolean    @default(false)
+
+  // Day-of running: which mat this category runs on, and its order within the mat.
+  matId    String?
+  mat      Mat?    @relation(fields: [matId], references: [id], onDelete: SetNull)
+  matOrder Int?
 
   slots DrawSlot[]
   bouts Bout[]
@@ -445,8 +460,35 @@ model Bout {
   outcome   String? // POINTS | GAP | SENSHU | HANTEI | HANSOKU | KIKEN
   scoreJson String? // full per-side breakdown + action log
 
+  // Per-bout mat override; null = inherit the draw's mat. Survives recompute
+  // (recompute never writes matId), lost only if the bout row is deleted.
+  matId String?
+  mat   Mat?   @relation(fields: [matId], references: [id], onDelete: SetNull)
+
+  // Manual within-mat running order set by the organizer on run day. null =
+  // not manually ordered (sorts after ordered bouts, by natural bracket order).
+  // Survives recompute like matId; lost only if the bout row is deleted.
+  queueOrder Int?
+
   @@unique([drawId, phase, round, position])
   @@index([drawId])
+}
+
+// A competition mat/tatami within an event. Categories (draws) are planned
+// onto mats for day-of running; individual bouts may override the mat.
+model Mat {
+  id      String @id @default(cuid())
+  eventId String
+  event   Event  @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  name    String
+  order   Int    @default(0)
+
+  draws Draw[]
+  bouts Bout[]
+
+  createdAt DateTime @default(now())
+
+  @@index([eventId])
 }
 
 model Document {

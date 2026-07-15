@@ -1,8 +1,9 @@
 import { randomInt } from "crypto";
 import { prisma } from "../lib/prisma.js";
 
-// Entry statuses that take part in a draw
-const ELIGIBLE_STATUSES = ["SUBMITTED", "APPROVED"] as const;
+// Entry statuses that take part in a draw. Only approved entries are drawn —
+// submission alone is not enough; an admin must approve first.
+const ELIGIBLE_STATUSES = ["APPROVED"] as const;
 
 const ENTRY_INCLUDE = {
   athlete: { select: { id: true, firstName: true, lastName: true } },
@@ -426,6 +427,9 @@ export class DrawService {
                 size: draw.size,
                 status: draw.status,
                 inSync: sync!.added === 0 && sync!.removed === 0,
+                locked: draw.locked,
+                matId: draw.matId,
+                matOrder: draw.matOrder,
               }
             : null,
         });
@@ -493,6 +497,8 @@ export class DrawService {
       include: { bouts: { where: { NOT: { winnerEntryId: null } } } },
     });
     if (!draw) throw { status: 404, message: "Draw not found" };
+    if (draw.locked)
+      throw { status: 409, message: "Draw is locked — unlock it to regenerate." };
 
     const hasResults = draw.bouts.some((b) => b.akaEntryId && b.aoEntryId);
     if (hasResults && !force)
@@ -537,6 +543,8 @@ export class DrawService {
   static async delete(drawId: string, user: { id: string }) {
     const draw = await prisma.draw.findUnique({ where: { id: drawId } });
     if (!draw) throw { status: 404, message: "Draw not found" };
+    if (draw.locked)
+      throw { status: 409, message: "Draw is locked — unlock it to delete." };
     await prisma.$transaction(async (tx) => {
       await tx.draw.delete({ where: { id: drawId } });
       await tx.auditLog.create({
@@ -549,6 +557,25 @@ export class DrawService {
         },
       });
     });
+  }
+
+  /** Lock (publish) or unlock a draw. Locked draws can't be regenerated/deleted. */
+  static async setLock(drawId: string, locked: boolean, user: { id: string }) {
+    const draw = await prisma.draw.findUnique({ where: { id: drawId } });
+    if (!draw) throw { status: 404, message: "Draw not found" };
+    await prisma.$transaction(async (tx) => {
+      await tx.draw.update({ where: { id: drawId }, data: { locked } });
+      await tx.auditLog.create({
+        data: {
+          userId: user.id,
+          entityType: "Draw",
+          entityId: drawId,
+          action: locked ? "LOCK" : "UNLOCK",
+          diffJson: JSON.stringify({ locked }),
+        },
+      });
+    });
+    return DrawService.get(drawId);
   }
 
   /** Capture (or clear, with null) the winner of a bout, cascading the bracket. */
@@ -695,6 +722,7 @@ export class DrawService {
         : null,
       size: draw.size,
       status: draw.status,
+      locked: draw.locked,
       slots: draw.slots.map((s) => ({ position: s.position, entry: summary(s.entry) })),
       bouts: state.bouts.map((b) => {
         const stored = draw.bouts.find(
@@ -734,5 +762,87 @@ export class DrawService {
           .map((s) => summary(s.entry)),
       },
     };
+  }
+
+  /**
+   * Event-wide results: every drawn category's podium plus a club medal tally.
+   * Placements come straight from the bracket compute, so partially-run
+   * categories return whatever is already decided (rest null).
+   */
+  static async eventResults(eventId: string) {
+    const draws = await prisma.draw.findMany({
+      where: { eventId },
+      include: {
+        division: true,
+        weightClass: true,
+        slots: { include: { entry: { include: ENTRY_INCLUDE } } },
+        bouts: true,
+      },
+      orderBy: [{ division: { category: "asc" } }, { division: { name: "asc" } }],
+    });
+
+    type ResultEntry = { entryId: string; name: string; clubId: string; clubName: string };
+    const summary = (entry: {
+      id: string;
+      athlete: { firstName: string; lastName: string } | null;
+      team: { name: string } | null;
+      club: { id: string; name: string } | null;
+    }): ResultEntry => ({
+      entryId: entry.id,
+      name: entry.athlete
+        ? `${entry.athlete.firstName} ${entry.athlete.lastName}`
+        : entry.team?.name ?? "Unknown",
+      clubId: entry.club?.id ?? "",
+      clubName: entry.club?.name ?? "",
+    });
+
+    const tally = new Map<string, { clubId: string; clubName: string; gold: number; silver: number; bronze: number }>();
+    const medal = (e: ResultEntry | null, kind: "gold" | "silver" | "bronze") => {
+      if (!e || !e.clubId) return;
+      const row = tally.get(e.clubId) ?? { clubId: e.clubId, clubName: e.clubName, gold: 0, silver: 0, bronze: 0 };
+      row[kind] += 1;
+      tally.set(e.clubId, row);
+    };
+
+    const categories = draws.map((draw) => {
+      const slotByPosition = new Map<number, string>();
+      const entryById = new Map<string, ResultEntry>();
+      for (const s of draw.slots) {
+        slotByPosition.set(s.position, s.entryId);
+        entryById.set(s.entryId, summary(s.entry));
+      }
+      const storedWinners = new Map<BoutKey, string>();
+      for (const b of draw.bouts) {
+        if (b.winnerEntryId) storedWinners.set(boutKey(b.phase, b.round, b.position), b.winnerEntryId);
+      }
+      const state = computeDrawState(draw.size, slotByPosition, storedWinners);
+      const lookup = (id: string | null) => (id ? entryById.get(id) ?? null : null);
+
+      const first = lookup(state.placements.firstEntryId);
+      const second = lookup(state.placements.secondEntryId);
+      const thirds = state.placements.thirdEntryIds.map(lookup).filter((e): e is ResultEntry => !!e);
+
+      medal(first, "gold");
+      medal(second, "silver");
+      for (const t of thirds) medal(t, "bronze");
+
+      return {
+        drawId: draw.id,
+        divisionName: draw.division.name,
+        weightClassName: draw.weightClass?.name ?? null,
+        category: draw.division.category,
+        gender: draw.division.gender,
+        status: state.status,
+        first,
+        second,
+        thirds,
+      };
+    });
+
+    const clubTally = [...tally.values()]
+      .map((c) => ({ ...c, total: c.gold + c.silver + c.bronze }))
+      .sort((a, b) => b.gold - a.gold || b.silver - a.silver || b.bronze - a.bronze || a.clubName.localeCompare(b.clubName));
+
+    return { categories, clubTally };
   }
 }

@@ -3,6 +3,9 @@ import { useNavigate } from "react-router-dom"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   AlertTriangle,
+  Lock,
+  LockOpen,
+  Printer,
   RefreshCw,
   Shuffle,
   Swords,
@@ -11,9 +14,9 @@ import {
 } from "lucide-react"
 
 import { useAuth } from "@/contexts/AuthContext"
+import { useSelectedEvent } from "@/contexts/SelectedEventContext"
 import { useToast, useApiErrorToast } from "@/components/Toast"
 import { useConfirm } from "@/components/ConfirmDialog"
-import { AppShell } from "@/components/layout/AppShell"
 import { BracketView, PodiumView, RepechageView } from "@/components/draws/BracketView"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -36,6 +39,7 @@ import {
   listDrawCategories,
   regenerateDraw,
   setBoutWinner,
+  setDrawLock,
   type DrawBout,
   type DrawCategoryRow,
   type DrawStatus,
@@ -101,6 +105,11 @@ const CategoryCard = ({
           >
             {STATUS_LABEL[row.draw.status]}
           </Badge>
+          {row.draw.locked && (
+            <span className="flex items-center gap-1 text-[10px] text-belt-blue" title="Locked">
+              <Lock className="h-3 w-3" />
+            </span>
+          )}
           {!row.draw.inSync && (
             <span className="flex items-center gap-1 text-[10px] text-belt-orange">
               <AlertTriangle className="h-3 w-3" />
@@ -127,20 +136,11 @@ export default function DrawsPage() {
 
   const canManage = role === "ADMIN" || role === "SUPERADMIN"
 
-  const [eventId, setEventId] = useState<string>("")
+  const { eventId } = useSelectedEvent()
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
 
-  const { data: events, isLoading: eventsLoading } = useQuery({
-    queryKey: ["events"],
-    queryFn: () => listEvents(),
-  })
-
-  useEffect(() => {
-    if (!eventId && events?.length) {
-      const preferred = events.find((e) => e.status === "ACTIVE" || e.status === "CLOSED")
-      setEventId((preferred ?? events[0]).id)
-    }
-  }, [events, eventId])
+  // Reset the selected category when the hub switches events.
+  useEffect(() => setSelectedKey(null), [eventId])
 
   const { data: categories, isLoading: categoriesLoading } = useQuery({
     queryKey: ["draw-categories", eventId],
@@ -197,6 +197,16 @@ export default function DrawsPage() {
     onError: (err) => apiError(err, "Could not delete the draw"),
   })
 
+  const lockMutation = useMutation({
+    mutationFn: ({ id, locked }: { id: string; locked: boolean }) => setDrawLock(id, locked),
+    onSuccess: (updated) => {
+      queryClient.setQueryData(["draw", updated.id], updated)
+      queryClient.invalidateQueries({ queryKey: ["draw-categories", eventId] })
+      toast.success(updated.locked ? "Draw locked" : "Draw unlocked")
+    },
+    onError: (err) => apiError(err, "Could not update the lock"),
+  })
+
   const winnerMutation = useMutation({
     mutationFn: ({ boutId, winnerEntryId }: { boutId: string; winnerEntryId: string | null }) =>
       setBoutWinner(drawId!, boutId, winnerEntryId),
@@ -251,46 +261,21 @@ export default function DrawsPage() {
     generateMutation.isPending ||
     regenerateMutation.isPending ||
     deleteMutation.isPending ||
+    lockMutation.isPending ||
     winnerMutation.isPending
 
   return (
-    <AppShell title="Draws">
-      <div className="mb-4 sm:mb-6">
-        <h1 className="font-display text-3xl sm:text-4xl tracking-wider">DRAWS & RESULTS</h1>
+    <>
+      <div className="mb-4">
+        <h2 className="font-display text-xl tracking-wide sm:text-2xl">Draws &amp; Results</h2>
         <p className="mt-1 text-sm text-muted-foreground">
           Generate random draws per category, capture results and follow each athlete's progression.
         </p>
       </div>
 
-      <div className="mb-4 max-w-md">
-        <Label className="mb-1.5 block text-xs text-muted-foreground">Event</Label>
-        {eventsLoading ? (
-          <Skeleton className="h-9 w-full" />
-        ) : (
-          <Select
-            value={eventId}
-            onValueChange={(v) => {
-              setEventId(v)
-              setSelectedKey(null)
-            }}
-          >
-            <SelectTrigger>
-              <SelectValue placeholder="Select an event" />
-            </SelectTrigger>
-            <SelectContent>
-              {events?.map((e) => (
-                <SelectItem key={e.id} value={e.id}>
-                  {e.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        )}
-      </div>
-
       <div className="grid gap-4 lg:grid-cols-[300px_1fr]">
         {/* Category list */}
-        <div className="space-y-2 lg:max-h-[calc(100vh-16rem)] lg:overflow-y-auto lg:pr-1">
+        <div className="space-y-2 lg:max-h-[calc(100vh-16rem)] lg:overflow-y-auto lg:pr-1 print:hidden">
           {categoriesLoading ? (
             Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-20 w-full" />)
           ) : !categories?.length ? (
@@ -329,7 +314,7 @@ export default function DrawsPage() {
                 <p className="mb-1 text-sm font-medium">{categoryTitle(selected)}</p>
                 <p className="mb-4 text-sm text-muted-foreground">
                   {selected.entryCount < 2
-                    ? "At least 2 submitted or approved entries are needed to generate a draw."
+                    ? "At least 2 approved entries are needed to generate a draw."
                     : `${selected.entryCount} entries ready — generate a random draw.`}
                 </p>
                 {canManage && (
@@ -360,19 +345,64 @@ export default function DrawsPage() {
                   >
                     {STATUS_LABEL[draw.status]}
                   </Badge>
+                  {draw.locked && (
+                    <Badge
+                      variant="outline"
+                      className="gap-1 font-normal text-[10px] bg-belt-blue/15 text-belt-blue border-belt-blue/30"
+                    >
+                      <Lock className="h-3 w-3" />
+                      Locked
+                    </Badge>
+                  )}
                 </div>
-                {canManage && (
-                  <div className="flex items-center gap-2">
-                    <Button variant="outline" size="sm" onClick={handleRegenerate} disabled={busy}>
-                      <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
-                      Regenerate
-                    </Button>
-                    <Button variant="outline" size="sm" onClick={handleDelete} disabled={busy}>
-                      <Trash2 className="mr-1.5 h-3.5 w-3.5 text-flag-red" />
-                      Delete
-                    </Button>
-                  </div>
-                )}
+                <div className="flex items-center gap-2 print:hidden">
+                  <Button variant="outline" size="sm" onClick={() => window.print()}>
+                    <Printer className="mr-1.5 h-3.5 w-3.5" />
+                    Print
+                  </Button>
+                  {canManage && (
+                    <>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => lockMutation.mutate({ id: draw.id, locked: !draw.locked })}
+                        disabled={busy}
+                      >
+                        {draw.locked ? (
+                          <>
+                            <LockOpen className="mr-1.5 h-3.5 w-3.5" />
+                            Unlock
+                          </>
+                        ) : (
+                          <>
+                            <Lock className="mr-1.5 h-3.5 w-3.5" />
+                            Lock
+                          </>
+                        )}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleRegenerate}
+                        disabled={busy || draw.locked}
+                        title={draw.locked ? "Unlock the draw to regenerate" : undefined}
+                      >
+                        <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+                        Regenerate
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleDelete}
+                        disabled={busy || draw.locked}
+                        title={draw.locked ? "Unlock the draw to delete" : undefined}
+                      >
+                        <Trash2 className="mr-1.5 h-3.5 w-3.5 text-flag-red" />
+                        Delete
+                      </Button>
+                    </>
+                  )}
+                </div>
               </div>
 
               {/* Out-of-sync warning */}
@@ -389,7 +419,13 @@ export default function DrawsPage() {
                     </p>
                   </div>
                   {canManage && (
-                    <Button variant="outline" size="sm" onClick={handleRegenerate} disabled={busy}>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleRegenerate}
+                      disabled={busy || draw.locked}
+                      title={draw.locked ? "Unlock the draw to regenerate" : undefined}
+                    >
                       <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
                       Regenerate
                     </Button>
@@ -422,6 +458,6 @@ export default function DrawsPage() {
           )}
         </div>
       </div>
-    </AppShell>
+    </>
   )
 }

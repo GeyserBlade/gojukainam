@@ -55,7 +55,12 @@ export const CreateEntry = z.object({
 export const UpdateEntryStatus = z.object({
   id: z.string(),
   status: z.enum(["SUBMITTED","APPROVED","RETURNED"]),
-  reason: z.string().optional(), // stored in AuditLog
+  reason: z.string().optional(), // stored in AuditLog + on entry when RETURNED
+});
+
+export const BulkSubmitEntries = z.object({
+  eventId: z.string(),
+  ids: z.array(z.string()).min(1),
 });
 
 export const DocumentTypeEnum = z.enum([
@@ -171,6 +176,47 @@ export const SetBoutScore = z.object({
 export const BoutParams = z.object({
   id: z.string().min(1),
   boutId: z.string().min(1),
+});
+
+export const SetDrawLock = z.object({
+  locked: z.boolean(),
+});
+
+// ---- Day-of run board ----
+export const CreateMat = z.object({
+  eventId: z.string().min(1),
+  name: z.string().min(1).max(60),
+  order: z.number().int().min(0).optional(),
+});
+
+export const UpdateMat = z.object({
+  name: z.string().min(1).max(60).optional(),
+  order: z.number().int().min(0).optional(),
+});
+
+export const MatIdParam = z.object({
+  matId: z.string().min(1),
+});
+
+export const AssignDrawMat = z.object({
+  matId: z.string().min(1).nullable(),
+  matOrder: z.number().int().min(0).optional().nullable(),
+});
+
+export const SetBoutMat = z.object({
+  matId: z.string().min(1).nullable(),
+});
+
+export const ReorderMatQueue = z.object({
+  boutIds: z.array(z.string().min(1)).min(1),
+});
+
+export const SetPublicAccess = z.object({
+  enabled: z.boolean(),
+});
+
+export const SetCheckIn = z.object({
+  checkedIn: z.boolean(),
 });
 
 export const ClubIdQuery = z.object({

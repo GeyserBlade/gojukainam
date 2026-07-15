@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { prisma } from "../lib/prisma.js";
 import { CreateEvent, UpdateEvent, CreateDivision, UpdateDivision, CreateWeightClass, UpdateWeightClass } from "../utils/validators.js";
 import { ageOn } from "../utils/eligibility.js";
@@ -6,6 +7,39 @@ import type { Gender } from "@prisma/client";
 
 export class EventService {
   // ============ Events ============
+
+  /** Aggregate readiness snapshot for the event hub Overview. */
+  static async getReadiness(eventId: string) {
+    const [statusGroups, generated, completed, locked, approvedTotal, checkedIn, mats, divisions] =
+      await Promise.all([
+        prisma.entry.groupBy({ by: ["status"], where: { eventId }, _count: true }),
+        prisma.draw.count({ where: { eventId } }),
+        prisma.draw.count({ where: { eventId, status: "COMPLETED" } }),
+        prisma.draw.count({ where: { eventId, locked: true } }),
+        prisma.entry.count({ where: { eventId, status: "APPROVED" } }),
+        prisma.entry.count({ where: { eventId, status: "APPROVED", checkedIn: true } }),
+        prisma.mat.count({ where: { eventId } }),
+        prisma.division.count({ where: { eventId } }),
+      ]);
+
+    const byStatus = (s: string) => statusGroups.find((g) => g.status === s)?._count ?? 0;
+    const entries = {
+      draft: byStatus("DRAFT"),
+      submitted: byStatus("SUBMITTED"),
+      approved: byStatus("APPROVED"),
+      returned: byStatus("RETURNED"),
+      total: statusGroups.reduce((sum, g) => sum + g._count, 0),
+    };
+
+    return {
+      entries,
+      draws: { generated, completed, locked },
+      checkin: { done: checkedIn, total: approvedTotal },
+      mats,
+      divisions,
+    };
+  }
+
   static async getAll() {
     return prisma.event.findMany({
       orderBy: { startDate: "desc" },
@@ -52,6 +86,16 @@ export class EventService {
       where: { id },
       data: { status }
     });
+  }
+
+  /**
+   * Enable/disable (and rotate) the read-only public board token. Enabling
+   * always mints a fresh token, so re-enabling revokes any previously shared
+   * link. Disabling clears it entirely.
+   */
+  static async setPublicAccess(id: string, enabled: boolean) {
+    const publicToken = enabled ? randomBytes(12).toString("hex") : null;
+    return prisma.event.update({ where: { id }, data: { publicToken } });
   }
 
   static async getActiveEvents() {

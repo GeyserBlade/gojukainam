@@ -40,7 +40,7 @@ export function AppHeader({ title }: AppHeaderProps) {
   }
 
   return (
-    <header className="sticky top-0 z-40 w-full border-b bg-background/85 backdrop-blur supports-[backdrop-filter]:bg-background/65">
+    <header className="sticky top-0 z-40 w-full border-b bg-background/85 backdrop-blur supports-[backdrop-filter]:bg-background/65 print:hidden">
       <div className="mx-auto flex h-14 max-w-7xl items-center gap-2 px-3 sm:px-4">
         <MobileNav />
 

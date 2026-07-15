@@ -180,11 +180,26 @@ async function main() {
   b = scored.bouts.find((x) => x.phase === "MAIN" && x.round === 2 && x.position === 0)!;
   check("upstream correction wipes downstream score", b.akaScore === null && b.outcome === null && b.winnerEntryId === null, b);
 
+  console.log("— lock / unlock —");
+  const locked = await DrawService.setLock(scored.id, true, user);
+  check("draw reports locked", locked.locked === true, locked.locked);
+  let regenBlocked = false;
+  try { await DrawService.regenerate(scored.id, true, user); } catch (e: any) { regenBlocked = e?.status === 409; }
+  check("regenerate blocked while locked", regenBlocked);
+  let delBlocked = false;
+  try { await DrawService.delete(scored.id, user); } catch (e: any) { delBlocked = e?.status === 409; }
+  check("delete blocked while locked", delBlocked);
+  const unlocked = await DrawService.setLock(scored.id, false, user);
+  check("draw reports unlocked", unlocked.locked === false, unlocked.locked);
+  const afterUnlock = await DrawService.regenerate(scored.id, true, user);
+  check("regenerate works after unlock", afterUnlock.slots.length === 8, afterUnlock.slots.length);
+
   console.log("— category list —");
   const list = await DrawService.list(event.id);
   const row = list.find((r) => r.divisionId === division.id);
   check("list shows category with 8 entries", row?.entryCount === 8, row);
   check("list shows draw in sync", row?.draw?.inSync === true, row?.draw);
+  check("list draw not locked", row?.draw?.locked === false, row?.draw);
 
   console.log(failures === 0 ? "\nALL CHECKS PASSED" : `\n${failures} CHECK(S) FAILED`);
   console.log(`Demo event kept for UI testing: "${event.name}" (${event.id})`);
