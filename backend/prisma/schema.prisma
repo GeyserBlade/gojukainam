@@ -401,6 +401,8 @@ model Draw {
 
   size   Int // bracket size: 2, 4, 8, 16, 32
   status DrawStatus @default(DRAWN)
+  /// When true the bracket is frozen: regenerate/delete are blocked until unlocked.
+  locked Boolean    @default(false)
 
   // Day-of running: which mat this category runs on, and its order within the mat.
   matId    String?

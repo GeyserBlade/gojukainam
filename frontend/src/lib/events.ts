@@ -123,7 +123,7 @@ export async function getEvent(id: string): Promise<Event> {
 
 export interface EventReadiness {
   entries: { draft: number; submitted: number; approved: number; returned: number; total: number };
-  draws: { generated: number; completed: number };
+  draws: { generated: number; completed: number; locked: number };
   checkin: { done: number; total: number };
   mats: number;
   divisions: number;

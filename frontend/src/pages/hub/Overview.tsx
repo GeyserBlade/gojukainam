@@ -108,7 +108,7 @@ export default function Overview() {
         <div className="mb-2 flex items-center gap-2 text-sm font-medium text-muted-foreground">
           <Trophy className="size-4" /> Competition
         </div>
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
           <Stat label="Draws generated" value={r.draws.generated} />
           <Stat
             label="Draws completed"
@@ -116,6 +116,7 @@ export default function Overview() {
             tone="text-belt-green"
             hint={r.draws.generated > 0 ? `of ${r.draws.generated}` : undefined}
           />
+          <Stat label="Draws locked" value={r.draws.locked} tone="text-belt-blue" />
           <Stat
             label="Checked in"
             value={`${r.checkin.done}/${r.checkin.total}`}

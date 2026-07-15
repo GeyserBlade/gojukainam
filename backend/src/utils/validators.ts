@@ -178,6 +178,10 @@ export const BoutParams = z.object({
   boutId: z.string().min(1),
 });
 
+export const SetDrawLock = z.object({
+  locked: z.boolean(),
+});
+
 // ---- Day-of run board ----
 export const CreateMat = z.object({
   eventId: z.string().min(1),

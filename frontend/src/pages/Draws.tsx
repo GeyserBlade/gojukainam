@@ -3,6 +3,8 @@ import { useNavigate } from "react-router-dom"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   AlertTriangle,
+  Lock,
+  LockOpen,
   Printer,
   RefreshCw,
   Shuffle,
@@ -37,6 +39,7 @@ import {
   listDrawCategories,
   regenerateDraw,
   setBoutWinner,
+  setDrawLock,
   type DrawBout,
   type DrawCategoryRow,
   type DrawStatus,
@@ -102,6 +105,11 @@ const CategoryCard = ({
           >
             {STATUS_LABEL[row.draw.status]}
           </Badge>
+          {row.draw.locked && (
+            <span className="flex items-center gap-1 text-[10px] text-belt-blue" title="Locked">
+              <Lock className="h-3 w-3" />
+            </span>
+          )}
           {!row.draw.inSync && (
             <span className="flex items-center gap-1 text-[10px] text-belt-orange">
               <AlertTriangle className="h-3 w-3" />
@@ -189,6 +197,16 @@ export default function DrawsPage() {
     onError: (err) => apiError(err, "Could not delete the draw"),
   })
 
+  const lockMutation = useMutation({
+    mutationFn: ({ id, locked }: { id: string; locked: boolean }) => setDrawLock(id, locked),
+    onSuccess: (updated) => {
+      queryClient.setQueryData(["draw", updated.id], updated)
+      queryClient.invalidateQueries({ queryKey: ["draw-categories", eventId] })
+      toast.success(updated.locked ? "Draw locked" : "Draw unlocked")
+    },
+    onError: (err) => apiError(err, "Could not update the lock"),
+  })
+
   const winnerMutation = useMutation({
     mutationFn: ({ boutId, winnerEntryId }: { boutId: string; winnerEntryId: string | null }) =>
       setBoutWinner(drawId!, boutId, winnerEntryId),
@@ -243,6 +261,7 @@ export default function DrawsPage() {
     generateMutation.isPending ||
     regenerateMutation.isPending ||
     deleteMutation.isPending ||
+    lockMutation.isPending ||
     winnerMutation.isPending
 
   return (
@@ -326,6 +345,15 @@ export default function DrawsPage() {
                   >
                     {STATUS_LABEL[draw.status]}
                   </Badge>
+                  {draw.locked && (
+                    <Badge
+                      variant="outline"
+                      className="gap-1 font-normal text-[10px] bg-belt-blue/15 text-belt-blue border-belt-blue/30"
+                    >
+                      <Lock className="h-3 w-3" />
+                      Locked
+                    </Badge>
+                  )}
                 </div>
                 <div className="flex items-center gap-2 print:hidden">
                   <Button variant="outline" size="sm" onClick={() => window.print()}>
@@ -334,11 +362,41 @@ export default function DrawsPage() {
                   </Button>
                   {canManage && (
                     <>
-                      <Button variant="outline" size="sm" onClick={handleRegenerate} disabled={busy}>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => lockMutation.mutate({ id: draw.id, locked: !draw.locked })}
+                        disabled={busy}
+                      >
+                        {draw.locked ? (
+                          <>
+                            <LockOpen className="mr-1.5 h-3.5 w-3.5" />
+                            Unlock
+                          </>
+                        ) : (
+                          <>
+                            <Lock className="mr-1.5 h-3.5 w-3.5" />
+                            Lock
+                          </>
+                        )}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleRegenerate}
+                        disabled={busy || draw.locked}
+                        title={draw.locked ? "Unlock the draw to regenerate" : undefined}
+                      >
                         <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
                         Regenerate
                       </Button>
-                      <Button variant="outline" size="sm" onClick={handleDelete} disabled={busy}>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleDelete}
+                        disabled={busy || draw.locked}
+                        title={draw.locked ? "Unlock the draw to delete" : undefined}
+                      >
                         <Trash2 className="mr-1.5 h-3.5 w-3.5 text-flag-red" />
                         Delete
                       </Button>
@@ -361,7 +419,13 @@ export default function DrawsPage() {
                     </p>
                   </div>
                   {canManage && (
-                    <Button variant="outline" size="sm" onClick={handleRegenerate} disabled={busy}>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleRegenerate}
+                      disabled={busy || draw.locked}
+                      title={draw.locked ? "Unlock the draw to regenerate" : undefined}
+                    >
                       <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
                       Regenerate
                     </Button>

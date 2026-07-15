@@ -9,11 +9,12 @@ export class EventService {
 
   /** Aggregate readiness snapshot for the event hub Overview. */
   static async getReadiness(eventId: string) {
-    const [statusGroups, generated, completed, approvedTotal, checkedIn, mats, divisions] =
+    const [statusGroups, generated, completed, locked, approvedTotal, checkedIn, mats, divisions] =
       await Promise.all([
         prisma.entry.groupBy({ by: ["status"], where: { eventId }, _count: true }),
         prisma.draw.count({ where: { eventId } }),
         prisma.draw.count({ where: { eventId, status: "COMPLETED" } }),
+        prisma.draw.count({ where: { eventId, locked: true } }),
         prisma.entry.count({ where: { eventId, status: "APPROVED" } }),
         prisma.entry.count({ where: { eventId, status: "APPROVED", checkedIn: true } }),
         prisma.mat.count({ where: { eventId } }),
@@ -31,7 +32,7 @@ export class EventService {
 
     return {
       entries,
-      draws: { generated, completed },
+      draws: { generated, completed, locked },
       checkin: { done: checkedIn, total: approvedTotal },
       mats,
       divisions,

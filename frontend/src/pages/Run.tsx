@@ -6,6 +6,7 @@ import {
   ArrowUp,
   Check,
   Flag,
+  Lock,
   MonitorPlay,
   MoveRight,
   Plus,
@@ -589,7 +590,12 @@ function PlanTab({ eventId, canManage }: { eventId: string; canManage: boolean }
               <Card key={`${row.divisionId}:${row.weightClassId ?? ""}`}>
                 <CardContent className="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5">
                   <div className="min-w-0">
-                    <p className="truncate text-sm font-medium">{categoryTitle(row)}</p>
+                    <p className="flex items-center gap-1.5 truncate text-sm font-medium">
+                      {categoryTitle(row)}
+                      {row.draw.locked && (
+                        <Lock className="h-3 w-3 shrink-0 text-belt-blue" aria-label="Locked" />
+                      )}
+                    </p>
                     <p className="text-xs text-muted-foreground">
                       {row.category} · {row.draw.size}-draw
                     </p>
