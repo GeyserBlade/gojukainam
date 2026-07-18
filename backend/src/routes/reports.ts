@@ -5,6 +5,13 @@ import { DrawService } from "../services/draw.service.js";
 
 export const router = Router();
 
+// Quote a CSV cell; a leading apostrophe neutralizes spreadsheet formula injection.
+const csvCell = (v: unknown) => {
+  let s = String(v ?? "");
+  if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
+  return `"${s.replace(/"/g, '""')}"`;
+};
+
 // Event-wide results: per-category podiums + club medal tally
 router.get("/results", requireRoles("CLUB_MANAGER", "COACH", "ATHLETE", "ADMIN", "SUPERADMIN"), async (req, res, next) => {
   try {
@@ -46,7 +53,7 @@ router.get("/entries.csv", requireRoles("CLUB_MANAGER", "COACH", "ADMIN", "SUPER
     r.weightClass?.name ?? "",
     r.feeCents,
     r.createdAt.toISOString(),
-  ].map(v => `"${String(v).replace(/"/g,'""')}"`).join(","));
+  ].map(csvCell).join(","));
 
   res.setHeader("Content-Type", "text/csv");
   res.setHeader("Content-Disposition", `attachment; filename="entries-${eventId}.csv"`);

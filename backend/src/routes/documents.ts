@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { requireRoles } from "../utils/auth.js";
+import { requireRoles, type AuthUser } from "../utils/auth.js";
 import { validate } from "../middleware/validate.js";
 import { RequestUploadBody } from "../utils/validators.js";
 import { DocumentService, type EntityRef } from "../services/document.service.js";
@@ -15,6 +15,23 @@ const ALLOWED_MIME = new Set([
   "image/webp",
 ]);
 const MAX_SIZE_BYTES = 20 * 1024 * 1024;
+
+// Read access: admins see all; club-scoped roles (CLUB_MANAGER, COACH) see their
+// own club's athlete/club documents plus organizer-published event documents.
+async function canReadDocuments(
+  user: AuthUser,
+  ref: { athleteId?: string | null; eventId?: string | null; clubId?: string | null },
+): Promise<boolean> {
+  if (user.role === "SUPERADMIN" || user.role === "ADMIN") return true;
+  if (!user.clubId) return false;
+  if (ref.athleteId) {
+    const athlete = await prisma.athlete.findUnique({ where: { id: ref.athleteId }, select: { clubId: true } });
+    return !!athlete && athlete.clubId === user.clubId;
+  }
+  if (ref.clubId) return ref.clubId === user.clubId;
+  if (ref.eventId) return true;
+  return false;
+}
 
 // POST /api/documents/upload-url
 // Validates permissions, creates a DB record, returns a pre-signed upload URL
@@ -72,7 +89,7 @@ router.post(
 );
 
 // GET /api/documents?athleteId=... | ?eventId=... | ?clubId=...
-router.get("/", async (req, res, next) => {
+router.get("/", requireRoles("SUPERADMIN", "ADMIN", "CLUB_MANAGER", "COACH"), async (req, res, next) => {
   try {
     const { athleteId, eventId, clubId } = req.query as Record<string, string | undefined>;
 
@@ -81,19 +98,17 @@ router.get("/", async (req, res, next) => {
     if (athleteId) {
       const athlete = await prisma.athlete.findUnique({ where: { id: athleteId }, select: { clubId: true } });
       if (!athlete) return res.status(404).json({ error: "Athlete not found" });
-      if (req.user?.role === "CLUB_MANAGER" && req.user.clubId !== athlete.clubId) {
-        return res.status(403).json({ error: "Forbidden" });
-      }
       entityRef = { athleteId };
     } else if (eventId) {
       entityRef = { eventId };
     } else if (clubId) {
-      if (req.user?.role === "CLUB_MANAGER" && req.user.clubId !== clubId) {
-        return res.status(403).json({ error: "Forbidden" });
-      }
       entityRef = { clubId };
     } else {
       return res.status(400).json({ error: "One of athleteId, eventId, or clubId is required" });
+    }
+
+    if (!(await canReadDocuments(req.user!, entityRef))) {
+      return res.status(403).json({ error: "Forbidden" });
     }
 
     const docs = await DocumentService.listForEntity(entityRef);
@@ -103,20 +118,13 @@ router.get("/", async (req, res, next) => {
 
 // GET /api/documents/:id/download-url
 // Returns a short-lived pre-signed download URL
-router.get("/:id/download-url", async (req, res, next) => {
+router.get("/:id/download-url", requireRoles("SUPERADMIN", "ADMIN", "CLUB_MANAGER", "COACH"), async (req, res, next) => {
   try {
     const doc = await DocumentService.getById(getParam(req.params.id));
     if (!doc) return res.status(404).json({ error: "Not found" });
 
-    if (doc.athleteId) {
-      const athlete = await prisma.athlete.findUnique({ where: { id: doc.athleteId }, select: { clubId: true } });
-      if (req.user?.role === "CLUB_MANAGER" && req.user.clubId !== athlete?.clubId) {
-        return res.status(403).json({ error: "Forbidden" });
-      }
-    } else if (doc.clubId) {
-      if (req.user?.role === "CLUB_MANAGER" && req.user.clubId !== doc.clubId) {
-        return res.status(403).json({ error: "Forbidden" });
-      }
+    if (!(await canReadDocuments(req.user!, doc))) {
+      return res.status(403).json({ error: "Forbidden" });
     }
 
     const url = await DocumentService.getDownloadUrl(getParam(req.params.id));

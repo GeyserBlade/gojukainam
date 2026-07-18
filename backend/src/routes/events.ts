@@ -207,11 +207,20 @@ router.delete("/weights/:weightClassId", requireRoles("SUPERADMIN", "ADMIN"), va
 // ============ Eligible Athletes ============
 
 // get eligible athletes for a division
-router.get("/:id/divisions/:divisionId/eligible-athletes", validate(EligibleAthletesQuery, "query"), async (req, res, next) => {
+router.get("/:id/divisions/:divisionId/eligible-athletes", requireRoles("SUPERADMIN", "ADMIN", "CLUB_MANAGER", "COACH"), validate(EligibleAthletesQuery, "query"), async (req, res, next) => {
   try {
     const eventId = getParam(req.params.id);
     const divisionId = getParam(req.params.divisionId);
-    const { clubId } = req.query as { clubId?: string };
+
+    // Non-admin roles are always scoped to their own club, ignoring the query param.
+    const isAdmin = req.user!.role === "SUPERADMIN" || req.user!.role === "ADMIN";
+    let clubId: string | undefined;
+    if (isAdmin) {
+      clubId = (req.query as { clubId?: string }).clubId;
+    } else {
+      if (!req.user!.clubId) return res.status(400).json({ error: "User has no club assigned" });
+      clubId = req.user!.clubId;
+    }
 
     const athletes = await EventService.getEligibleAthletes(eventId, divisionId, clubId);
     res.json(athletes);
