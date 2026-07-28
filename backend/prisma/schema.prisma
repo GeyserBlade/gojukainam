@@ -326,6 +326,13 @@ model Entry {
   // Fast filters
   @@index([eventId, divisionId, entryType, status])
   @@index([clubId, status])
+  // Foreign-key indexes: Postgres does not create these automatically, and
+  // without them every cascade/restrict check and every "entries for this
+  // athlete/team/division/weight class" lookup sequentially scans Entry.
+  @@index([athleteId])
+  @@index([teamId])
+  @@index([divisionId])
+  @@index([weightClassId])
 }
 
 model Team {
@@ -423,6 +430,8 @@ model Draw {
   // guards against duplicates before creating.
   @@unique([eventId, divisionId, weightClassId])
   @@index([eventId])
+  // FK index: the run-day board groups draws by mat.
+  @@index([matId])
 }
 
 model DrawSlot {
@@ -435,6 +444,10 @@ model DrawSlot {
 
   @@unique([drawId, position])
   @@unique([drawId, entryId])
+  // FK index: entry deletion cascades here, and the entry-detail view looks up
+  // an athlete's slots across draws (the [drawId, entryId] unique can't serve
+  // an entryId-only lookup).
+  @@index([entryId])
 }
 
 model Bout {
@@ -472,6 +485,12 @@ model Bout {
 
   @@unique([drawId, phase, round, position])
   @@index([drawId])
+  // FK indexes: the three Entry relations all cascade to SetNull on entry
+  // delete, and results/board queries filter bouts by competitor or by mat.
+  @@index([akaEntryId])
+  @@index([aoEntryId])
+  @@index([winnerEntryId])
+  @@index([matId])
 }
 
 // A competition mat/tatami within an event. Categories (draws) are planned
