@@ -4,6 +4,8 @@ export interface DrawEntrySummary {
   entryId: string;
   name: string;
   clubName: string;
+  /** Dense seed rank as drawn; null = unseeded. */
+  seed?: number | null;
 }
 
 export type BoutOutcome = "POINTS" | "GAP" | "SENSHU" | "HANTEI" | "HANSOKU" | "KIKEN";
@@ -35,7 +37,7 @@ export interface DrawDetail {
   size: number;
   status: DrawStatus;
   locked: boolean;
-  slots: { position: number; entry: DrawEntrySummary }[];
+  slots: { position: number; seed: number | null; entry: DrawEntrySummary }[];
   bouts: DrawBout[];
   placements: {
     first: DrawEntrySummary | null;
@@ -44,8 +46,11 @@ export interface DrawDetail {
   };
   sync: {
     inSync: boolean;
+    /** Seeding changed since the draw was made, independently of the entry set. */
+    seedsChanged: boolean;
     added: DrawEntrySummary[];
     removed: DrawEntrySummary[];
+    seedChanges: (DrawEntrySummary & { from: number | null; to: number | null })[];
   };
 }
 
@@ -62,10 +67,52 @@ export interface DrawCategoryRow {
     size: number;
     status: DrawStatus;
     inSync: boolean;
+    seedsChanged: boolean;
     locked: boolean;
     matId: string | null;
     matOrder: number | null;
   } | null;
+}
+
+export interface CategorySeedRow {
+  entryId: string;
+  name: string;
+  clubName: string;
+  status: "DRAFT" | "SUBMITTED" | "APPROVED";
+  seed: number | null;
+}
+
+export interface CategorySeeds {
+  entries: CategorySeedRow[];
+  drawId: string | null;
+  drawLocked: boolean;
+}
+
+export async function listCategorySeeds(params: {
+  eventId: string;
+  divisionId: string;
+  weightClassId?: string | null;
+}): Promise<CategorySeeds> {
+  const res = await api.get("/draws/seeds", {
+    // The backend reads this straight off req.query, so an empty string would
+    // be treated as a real weight-class id. Omit it instead.
+    params: {
+      eventId: params.eventId,
+      divisionId: params.divisionId,
+      ...(params.weightClassId ? { weightClassId: params.weightClassId } : {}),
+    },
+  });
+  return res.data;
+}
+
+export async function setCategorySeeds(data: {
+  eventId: string;
+  divisionId: string;
+  weightClassId?: string | null;
+  seeds: { entryId: string; seed: number | null }[];
+}): Promise<CategorySeeds> {
+  const res = await api.put("/draws/seeds", data);
+  return res.data;
 }
 
 export async function listDrawCategories(eventId: string): Promise<DrawCategoryRow[]> {
