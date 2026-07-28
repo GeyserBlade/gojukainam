@@ -11,6 +11,8 @@ import {
   EventIdQuery,
   IdParam,
   BoutParams,
+  CategorySeedsQuery,
+  SetCategorySeeds,
 } from "../utils/validators.js";
 import { getParam } from "../utils/params.js";
 
@@ -25,6 +27,38 @@ router.get("/", requireRoles(...VIEW_ROLES), validate(EventIdQuery, "query"), as
     const { eventId } = req.query as { eventId: string };
     res.json(await DrawService.list(eventId));
   } catch (err) { next(err); }
+});
+
+// Seeding for one category. Must be declared before "/:id" or the param route
+// swallows it. validate(..., "query") only checks and never writes back
+// (req.query is read-only in Express), so the raw values are read here.
+router.get("/seeds", requireRoles(...MANAGE_ROLES), validate(CategorySeedsQuery, "query"), async (req, res, next) => {
+  try {
+    const { eventId, divisionId } = req.query as { eventId: string; divisionId: string };
+    res.json(await DrawService.listCategorySeeds({
+      eventId,
+      divisionId,
+      weightClassId: (req.query.weightClassId as string) || null,
+    }));
+  } catch (err: any) {
+    if (err.status && err.message) return res.status(err.status).json({ error: err.message });
+    next(err);
+  }
+});
+
+// Replace a category's seeding wholesale
+router.put("/seeds", requireRoles(...MANAGE_ROLES), validate(SetCategorySeeds), async (req, res, next) => {
+  try {
+    const { eventId, divisionId, weightClassId, seeds } = req.body;
+    res.json(await DrawService.setCategorySeeds(
+      { eventId, divisionId, weightClassId: weightClassId ?? null },
+      seeds,
+      { id: req.user!.id }
+    ));
+  } catch (err: any) {
+    if (err.status && err.message) return res.status(err.status).json({ error: err.message });
+    next(err);
+  }
 });
 
 // Full bracket for one draw

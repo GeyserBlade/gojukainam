@@ -307,6 +307,14 @@ model Entry {
   statusReason String?
   /// Day-of presence flag; ticked at check-in, used by the run board.
   checkedIn    Boolean     @default(false)
+  /// Manual seeding rank within this entry's category (division + weight class).
+  /// A relative ordering rather than a literal bracket rank: gaps left by a
+  /// withdrawn seeded athlete are compacted to dense ranks 1..N at draw time.
+  /// null = unseeded, and all unseeded entries are equal. Uniqueness within a
+  /// category is enforced in the service layer, not by @@unique — Postgres
+  /// treats NULL weightClassId rows as distinct, so a DB constraint would
+  /// silently not apply to KATA categories at all.
+  seed         Int?
   feeCents     Int         @default(0)
   notes        String?
 
@@ -441,6 +449,12 @@ model DrawSlot {
   position Int // 1..size; positions without a row are byes
   entryId  String
   entry    Entry  @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  /// Dense seed rank (1..N) actually used when this draw was generated; null =
+  /// drawn as unseeded. Snapshotted so the bracket keeps showing what was drawn
+  /// even if Entry.seed changes afterwards, and so seed drift is detectable at
+  /// all: tier placement is randomised, so the seeding cannot be inferred from
+  /// `position` alone.
+  seed     Int?
 
   @@unique([drawId, position])
   @@unique([drawId, entryId])

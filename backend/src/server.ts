@@ -1,5 +1,6 @@
 import express from "express";
 import cors from "cors";
+import compression from "compression";
 import cookieParser from "cookie-parser";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
@@ -34,6 +35,9 @@ const app = express();
 // Security headers
 app.use(helmet());
 
+// Gzip response bodies (board/entry payloads are large JSON)
+app.use(compression());
+
 // Rate limiting
 // General API limiter — prevents broad abuse and DoS
 const apiLimiter = rateLimit({
@@ -42,6 +46,8 @@ const apiLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: "Too many requests, please slow down" },
+  // The public spectator board has its own (more generous) limiter below.
+  skip: (req) => req.path.startsWith("/public/"),
 });
 app.use("/api", apiLimiter);
 
@@ -57,6 +63,18 @@ app.use("/api/auth/login", authLimiter);
 app.use("/api/auth/magic-link", authLimiter);
 app.use("/api/auth/magic-login", authLimiter);
 app.use("/api/auth/password-reset-request", authLimiter);
+
+// Generous limiter for the public spectator board — many spectators can share
+// one venue IP, and the endpoint is cheap (server-side cached), so give it its
+// own budget instead of the general 300/min.
+const publicLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 1200,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many requests, please slow down" },
+});
+app.use("/api/public", publicLimiter);
 
 // Allow multiple origins for development (Vite dev server and serve)
 // In production (Railway), FRONTEND_URL will be set to the single production domain

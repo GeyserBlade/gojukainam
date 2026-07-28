@@ -108,6 +108,42 @@ const SelectBox = ({
   />
 )
 
+const SEED_NONE = "none"
+const MAX_SEED = 8
+
+/**
+ * Seed control for the review list. The list spans categories, so the number
+ * alone is ambiguous — the adjacent Division column supplies the context.
+ * Whole-category seeding lives on the Draws page.
+ */
+const SeedSelect = ({
+  entry,
+  disabled,
+  onChange,
+}: {
+  entry: Entry
+  disabled: boolean
+  onChange: (seed: number | null) => void
+}) => (
+  <Select
+    value={entry.seed == null ? SEED_NONE : String(entry.seed)}
+    onValueChange={(next) => onChange(next === SEED_NONE ? null : Number(next))}
+    disabled={disabled}
+  >
+    <SelectTrigger className="h-7 w-[64px]" aria-label="Seed">
+      <SelectValue />
+    </SelectTrigger>
+    <SelectContent>
+      <SelectItem value={SEED_NONE}>—</SelectItem>
+      {Array.from({ length: MAX_SEED }, (_, i) => i + 1).map((n) => (
+        <SelectItem key={n} value={String(n)}>
+          {n}
+        </SelectItem>
+      ))}
+    </SelectContent>
+  </Select>
+)
+
 const EntryRow = ({
   entry,
   selectable,
@@ -116,6 +152,7 @@ const EntryRow = ({
   onSubmit,
   onApprove,
   onReturn,
+  onSetSeed,
   isAdmin,
   isClub,
   busy,
@@ -128,6 +165,7 @@ const EntryRow = ({
   onSubmit: () => void
   onApprove: () => void
   onReturn: () => void
+  onSetSeed: (seed: number | null) => void
   isAdmin: boolean
   isClub: boolean
   busy: boolean
@@ -182,6 +220,11 @@ const EntryRow = ({
                 {!isTeam && entry.athlete?.belt && (
                   <span>{entry.athlete.belt.name}</span>
                 )}
+                {entry.seed != null && (
+                  <Badge variant="outline" className="font-normal text-[10px]">
+                    Seed {entry.seed}
+                  </Badge>
+                )}
               </div>
               {isTeam && entry.team && (
                 <p className="mt-1 text-xs text-muted-foreground">
@@ -194,6 +237,9 @@ const EntryRow = ({
           </div>
           <div className="flex flex-col items-end gap-2">
             <StatusBadge status={entry.status} />
+            {isAdmin && entry.status !== "RETURNED" && (
+              <SeedSelect entry={entry} disabled={busy} onChange={onSetSeed} />
+            )}
             {canSubmit && (
               <Button
                 size="xs"
@@ -391,6 +437,22 @@ const EntriesView = () => {
       toast.success(`${updatedCount} ${updatedCount === 1 ? "entry" : "entries"} returned`)
     } catch (e) {
       showApiError(e, "Failed to return entries")
+    } finally {
+      setActing(false)
+    }
+  }
+
+  // 409s here carry the conflicting athlete's name from the server, so the
+  // fallback message is only ever seen for unexpected failures.
+  const runSetSeed = async (id: string, seed: number | null) => {
+    setActing(true)
+    try {
+      await EntryService.setSeed(id, seed)
+      invalidate()
+      queryClient.invalidateQueries({ queryKey: ["category-seeds"] })
+      queryClient.invalidateQueries({ queryKey: ["draw-categories"] })
+    } catch (e) {
+      showApiError(e, "Failed to set the seed")
     } finally {
       setActing(false)
     }
@@ -796,6 +858,7 @@ const EntriesView = () => {
                               onSubmit={() => runSubmit([entry.id])}
                               onApprove={() => runApprove([entry.id])}
                               onReturn={() => openReturnDialog([entry.id])}
+                              onSetSeed={(seed) => runSetSeed(entry.id, seed)}
                               isAdmin={isAdmin}
                               isClub={isClub}
                               busy={acting}
@@ -831,6 +894,7 @@ const EntriesView = () => {
                     <TableHead>Category</TableHead>
                     <TableHead className="hidden lg:table-cell">Type</TableHead>
                     <TableHead className="hidden xl:table-cell">Weight</TableHead>
+                    {isAdmin && <TableHead className="hidden lg:table-cell">Seed</TableHead>}
                     <TableHead>Status</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
@@ -892,6 +956,19 @@ const EntriesView = () => {
                         <TableCell className="hidden xl:table-cell text-muted-foreground">
                           {entry.weightClass?.name || "—"}
                         </TableCell>
+                        {isAdmin && (
+                          <TableCell className="hidden lg:table-cell">
+                            {entry.status === "RETURNED" ? (
+                              <span className="text-muted-foreground">—</span>
+                            ) : (
+                              <SeedSelect
+                                entry={entry}
+                                disabled={acting}
+                                onChange={(seed) => runSetSeed(entry.id, seed)}
+                              />
+                            )}
+                          </TableCell>
+                        )}
                         <TableCell>
                           <StatusBadge status={entry.status} />
                         </TableCell>

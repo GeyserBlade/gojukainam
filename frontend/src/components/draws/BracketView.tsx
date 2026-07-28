@@ -56,6 +56,15 @@ const FighterRow = ({ fighter, side, isBye, isWinner, isLoser, clickable, onClic
       !clickable && "cursor-default",
     )}
   >
+    {/* Seed sits outside the truncating block so long names still clip cleanly */}
+    {fighter?.seed != null && (
+      <span
+        className="w-3 shrink-0 text-[10px] font-semibold tabular-nums text-muted-foreground"
+        title={`Seed ${fighter.seed}`}
+      >
+        {fighter.seed}
+      </span>
+    )}
     <div className="min-w-0 flex-1">
       {fighter ? (
         <>

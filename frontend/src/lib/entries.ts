@@ -66,6 +66,8 @@ export interface Entry {
   status: "DRAFT" | "SUBMITTED" | "APPROVED" | "RETURNED";
   statusReason?: string | null;
   checkedIn?: boolean;
+  /** Seeding rank within this entry's category; null/undefined = unseeded. */
+  seed?: number | null;
   notes?: string | null;
   createdAt: string;
   updatedAt: string;
@@ -139,6 +141,13 @@ export class EntryService {
     reason?: string,
   ): Promise<{ updatedCount: number }> {
     const res = await api.post("/review/bulk", { eventId, ids, status, reason });
+    return res.data;
+  }
+
+  // Seed one entry. 409s when another entry in the same category holds it,
+  // with the holder named in the error message.
+  static async setSeed(id: string, seed: number | null): Promise<{ entryId: string; seed: number | null }> {
+    const res = await api.put(`/entries/${id}/seed`, { seed });
     return res.data;
   }
 
