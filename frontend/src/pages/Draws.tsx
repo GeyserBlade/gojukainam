@@ -18,6 +18,7 @@ import { useSelectedEvent } from "@/contexts/SelectedEventContext"
 import { useToast, useApiErrorToast } from "@/components/Toast"
 import { useConfirm } from "@/components/ConfirmDialog"
 import { BracketView, PodiumView, RepechageView } from "@/components/draws/BracketView"
+import { SeedPanel } from "@/components/draws/SeedPanel"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -113,7 +114,7 @@ const CategoryCard = ({
           {!row.draw.inSync && (
             <span className="flex items-center gap-1 text-[10px] text-belt-orange">
               <AlertTriangle className="h-3 w-3" />
-              Entries changed
+              {row.draw.seedsChanged ? "Seeding changed" : "Entries changed"}
             </span>
           )}
         </>
@@ -257,6 +258,8 @@ export default function DrawsPage() {
     }
   }
 
+  const entriesChanged = (draw?.sync.added.length ?? 0) > 0 || (draw?.sync.removed.length ?? 0) > 0
+
   const busy =
     generateMutation.isPending ||
     regenerateMutation.isPending ||
@@ -308,26 +311,35 @@ export default function DrawsPage() {
               </CardContent>
             </Card>
           ) : !selected.draw ? (
-            <Card>
-              <CardContent className="py-16 text-center">
-                <Shuffle className="mx-auto mb-3 h-8 w-8 text-muted-foreground" />
-                <p className="mb-1 text-sm font-medium">{categoryTitle(selected)}</p>
-                <p className="mb-4 text-sm text-muted-foreground">
-                  {selected.entryCount < 2
-                    ? "At least 2 approved entries are needed to generate a draw."
-                    : `${selected.entryCount} entries ready — generate a random draw.`}
-                </p>
-                {canManage && (
-                  <Button
-                    onClick={() => generateMutation.mutate(selected)}
-                    disabled={busy || selected.entryCount < 2}
-                  >
-                    <Shuffle className="mr-2 h-4 w-4" />
-                    Generate draw
-                  </Button>
-                )}
-              </CardContent>
-            </Card>
+            <>
+              {/* Seed before generating — that is the order the draw needs. */}
+              <SeedPanel
+                eventId={eventId}
+                divisionId={selected.divisionId}
+                weightClassId={selected.weightClassId}
+                canManage={canManage}
+              />
+              <Card>
+                <CardContent className="py-16 text-center">
+                  <Shuffle className="mx-auto mb-3 h-8 w-8 text-muted-foreground" />
+                  <p className="mb-1 text-sm font-medium">{categoryTitle(selected)}</p>
+                  <p className="mb-4 text-sm text-muted-foreground">
+                    {selected.entryCount < 2
+                      ? "At least 2 approved entries are needed to generate a draw."
+                      : `${selected.entryCount} entries ready — generate the draw.`}
+                  </p>
+                  {canManage && (
+                    <Button
+                      onClick={() => generateMutation.mutate(selected)}
+                      disabled={busy || selected.entryCount < 2}
+                    >
+                      <Shuffle className="mr-2 h-4 w-4" />
+                      Generate draw
+                    </Button>
+                  )}
+                </CardContent>
+              </Card>
+            </>
           ) : drawLoading || !draw ? (
             <Skeleton className="h-96 w-full" />
           ) : (
@@ -405,18 +417,34 @@ export default function DrawsPage() {
                 </div>
               </div>
 
-              {/* Out-of-sync warning */}
+              {/* Out-of-sync warning. Entry changes shift the dense seed ranks,
+                  so both halves of this often fire together. */}
               {!draw.sync.inSync && (
                 <div className="flex flex-wrap items-center gap-2 rounded-md border border-belt-orange/40 bg-belt-orange/10 px-3 py-2.5 text-sm">
                   <AlertTriangle className="h-4 w-4 shrink-0 text-belt-orange" />
                   <div className="min-w-0 flex-1">
-                    <p className="font-medium text-belt-orange">Entries have changed since this draw</p>
-                    <p className="text-xs text-muted-foreground">
-                      {draw.sync.added.length > 0 &&
-                        `New: ${draw.sync.added.map((e) => e.name).join(", ")}. `}
-                      {draw.sync.removed.length > 0 &&
-                        `Withdrawn: ${draw.sync.removed.map((e) => e.name).join(", ")}.`}
+                    <p className="font-medium text-belt-orange">
+                      {entriesChanged
+                        ? "Entries have changed since this draw"
+                        : "Seeding has changed since this draw"}
                     </p>
+                    {entriesChanged && (
+                      <p className="text-xs text-muted-foreground">
+                        {draw.sync.added.length > 0 &&
+                          `New: ${draw.sync.added.map((e) => e.name).join(", ")}. `}
+                        {draw.sync.removed.length > 0 &&
+                          `Withdrawn: ${draw.sync.removed.map((e) => e.name).join(", ")}.`}
+                      </p>
+                    )}
+                    {draw.sync.seedsChanged && draw.sync.seedChanges.length > 0 && (
+                      <p className="text-xs text-muted-foreground">
+                        Seeding:{" "}
+                        {draw.sync.seedChanges
+                          .map((c) => `${c.name} ${c.from ?? "—"} → ${c.to ?? "—"}`)
+                          .join(", ")}
+                        .
+                      </p>
+                    )}
                   </div>
                   {canManage && (
                     <Button
@@ -432,6 +460,13 @@ export default function DrawsPage() {
                   )}
                 </div>
               )}
+
+              <SeedPanel
+                eventId={eventId}
+                divisionId={draw.division.id}
+                weightClassId={draw.weightClass?.id ?? null}
+                canManage={canManage}
+              />
 
               <PodiumView draw={draw} />
 

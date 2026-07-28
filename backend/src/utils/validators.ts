@@ -182,6 +182,30 @@ export const SetDrawLock = z.object({
   locked: z.boolean(),
 });
 
+// ---- Seeding ----
+// Capped at a flat 64 rather than the entry count, which moves as entries are
+// approved or returned. Seeds are a relative ordering and get compacted to
+// dense ranks at draw time, so the exact ceiling is not load-bearing.
+export const SeedValue = z.number().int().min(1).max(64).nullable();
+
+export const CategorySeedsQuery = z.object({
+  eventId: z.string().min(1),
+  divisionId: z.string().min(1),
+  weightClassId: z.string().min(1).optional(),
+});
+
+export const SetCategorySeeds = z.object({
+  eventId: z.string().min(1),
+  divisionId: z.string().min(1),
+  weightClassId: z.string().min(1).optional().nullable(),
+  // Empty array is valid: it clears every seed in the category.
+  seeds: z.array(z.object({ entryId: z.string().min(1), seed: SeedValue })).max(256),
+});
+
+export const SetEntrySeed = z.object({
+  seed: SeedValue,
+});
+
 // ---- Day-of run board ----
 export const CreateMat = z.object({
   eventId: z.string().min(1),

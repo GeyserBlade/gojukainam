@@ -5,6 +5,13 @@ import { prisma } from "../lib/prisma.js";
 // submission alone is not enough; an admin must approve first.
 const ELIGIBLE_STATUSES = ["APPROVED"] as const;
 
+// Statuses that can carry a seed. Wider than ELIGIBLE_STATUSES because admins
+// seed a category while its entries are still in review — the review queue is
+// SUBMITTED-only, so waiting for APPROVED would make the control useless.
+// RETURNED is excluded: those entries are out of the field for now and keep
+// their stored seed untouched.
+const SEEDABLE_STATUSES = ["DRAFT", "SUBMITTED", "APPROVED"] as const;
+
 const ENTRY_INCLUDE = {
   athlete: { select: { id: true, firstName: true, lastName: true } },
   team: { select: { id: true, name: true } },
@@ -70,6 +77,102 @@ function bracketSize(n: number): number {
   let size = 2;
   while (size < n) size *= 2;
   return size;
+}
+
+export type SeedableEntry = { id: string; seed: number | null };
+
+/**
+ * Dense ranks 1..N over the seeded members of a set.
+ *
+ * Entry.seed is a relative ordering, not a literal bracket rank, so gaps left
+ * by a withdrawn seeded athlete compact away instead of blocking the draw:
+ * seeds 1, 2, 5 become ranks 1, 2, 3. Duplicates are broken by entry id, so a
+ * lost race between two admins still yields a valid draw rather than an error.
+ */
+export function denseSeedRanks(entries: SeedableEntry[]): Map<string, number> {
+  const ranks = new Map<string, number>();
+  entries
+    .filter((e) => e.seed !== null)
+    .sort((a, b) => a.seed! - b.seed! || a.id.localeCompare(b.id))
+    .forEach((e, i) => ranks.set(e.id, i + 1));
+  return ranks;
+}
+
+/** Seed tiers covering ranks 1..count: [1,1] [2,2] [3,4] [5,8] [9,16] ... */
+function seedTiers(count: number): [number, number][] {
+  const tiers: [number, number][] = [
+    [1, 1],
+    [2, 2],
+  ];
+  for (let lo = 3; lo <= count; ) {
+    const hi = (lo - 1) * 2;
+    tiers.push([lo, hi]);
+    lo = hi + 1;
+  }
+  return tiers;
+}
+
+/**
+ * Order entries for bracketPositions(): result[k] takes bracket position
+ * bracketPositions(size)[k], i.e. it plays the bracket's "seed k+1" slot.
+ *
+ * Seeds 1 and 2 are placed exactly, which puts them in opposite halves so they
+ * can only meet in the final. Seeds 3-4, 5-8, 9-16 ... are randomised within
+ * their tier, per standard WKF/tennis practice: protected from each other, but
+ * not predetermined. Unseeded entries fill whatever indices are left.
+ *
+ * Byes need no special handling: they are the unused tail indices, which
+ * bracketPositions maps to the top seeds' round-1 partners, so the byes land on
+ * the top seeds automatically.
+ */
+export function seededOrder(
+  entries: SeedableEntry[]
+): { id: string; rank: number | null }[] {
+  const n = entries.length;
+  const ranks = denseSeedRanks(entries);
+  const idByRank = new Map([...ranks].map(([id, r]) => [r, id]));
+  const seededCount = ranks.size;
+
+  const order = new Array<{ id: string; rank: number | null } | undefined>(n);
+  const used = new Set<number>();
+
+  for (const [lo, hi] of seedTiers(seededCount)) {
+    const tierRanks: number[] = [];
+    for (let r = lo; r <= Math.min(hi, seededCount); r++) tierRanks.push(r);
+    if (tierRanks.length === 0) continue;
+
+    // Candidate k indices for this tier, clamped to the real field size so a
+    // 3-entry category holding 3 seeds never reaches for k=3.
+    const candidates: number[] = [];
+    for (let k = lo - 1; k <= Math.min(hi, n) - 1; k++) candidates.push(k);
+
+    const picked = shuffle(candidates);
+    tierRanks.forEach((rank, i) => {
+      order[picked[i]] = { id: idByRank.get(rank)!, rank };
+      used.add(picked[i]);
+    });
+  }
+
+  const rest = shuffle(entries.filter((e) => !ranks.has(e.id)));
+  let next = 0;
+  for (let k = 0; k < n; k++) {
+    if (!used.has(k)) order[k] = { id: rest[next++].id, rank: null };
+  }
+
+  return order as { id: string; rank: number | null }[];
+}
+
+/**
+ * True when a draw's snapshotted seeding no longer matches what the current
+ * eligible entries would produce. Always compares dense rank to dense rank —
+ * never a raw Entry.seed to a DrawSlot.seed, since the former is a relative
+ * ordering and the latter is the compacted rank.
+ */
+function seedsDrifted(
+  slots: { entryId: string; seed: number | null }[],
+  ranks: Map<string, number>
+): boolean {
+  return slots.some((s) => s.seed !== (ranks.get(s.entryId) ?? null));
 }
 
 /**
@@ -316,6 +419,22 @@ async function recompute(tx: Tx, drawId: string) {
   return state;
 }
 
+/** Display shape for an entry wherever a draw payload names a competitor. */
+function entrySummary(entry: {
+  id: string;
+  athlete: { firstName: string; lastName: string } | null;
+  team: { name: string } | null;
+  club: { name: string } | null;
+}) {
+  return {
+    entryId: entry.id,
+    name: entry.athlete
+      ? `${entry.athlete.firstName} ${entry.athlete.lastName}`
+      : entry.team?.name ?? "Unknown",
+    clubName: entry.club?.name ?? "",
+  };
+}
+
 function eligibleEntryWhere(eventId: string, divisionId: string, weightClassId: string | null) {
   return {
     eventId,
@@ -325,12 +444,26 @@ function eligibleEntryWhere(eventId: string, divisionId: string, weightClassId: 
   };
 }
 
+function seedableEntryWhere(eventId: string, divisionId: string, weightClassId: string | null) {
+  return {
+    eventId,
+    divisionId,
+    ...(weightClassId ? { weightClassId } : {}),
+    status: { in: [...SEEDABLE_STATUSES] },
+  };
+}
+
 async function createDrawRecords(
   tx: Tx,
-  params: { eventId: string; divisionId: string; weightClassId: string | null; entryIds: string[] }
+  params: {
+    eventId: string;
+    divisionId: string;
+    weightClassId: string | null;
+    entries: SeedableEntry[];
+  }
 ) {
-  const shuffled = shuffle(params.entryIds);
-  const size = bracketSize(shuffled.length);
+  const order = seededOrder(params.entries);
+  const size = bracketSize(order.length);
   const positions = bracketPositions(size);
 
   const draw = await tx.draw.create({
@@ -342,10 +475,11 @@ async function createDrawRecords(
     },
   });
   await tx.drawSlot.createMany({
-    data: shuffled.map((entryId, k) => ({
+    data: order.map((item, k) => ({
       drawId: draw.id,
       position: positions[k],
-      entryId,
+      entryId: item.id,
+      seed: item.rank,
     })),
   });
   await recompute(tx, draw.id);
@@ -366,11 +500,11 @@ export class DrawService {
       }),
       prisma.entry.findMany({
         where: { eventId, status: { in: [...ELIGIBLE_STATUSES] } },
-        select: { id: true, divisionId: true, weightClassId: true },
+        select: { id: true, divisionId: true, weightClassId: true, seed: true },
       }),
       prisma.draw.findMany({
         where: { eventId },
-        include: { slots: { select: { entryId: true } }, weightClass: true },
+        include: { slots: { select: { entryId: true, seed: true } }, weightClass: true },
       }),
     ]);
     const weightClasses = await prisma.weightClass.findMany({ where: { eventId } });
@@ -379,11 +513,11 @@ export class DrawService {
     // Group eligible entries per category (division + optional weight class)
     const catKey = (divisionId: string, weightClassId: string | null) =>
       `${divisionId}:${weightClassId ?? ""}`;
-    const entriesByCat = new Map<string, string[]>();
+    const entriesByCat = new Map<string, SeedableEntry[]>();
     for (const e of entries) {
       const key = catKey(e.divisionId, e.weightClassId);
       if (!entriesByCat.has(key)) entriesByCat.set(key, []);
-      entriesByCat.get(key)!.push(e.id);
+      entriesByCat.get(key)!.push({ id: e.id, seed: e.seed });
     }
     const drawsByCat = new Map(
       draws.map((d) => [catKey(d.divisionId, d.weightClassId), d])
@@ -402,15 +536,16 @@ export class DrawService {
 
       for (const key of keys) {
         const weightClassId = key.split(":")[1] || null;
-        const entryIds = entriesByCat.get(key) ?? [];
+        const catEntries = entriesByCat.get(key) ?? [];
         const draw = drawsByCat.get(key);
         let sync = null;
         if (draw) {
           const slotIds = new Set(draw.slots.map((s) => s.entryId));
-          const eligibleIds = new Set(entryIds);
+          const eligibleIds = new Set(catEntries.map((e) => e.id));
           sync = {
-            added: entryIds.filter((id) => !slotIds.has(id)).length,
+            added: catEntries.filter((e) => !slotIds.has(e.id)).length,
             removed: [...slotIds].filter((id) => !eligibleIds.has(id)).length,
+            seedsChanged: seedsDrifted(draw.slots, denseSeedRanks(catEntries)),
           };
         }
         rows.push({
@@ -420,13 +555,14 @@ export class DrawService {
           gender: division.gender,
           weightClassId,
           weightClassName: weightClassId ? wcById.get(weightClassId)?.name ?? null : null,
-          entryCount: entryIds.length,
+          entryCount: catEntries.length,
           draw: draw
             ? {
                 id: draw.id,
                 size: draw.size,
                 status: draw.status,
-                inSync: sync!.added === 0 && sync!.removed === 0,
+                inSync: sync!.added === 0 && sync!.removed === 0 && !sync!.seedsChanged,
+                seedsChanged: sync!.seedsChanged,
                 locked: draw.locked,
                 matId: draw.matId,
                 matOrder: draw.matOrder,
@@ -460,17 +596,17 @@ export class DrawService {
 
     const entries = await prisma.entry.findMany({
       where: eligibleEntryWhere(data.eventId, data.divisionId, weightClassId),
-      select: { id: true },
+      select: { id: true, seed: true },
     });
     if (entries.length < 2)
-      throw { status: 422, message: "At least 2 submitted or approved entries are needed for a draw" };
+      throw { status: 422, message: "At least 2 approved entries are needed for a draw" };
 
     const drawId = await prisma.$transaction(async (tx) => {
       const id = await createDrawRecords(tx, {
         eventId: data.eventId,
         divisionId: data.divisionId,
         weightClassId,
-        entryIds: entries.map((e) => e.id),
+        entries,
       });
       await tx.auditLog.create({
         data: {
@@ -509,10 +645,10 @@ export class DrawService {
 
     const entries = await prisma.entry.findMany({
       where: eligibleEntryWhere(draw.eventId, draw.divisionId, draw.weightClassId),
-      select: { id: true },
+      select: { id: true, seed: true },
     });
     if (entries.length < 2)
-      throw { status: 422, message: "At least 2 submitted or approved entries are needed for a draw" };
+      throw { status: 422, message: "At least 2 approved entries are needed for a draw" };
 
     const newId = await prisma.$transaction(async (tx) => {
       await tx.draw.delete({ where: { id: drawId } });
@@ -520,7 +656,7 @@ export class DrawService {
         eventId: draw.eventId,
         divisionId: draw.divisionId,
         weightClassId: draw.weightClassId,
-        entryIds: entries.map((e) => e.id),
+        entries,
       });
       await tx.auditLog.create({
         data: {
@@ -576,6 +712,137 @@ export class DrawService {
       });
     });
     return DrawService.get(drawId);
+  }
+
+  /**
+   * The seeding panel's field for one category. Deliberately wider than the
+   * draw's own eligibility: admins seed while entries are still being reviewed,
+   * so DRAFT and SUBMITTED entries are listed too. RETURNED entries are left
+   * out entirely — they keep whatever seed they hold, untouched.
+   */
+  static async listCategorySeeds(params: {
+    eventId: string;
+    divisionId: string;
+    weightClassId: string | null;
+  }) {
+    const [entries, draw] = await Promise.all([
+      prisma.entry.findMany({
+        where: seedableEntryWhere(params.eventId, params.divisionId, params.weightClassId),
+        include: ENTRY_INCLUDE,
+      }),
+      prisma.draw.findFirst({
+        where: {
+          eventId: params.eventId,
+          divisionId: params.divisionId,
+          weightClassId: params.weightClassId,
+        },
+        select: { id: true, locked: true },
+      }),
+    ]);
+
+    const rows = entries
+      .map((e) => ({ ...entrySummary(e), status: e.status, seed: e.seed }))
+      .sort((a, b) => {
+        if (a.seed !== null && b.seed !== null) return a.seed - b.seed;
+        if (a.seed !== null) return -1;
+        if (b.seed !== null) return 1;
+        return a.name.localeCompare(b.name);
+      });
+
+    return { entries: rows, drawId: draw?.id ?? null, drawLocked: draw?.locked ?? false };
+  }
+
+  /**
+   * Set the whole category's seeding in one write. Authoritative over exactly
+   * the seedable entries: anything omitted from the payload is cleared, which
+   * is what makes "remove a seed" work from the panel.
+   */
+  static async setCategorySeeds(
+    params: { eventId: string; divisionId: string; weightClassId: string | null },
+    seeds: { entryId: string; seed: number | null }[],
+    user: { id: string }
+  ) {
+    const entries = await prisma.entry.findMany({
+      where: seedableEntryWhere(params.eventId, params.divisionId, params.weightClassId),
+      select: { id: true, seed: true },
+    });
+    const byId = new Map(entries.map((e) => [e.id, e]));
+
+    const seen = new Set<string>();
+    for (const row of seeds) {
+      if (!byId.has(row.entryId))
+        throw { status: 422, message: "An entry in this seeding does not belong to this category" };
+      if (seen.has(row.entryId))
+        throw { status: 422, message: "The same entry was given a seed twice" };
+      seen.add(row.entryId);
+    }
+    const values = seeds.map((s) => s.seed).filter((s): s is number => s !== null);
+    if (new Set(values).size !== values.length)
+      throw { status: 422, message: "Two entries were given the same seed" };
+
+    const wanted = new Map(seeds.map((s) => [s.entryId, s.seed]));
+    await prisma.$transaction(async (tx) => {
+      for (const entry of entries) {
+        const seed = wanted.get(entry.id) ?? null;
+        if (seed === entry.seed) continue;
+        await tx.entry.update({ where: { id: entry.id }, data: { seed } });
+      }
+      await tx.auditLog.create({
+        data: {
+          userId: user.id,
+          entityType: "Entry",
+          entityId: `category:${params.divisionId}:${params.weightClassId ?? ""}`,
+          action: "SEED_SET_BULK",
+          diffJson: JSON.stringify({ eventId: params.eventId, seeds }),
+        },
+      });
+    });
+
+    return DrawService.listCategorySeeds(params);
+  }
+
+  /**
+   * Set one entry's seed, for the review list where there is no whole-category
+   * context. Not blocked by a locked draw: the bracket snapshots its own seeds,
+   * so the published draw is unaffected and simply reports as out of sync.
+   */
+  static async setEntrySeed(entryId: string, seed: number | null, user: { id: string }) {
+    const entry = await prisma.entry.findUnique({
+      where: { id: entryId },
+      select: { id: true, eventId: true, divisionId: true, weightClassId: true, seed: true },
+    });
+    if (!entry) throw { status: 404, message: "Entry not found" };
+
+    if (seed !== null) {
+      const clash = await prisma.entry.findFirst({
+        where: {
+          ...seedableEntryWhere(entry.eventId, entry.divisionId, entry.weightClassId),
+          seed,
+          NOT: { id: entryId },
+        },
+        include: ENTRY_INCLUDE,
+      });
+      if (clash)
+        throw {
+          status: 409,
+          message: `Seed ${seed} is already held by ${entrySummary(clash).name} (${clash.status.toLowerCase()})`,
+        };
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.entry.update({ where: { id: entryId }, data: { seed } });
+      await tx.auditLog.create({
+        data: {
+          userId: user.id,
+          entityType: "Entry",
+          entityId: entryId,
+          action: "SEED_SET",
+          diffJson: JSON.stringify({ from: entry.seed, to: seed }),
+        },
+      });
+    });
+
+    return { entryId, seed };
   }
 
   /** Capture (or clear, with null) the winner of a bout, cascading the bracket. */
@@ -698,20 +965,17 @@ export class DrawService {
     const slotIds = new Set(draw.slots.map((s) => s.entryId));
     const eligibleIds = new Set(eligible.map((e) => e.id));
 
-    const summary = (entry: {
-      id: string;
-      athlete: { firstName: string; lastName: string } | null;
-      team: { name: string } | null;
-      club: { name: string } | null;
-    }) => ({
-      entryId: entry.id,
-      name: entry.athlete
-        ? `${entry.athlete.firstName} ${entry.athlete.lastName}`
-        : entry.team?.name ?? "Unknown",
-      clubName: entry.club?.name ?? "",
-    });
+    const summary = entrySummary;
 
-    const entryById = new Map(draw.slots.map((s) => [s.entryId, summary(s.entry)]));
+    // Seed shown on the bracket is the snapshot taken when the draw was made,
+    // so a later Entry.seed edit never changes a published bracket. Drift is
+    // reported separately through `sync` below.
+    const entryById = new Map(
+      draw.slots.map((s) => [s.entryId, { ...summary(s.entry), seed: s.seed }])
+    );
+
+    const ranks = denseSeedRanks(eligible.map((e) => ({ id: e.id, seed: e.seed })));
+    const seedsChanged = seedsDrifted(draw.slots, ranks);
 
     return {
       id: draw.id,
@@ -723,7 +987,11 @@ export class DrawService {
       size: draw.size,
       status: draw.status,
       locked: draw.locked,
-      slots: draw.slots.map((s) => ({ position: s.position, entry: summary(s.entry) })),
+      slots: draw.slots.map((s) => ({
+        position: s.position,
+        seed: s.seed,
+        entry: { ...summary(s.entry), seed: s.seed },
+      })),
       bouts: state.bouts.map((b) => {
         const stored = draw.bouts.find(
           (row) => row.phase === b.phase && row.round === b.round && row.position === b.position
@@ -755,11 +1023,22 @@ export class DrawService {
       sync: {
         inSync:
           slotIds.size === eligibleIds.size &&
-          [...slotIds].every((id) => eligibleIds.has(id)),
-        added: eligible.filter((e) => !slotIds.has(e.id)).map(summary),
+          [...slotIds].every((id) => eligibleIds.has(id)) &&
+          !seedsChanged,
+        seedsChanged,
+        added: eligible
+          .filter((e) => !slotIds.has(e.id))
+          .map((e) => ({ ...summary(e), seed: ranks.get(e.id) ?? null })),
         removed: draw.slots
           .filter((s) => !eligibleIds.has(s.entryId))
-          .map((s) => summary(s.entry)),
+          .map((s) => ({ ...summary(s.entry), seed: s.seed })),
+        seedChanges: draw.slots
+          .filter((s) => s.seed !== (ranks.get(s.entryId) ?? null))
+          .map((s) => ({
+            ...summary(s.entry),
+            from: s.seed,
+            to: ranks.get(s.entryId) ?? null,
+          })),
       },
     };
   }

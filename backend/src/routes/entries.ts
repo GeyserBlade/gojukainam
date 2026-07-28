@@ -2,8 +2,9 @@ import { Router } from "express";
 import { requireRoles } from "../utils/auth.js";
 import { EntryService } from "../services/entry.service.js";
 import { validate, validateMultiple } from "../middleware/validate.js";
-import { CreateEntry, UpdateEntryStatus, EventEntriesQuery, IdParam, BulkSubmitEntries } from "../utils/validators.js";
+import { CreateEntry, UpdateEntryStatus, EventEntriesQuery, IdParam, BulkSubmitEntries, SetEntrySeed } from "../utils/validators.js";
 import { getParam } from "../utils/params.js";
+import { DrawService } from "../services/draw.service.js";
 
 export const router = Router();
 
@@ -112,6 +113,19 @@ router.put("/:id/status", requireRoles("CLUB_MANAGER", "COACH", "ADMIN", "SUPERA
 
     const updated = await EntryService.updateStatus(id, req.body, user);
     res.json(updated);
+  } catch (err: any) {
+    if (err.status && err.message) {
+      return res.status(err.status).json({ error: err.message });
+    }
+    next(err);
+  }
+});
+
+// set or clear one entry's seed (the whole-category equivalent is PUT /draws/seeds)
+router.put("/:id/seed", requireRoles("ADMIN", "SUPERADMIN"), validateMultiple({ params: IdParam, body: SetEntrySeed }), async (req, res, next) => {
+  try {
+    const row = await DrawService.setEntrySeed(getParam(req.params.id), req.body.seed, { id: req.user!.id });
+    res.json(row);
   } catch (err: any) {
     if (err.status && err.message) {
       return res.status(err.status).json({ error: err.message });
