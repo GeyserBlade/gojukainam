@@ -84,6 +84,32 @@ appends it). Note: this is `VITE_API_BASE`, not `VITE_API_URL`.
 
 Never commit `.env` files or print secret values into the transcript.
 
+## Local database
+
+A local Postgres 16 (Homebrew, already running on 5432) backs development —
+**never develop against the Railway production database.** The setup, verified
+2026-08-01:
+
+- Role `gojukainam` / database `karate`, created specifically for this project.
+  Other databases on that server (`cctv_alerts`, `ryansrecipes`) belong to
+  unrelated projects — leave them alone.
+- `backend/.env` has `DATABASE_URL` pointed at localhost; the production URL is
+  preserved on a commented `# PROD_DATABASE_URL=` line in the same file.
+- Before running any destructive Prisma command, confirm `DATABASE_URL` resolves
+  to `localhost`. `migrate reset` against the production URL would be
+  unrecoverable.
+
+Bootstrap from scratch:
+
+```bash
+cd backend && npx prisma migrate deploy && npm run prisma:seed && npm run create-superuser <email> <password>
+```
+
+Then run backend (port 4000) and frontend (5173); `frontend/.env.development.local`
+must point `VITE_API_BASE` at the backend's port. `npx tsx scripts/test-draws.ts`
+with `ALLOW_DEV_AUTH=true` runs the draw-engine suite against the local database —
+it is the only real test suite in the repo and it needs Postgres.
+
 ## Ground rules for agents
 
 1. **Read [`docs/state.md`](docs/state.md) first.** Another agent may have left

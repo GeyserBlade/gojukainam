@@ -58,12 +58,10 @@ Known gaps carried by this change, called out in its README:
 | Frontend boots, `/signin` renders, console clean | **yes** (dev server on 5180) |
 | Any screen exercised against a live API | **no** — see below |
 
-**Nothing has been run against a database.** The only `DATABASE_URL` configured
-in `backend/.env` points at the Railway *production* instance
-(`interchange.proxy.rlwy.net`), so the backend was deliberately not started —
-the changed pages contain mutations, and a stray click would write to
-production. There is no local Postgres set up. So: types and build are proven,
-runtime behaviour on real data is not.
+**Superseded 2026-08-01 — a local database now exists**, see "Local development
+database" below. At the time of the type-fix work the only `DATABASE_URL` was
+the Railway production instance, so nothing was run against a database; the app
+has since been verified end to end locally.
 
 ## Type errors fixed (2026-08-01)
 
@@ -109,6 +107,53 @@ flags. What changed, and why it matters beyond the type-check:
 
 Behavioural changes to sanity-check when someone next runs the app against real
 data: the event admin list should now include CLOSED and ARCHIVED events.
+
+## Local development database (set up 2026-08-01)
+
+Postgres 16.13 via Homebrew, already running on 5432. Role `gojukainam`,
+database `karate`. `backend/.env` `DATABASE_URL` now points there; the Railway
+production URL is preserved on a commented `# PROD_DATABASE_URL=` line in the
+same file. Other databases on that server (`cctv_alerts`, `ryansrecipes`) belong
+to unrelated projects.
+
+Verified working end to end: migrations applied (`migrate deploy`, 24
+migrations), `migrate diff` reports no drift between schema and migration
+history, seed populates, backend serves on 4000, frontend on 5173, login
+succeeds, and the entries hub renders real seeded data. The draw-engine suite
+(`ALLOW_DEV_AUTH=true npx tsx scripts/test-draws.ts`) — the same one CI runs and
+the only real tests in the repo — **passes locally**, which was impossible
+before.
+
+Local login: `dev@localhost.test` / `devpassword123` (SUPERADMIN, local only).
+
+### Two seed bugs fixed to get here
+
+`npm run prisma:seed` had been broken for a long time — CI never runs the seed,
+so nothing caught it:
+
+1. **Wrong config path.** It read `config/event-config.yaml` relative to the
+   working directory, but npm scripts run with cwd `backend/` while the config
+   lives at the repo root, so the documented command always threw ENOENT. Now
+   resolved relative to the script file via `import.meta.url`.
+2. **Stale against the schema.** It set `Athlete.beltRank` and
+   `emergencyName`/`emergencyPhone` (all removed), omitted the now-required
+   `Division.category`, and referenced `Gender.Open` which no longer exists. It
+   also never seeded any `Belt` rows even though `Athlete.beltId` is a required
+   FK — and the docs claimed it seeded belts.
+
+The rewritten seed creates 8 belts, 1 event, 32 divisions (age band × gender ×
+category), 6 clubs, 10 athletes spread across clubs and age bands, and 20
+entries. It guards against double-seeding rather than duplicating data, and
+leaves the SUPERADMIN to `npm run create-superuser` (which needs a password
+hash).
+
+### Port alignment
+
+`frontend/.env.development.local` pointed `VITE_API_BASE` at 4000 → **4001**
+mismatch with `backend/.env` (`PORT=4000`) and the tracked `launch.json`. Set to
+4000 to match both. If another project needs 4000 (ryansrecipes has used it),
+change the backend `PORT` and this file together. Previous value backed up in
+the session scratchpad.
 
 ## Other untracked, non-code files
 
