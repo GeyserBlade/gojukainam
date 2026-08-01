@@ -19,11 +19,24 @@ export class ErrorBoundary extends Component<Props, State> {
     }
   }
 
-  reset = () => this.setState({ error: null })
+  isChunkError = (err: Error) =>
+    err.message.includes("Failed to fetch dynamically imported module") ||
+    err.message.includes("Importing a module script failed") ||
+    err.message.includes("error loading dynamically imported module")
+
+  reset = () => {
+    if (this.state.error && this.isChunkError(this.state.error)) {
+      window.location.reload()
+    } else {
+      this.setState({ error: null })
+    }
+  }
 
   render() {
     if (!this.state.error) return this.props.children
     if (this.props.fallback) return this.props.fallback
+
+    const isChunk = this.isChunkError(this.state.error)
 
     return (
       <div
@@ -38,10 +51,14 @@ export class ErrorBoundary extends Component<Props, State> {
           </div>
           <h1 className="text-lg font-semibold mb-2">Something went wrong</h1>
           <p className="text-sm text-muted-foreground mb-4">
-            {this.state.error.message || "An unexpected error occurred."}
+            {isChunk
+              ? "A new version of the app was deployed. Click reload to get the latest version."
+              : this.state.error.message || "An unexpected error occurred."}
           </p>
           <div className="flex gap-2 justify-center">
-            <Button onClick={this.reset}>Try again</Button>
+            <Button onClick={this.reset}>
+              {isChunk ? "Reload" : "Try again"}
+            </Button>
             <Button
               variant="outline"
               onClick={() => (window.location.href = "/dashboard")}

@@ -1,8 +1,7 @@
 import {
   CalendarDays,
   ClipboardCheck,
-  Eye,
-  ListChecks,
+  LayoutDashboard,
   Medal,
   Shield,
   Upload,
@@ -28,9 +27,8 @@ const MANAGE_ROLES: Role[] = ["SUPERADMIN", "ADMIN", "CLUB_MANAGER"]
 export const NAV_ITEMS: NavItem[] = [
   { to: "/dashboard", label: "Dashboard", icon: ClipboardCheck },
   { to: "/athletes", label: "Athletes", icon: Users, roles: MANAGE_ROLES },
-  { to: "/events", label: "Entry Management", icon: ListChecks, roles: MANAGE_ROLES, accent: "belt-green" },
+  { to: "/hub", label: "Event Hub", icon: LayoutDashboard, accent: "primary" },
   { to: "/events/manage", label: "Event Admin", icon: CalendarDays, roles: MANAGE_ROLES, accent: "belt-orange" },
-  { to: "/entries/view", label: "All Entries", icon: Eye, roles: MANAGE_ROLES, accent: "flag-blue" },
   { to: "/athletes/extract", label: "Athlete Extract", icon: Upload, roles: MANAGE_ROLES },
   { to: "/athletes/import", label: "Import Athletes", icon: Upload, roles: ["SUPERADMIN"] },
   { to: "/users", label: "Users", icon: UserCog, roles: MANAGE_ROLES, accent: "belt-blue" },

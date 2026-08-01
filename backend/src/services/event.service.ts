@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { prisma } from "../lib/prisma.js";
 import { CreateEvent, UpdateEvent, CreateDivision, UpdateDivision, CreateWeightClass, UpdateWeightClass } from "../utils/validators.js";
 import { ageOn } from "../utils/eligibility.js";
@@ -6,6 +7,39 @@ import type { Gender } from "@prisma/client";
 
 export class EventService {
   // ============ Events ============
+
+  /** Aggregate readiness snapshot for the event hub Overview. */
+  static async getReadiness(eventId: string) {
+    const [statusGroups, generated, completed, locked, approvedTotal, checkedIn, mats, divisions] =
+      await Promise.all([
+        prisma.entry.groupBy({ by: ["status"], where: { eventId }, _count: true }),
+        prisma.draw.count({ where: { eventId } }),
+        prisma.draw.count({ where: { eventId, status: "COMPLETED" } }),
+        prisma.draw.count({ where: { eventId, locked: true } }),
+        prisma.entry.count({ where: { eventId, status: "APPROVED" } }),
+        prisma.entry.count({ where: { eventId, status: "APPROVED", checkedIn: true } }),
+        prisma.mat.count({ where: { eventId } }),
+        prisma.division.count({ where: { eventId } }),
+      ]);
+
+    const byStatus = (s: string) => statusGroups.find((g) => g.status === s)?._count ?? 0;
+    const entries = {
+      draft: byStatus("DRAFT"),
+      submitted: byStatus("SUBMITTED"),
+      approved: byStatus("APPROVED"),
+      returned: byStatus("RETURNED"),
+      total: statusGroups.reduce((sum, g) => sum + g._count, 0),
+    };
+
+    return {
+      entries,
+      draws: { generated, completed, locked },
+      checkin: { done: checkedIn, total: approvedTotal },
+      mats,
+      divisions,
+    };
+  }
+
   static async getAll() {
     return prisma.event.findMany({
       orderBy: { startDate: "desc" },
@@ -52,6 +86,16 @@ export class EventService {
       where: { id },
       data: { status }
     });
+  }
+
+  /**
+   * Enable/disable (and rotate) the read-only public board token. Enabling
+   * always mints a fresh token, so re-enabling revokes any previously shared
+   * link. Disabling clears it entirely.
+   */
+  static async setPublicAccess(id: string, enabled: boolean) {
+    const publicToken = enabled ? randomBytes(12).toString("hex") : null;
+    return prisma.event.update({ where: { id }, data: { publicToken } });
   }
 
   static async getActiveEvents() {
@@ -163,56 +207,43 @@ export class EventService {
       throw { status: 400, message: "Division does not belong to this event" };
     }
 
-    console.log('=== ELIGIBLE ATHLETES DEBUG ===');
-    console.log('Event:', { id: event.id, name: event.name, startDate: event.startDate });
-    console.log('Division:', {
-      id: division.id,
-      name: division.name,
-      category: division.category,
-      gender: division.gender,
-      minAge: division.minAge,
-      maxAge: division.maxAge
-    });
-    console.log('Filter clubId:', clubId || 'none');
-
-    // Get all athletes (optionally filtered by club)
-    const where: any = {};
-    if (clubId) where.clubId = clubId;
+    // Coarse DOB window for the DB query; the exact calendar-age check below
+    // (ageOn) is authoritative. One day of slack on each side covers
+    // month/day and leap-day boundaries.
+    const maxDob = new Date(event.startDate);
+    maxDob.setFullYear(maxDob.getFullYear() - division.minAge);
+    maxDob.setDate(maxDob.getDate() + 1);
+    const minDob = new Date(event.startDate);
+    minDob.setFullYear(minDob.getFullYear() - division.maxAge - 1);
+    minDob.setDate(minDob.getDate() - 1);
 
     const athletes = await prisma.athlete.findMany({
-      where,
-      include: {
+      where: {
+        ...(clubId ? { clubId } : {}),
+        gender: division.gender,
+        isActive: true,
+        dob: { gte: minDob, lte: maxDob },
+      },
+      select: {
+        id: true,
+        clubId: true,
+        firstName: true,
+        lastName: true,
+        dob: true,
+        gender: true,
+        nationality: true,
+        weightKg: true,
         club: { select: { name: true } },
         belt: { select: { name: true, colour: true } },
       },
       orderBy: [{ lastName: "asc" }, { firstName: "asc" }]
     });
 
-    console.log('Total athletes fetched:', athletes.length);
-
-    // Filter by age and gender eligibility
     const eligible = athletes.filter(athlete => {
       const age = ageOn(event.startDate, athlete.dob);
-
-      // Check gender
-      if (athlete.gender !== division.gender) {
-        console.log(`❌ ${athlete.firstName} ${athlete.lastName}: Gender mismatch (${athlete.gender} vs ${division.gender})`);
-        return false;
-      }
-
-      // Check age
-      if (age < division.minAge || age > division.maxAge) {
-        console.log(`❌ ${athlete.firstName} ${athlete.lastName}: Age ${age} not in range ${division.minAge}-${division.maxAge}`);
-        return false;
-      }
-
-      console.log(`✅ ${athlete.firstName} ${athlete.lastName}: Eligible (age ${age}, gender ${athlete.gender})`);
-      return true;
+      return age >= division.minAge && age <= division.maxAge;
     });
 
-    console.log('Eligible athletes after filtering:', eligible.length);
-
-    // Get existing entries for this division
     const existingEntries = await prisma.entry.findMany({
       where: {
         eventId,
@@ -221,21 +252,13 @@ export class EventService {
       select: { athleteId: true }
     });
 
-    console.log('Existing entries in this division:', existingEntries.length);
-
     const enteredAthleteIds = new Set(existingEntries.map(e => e.athleteId).filter(Boolean));
 
-    // Return athletes with eligibility info and age
-    const result = eligible.map(athlete => ({
+    return eligible.map(athlete => ({
       ...athlete,
       age: ageOn(event.startDate, athlete.dob),
       isEntered: enteredAthleteIds.has(athlete.id),
     }));
-
-    console.log('Returning', result.length, 'athletes');
-    console.log('==============================\n');
-
-    return result;
   }
 
   static async updateConfig(eventId: string, config: any) {

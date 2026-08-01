@@ -1,0 +1,100 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A newer push to the same branch makes the in-flight run redundant.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (typecheck, build, draw engine)
+    runs-on: ubuntu-latest
+
+    # test-draws.ts exercises the real draw engine against Postgres; there is
+    # no in-memory substitute, so CI gets its own throwaway database.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: karate
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/karate
+      # scripts/test-draws.ts writes audit rows attributed to a real user, and
+      # the header stub creates one. Never enable this outside CI.
+      ALLOW_DEV_AUTH: 'true'
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Apply migrations
+        # deploy, not dev: it applies the committed migration files exactly and
+        # never invents one, so a missing migration fails here instead of in prod.
+        run: npx prisma migrate deploy
+
+      - name: Verify migration history reproduces the schema
+        # Catches schema.prisma edits that were never given a migration, and
+        # out-of-band DDL. Empty output means the two agree.
+        run: |
+          npx prisma migrate diff \
+            --from-schema-datasource prisma/schema.prisma \
+            --to-schema-datamodel prisma/schema.prisma \
+            --exit-code
+
+      - run: npx tsc --noEmit
+
+      - run: npm run build
+
+      - name: Draw engine checks
+        run: npx tsx scripts/test-draws.ts
+
+  frontend:
+    name: Frontend (typecheck, build)
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - run: npm ci
+
+      - run: npx tsc --noEmit
+
+      - run: npm run build

@@ -16,6 +16,7 @@ import {
   WeightClassIdParam,
   EligibleAthletesQuery,
   ApplyTemplate,
+  SetPublicAccess,
 } from "../utils/validators.js";
 
 export const router = Router();
@@ -38,6 +39,15 @@ router.get("/", async (req, res, next) => {
 // list available division/weight-class templates (any logged user can read)
 router.get("/templates", (_req, res) => {
   res.json(EventService.listTemplates());
+});
+
+// readiness snapshot for the event hub (any logged user)
+router.get("/:id/readiness", validate(IdParam, "params"), async (req, res, next) => {
+  try {
+    res.json(await EventService.getReadiness(getParam(req.params.id)));
+  } catch (err) {
+    next(err);
+  }
 });
 
 // get single event by id
@@ -75,6 +85,16 @@ router.put("/:id", requireRoles("SUPERADMIN", "ADMIN"), validateMultiple({ param
 router.patch("/:id/status", requireRoles("SUPERADMIN", "ADMIN"), validateMultiple({ params: IdParam, body: UpdateEventStatus }), async (req, res, next) => {
   try {
     const event = await EventService.updateStatus(getParam(req.params.id), req.body.status);
+    res.json(event);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// enable/disable (rotate) the read-only public board token (admin only)
+router.post("/:id/public-token", requireRoles("SUPERADMIN", "ADMIN"), validateMultiple({ params: IdParam, body: SetPublicAccess }), async (req, res, next) => {
+  try {
+    const event = await EventService.setPublicAccess(getParam(req.params.id), req.body.enabled);
     res.json(event);
   } catch (err) {
     next(err);
@@ -187,11 +207,20 @@ router.delete("/weights/:weightClassId", requireRoles("SUPERADMIN", "ADMIN"), va
 // ============ Eligible Athletes ============
 
 // get eligible athletes for a division
-router.get("/:id/divisions/:divisionId/eligible-athletes", validate(EligibleAthletesQuery, "query"), async (req, res, next) => {
+router.get("/:id/divisions/:divisionId/eligible-athletes", requireRoles("SUPERADMIN", "ADMIN", "CLUB_MANAGER", "COACH"), validate(EligibleAthletesQuery, "query"), async (req, res, next) => {
   try {
     const eventId = getParam(req.params.id);
     const divisionId = getParam(req.params.divisionId);
-    const { clubId } = req.query as { clubId?: string };
+
+    // Non-admin roles are always scoped to their own club, ignoring the query param.
+    const isAdmin = req.user!.role === "SUPERADMIN" || req.user!.role === "ADMIN";
+    let clubId: string | undefined;
+    if (isAdmin) {
+      clubId = (req.query as { clubId?: string }).clubId;
+    } else {
+      if (!req.user!.clubId) return res.status(400).json({ error: "User has no club assigned" });
+      clubId = req.user!.clubId;
+    }
 
     const athletes = await EventService.getEligibleAthletes(eventId, divisionId, clubId);
     res.json(athletes);

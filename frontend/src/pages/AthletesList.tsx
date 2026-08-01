@@ -11,6 +11,7 @@ import { AthletesDataTable } from "@/components/athletes/AthletesDataTable"
 import { AthleteCard } from "@/components/athletes/AthleteCard"
 import {
   AthletesFiltersSheet,
+  defaultFilters,
   type AthletesFilters,
 } from "@/components/athletes/AthletesFiltersSheet"
 import { Button } from "@/components/ui/button"
@@ -25,7 +26,17 @@ import {
   listAllAthletes,
   listAthletes,
 } from "@/lib/athletes"
+import { listBelts } from "@/lib/belts"
 import { listClubs } from "@/lib/clubs"
+
+const calculateAge = (dob: string, refDate = new Date()) => {
+  const birth = new Date(dob)
+  if (Number.isNaN(birth.getTime())) return null
+  let age = refDate.getFullYear() - birth.getFullYear()
+  const m = refDate.getMonth() - birth.getMonth()
+  if (m < 0 || (m === 0 && refDate.getDate() < birth.getDate())) age--
+  return age >= 0 ? age : null
+}
 
 const AthletesListPage = () => {
   const { role, clubId } = useAuth()
@@ -40,15 +51,18 @@ const AthletesListPage = () => {
   const showClubFilter = role === "SUPERADMIN" || role === "ADMIN"
 
   const [q, setQ] = useState("")
-  const [filters, setFilters] = useState<AthletesFilters>({
-    clubId: clubId || "",
-    showInactive: false,
-  })
+  const [filters, setFilters] = useState<AthletesFilters>(() => defaultFilters(clubId))
 
   const { data: clubs = [] } = useQuery({
     queryKey: ["clubs"],
     queryFn: listClubs,
     enabled: canManage && showClubFilter,
+  })
+
+  const { data: belts = [] } = useQuery({
+    queryKey: ["belts"],
+    queryFn: listBelts,
+    enabled: canManage,
   })
 
   const {
@@ -77,19 +91,31 @@ const AthletesListPage = () => {
 
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase()
-    if (!s) return athletes
+    const minAge = filters.minAge ? Number(filters.minAge) : null
+    const maxAge = filters.maxAge ? Number(filters.maxAge) : null
+    const now = new Date()
     return athletes.filter((a) => {
-      const nm = `${a.firstName} ${a.lastName}`.toLowerCase()
-      const clubName = a.club?.name?.toLowerCase() ?? ""
-      const beltName = a.belt?.name?.toLowerCase() ?? ""
-      return (
-        nm.includes(s) ||
-        clubName.includes(s) ||
-        beltName.includes(s) ||
-        (a.nationality ?? "").toLowerCase().includes(s)
-      )
+      if (filters.beltId && a.beltId !== filters.beltId) return false
+      if (minAge !== null || maxAge !== null) {
+        const age = calculateAge(a.dob, now)
+        if (minAge !== null && (age ?? Infinity) < minAge) return false
+        if (maxAge !== null && (age ?? -Infinity) > maxAge) return false
+      }
+      if (s) {
+        const nm = `${a.firstName} ${a.lastName}`.toLowerCase()
+        const clubName = a.club?.name?.toLowerCase() ?? ""
+        const beltName = a.belt?.name?.toLowerCase() ?? ""
+        if (
+          !nm.includes(s) &&
+          !clubName.includes(s) &&
+          !beltName.includes(s) &&
+          !(a.nationality ?? "").toLowerCase().includes(s)
+        )
+          return false
+      }
+      return true
     })
-  }, [athletes, q])
+  }, [athletes, q, filters.beltId, filters.minAge, filters.maxAge])
 
   const deleteMutation = useMutation({
     mutationFn: deleteAthlete,
@@ -140,6 +166,7 @@ const AthletesListPage = () => {
         filters={filters}
         onChange={setFilters}
         clubs={clubs}
+        belts={belts}
         showClubFilter={showClubFilter}
       />
     </div>

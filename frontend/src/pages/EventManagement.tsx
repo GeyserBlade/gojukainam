@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import {
   DndContext,
@@ -11,6 +11,7 @@ import {
 import { SortableContext, verticalListSortingStrategy, useSortable } from "@dnd-kit/sortable"
 import { CSS } from "@dnd-kit/utilities"
 import {
+  AlertTriangle,
   Inbox,
   PlusCircle,
   Search,
@@ -18,9 +19,9 @@ import {
 } from "lucide-react"
 
 import { useAuth } from "@/contexts/AuthContext"
+import { useSelectedEvent } from "@/contexts/SelectedEventContext"
 import { useToast, useApiErrorToast } from "@/components/Toast"
 import { useConfirm } from "@/components/ConfirmDialog"
-import { AppShell } from "@/components/layout/AppShell"
 import { BeltBadge } from "@/components/athletes/BeltBadge"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -41,6 +42,7 @@ import {
   getEvent,
   getDivisions,
   getEligibleAthletes,
+  registrationState,
   type EligibleAthlete,
 } from "@/lib/events"
 import { EntryService, type Entry } from "@/lib/entries"
@@ -207,6 +209,11 @@ const EnteredEntryCard: React.FC<EnteredEntryCardProps> = ({ entry, onDelete, is
             {beltName && ` · ${beltName}`}
             {entry.weightClass && ` · ${entry.weightClass.name}`}
           </p>
+          {entry.status === "RETURNED" && entry.statusReason && (
+            <p className="mt-1 text-xs text-flag-red">
+              <span className="font-medium">Returned:</span> {entry.statusReason}
+            </p>
+          )}
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
           <Badge
@@ -249,7 +256,7 @@ const EventManagement = () => {
   const confirm = useConfirm()
   const isAdmin = role === "SUPERADMIN" || role === "ADMIN"
 
-  const [selectedEventId, setSelectedEventId] = useState<string>("")
+  const { eventId: selectedEventId } = useSelectedEvent()
   const [selectedDivisionId, setSelectedDivisionId] = useState<string>("")
   const [filterClubId, setFilterClubId] = useState<string>(clubId || "")
   const [searchQuery, setSearchQuery] = useState("")
@@ -257,10 +264,11 @@ const EventManagement = () => {
   const [selectedWeightClassId, setSelectedWeightClassId] = useState<string>("")
   const [draggedAthlete, setDraggedAthlete] = useState<EligibleAthlete | null>(null)
 
-  const { data: events = [] } = useQuery({
-    queryKey: ["events", "active"],
-    queryFn: () => listEvents(true),
-  })
+  // Reset division/weight when the hub switches events.
+  useEffect(() => {
+    setSelectedDivisionId("")
+    setSelectedWeightClassId("")
+  }, [selectedEventId])
 
   const { data: clubs = [] } = useQuery({
     queryKey: ["clubs"],
@@ -299,8 +307,11 @@ const EventManagement = () => {
 
   const createEntryMutation = useMutation({
     mutationFn: async (athleteId: string) => {
-      const effectiveClubId = filterClubId || clubId
-      if (!effectiveClubId) throw new Error("Club ID is required")
+      // The entry belongs to the athlete's own club; the club filter is
+      // only a view filter and admins may have no club at all.
+      const athlete = eligibleAthletes.find((a) => a.id === athleteId)
+      const effectiveClubId = athlete?.clubId || filterClubId || clubId
+      if (!effectiveClubId) throw new Error("Could not determine the athlete's club")
       const entryData: Parameters<typeof EntryService.create>[0] = {
         eventId: selectedEventId,
         clubId: effectiveClubId,
@@ -344,6 +355,10 @@ const EventManagement = () => {
 
   const selectedDivision = divisions.find((d) => d.id === selectedDivisionId)
 
+  // Clubs can only add entries while registration is open; admins bypass it.
+  const reg = registrationState(selectedEvent)
+  const addBlocked = !isAdmin && !reg.open
+
   const handleDragStart = (event: DragStartEvent) => {
     const athlete = eligibleAthletes.find((a) => a.id === event.active.id)
     setDraggedAthlete(athlete || null)
@@ -351,6 +366,7 @@ const EventManagement = () => {
 
   const handleDragEnd = (event: DragEndEvent) => {
     setDraggedAthlete(null)
+    if (addBlocked) return
     if (event.over?.id === "drop-zone") {
       const athleteId = event.active.id as string
       const athlete = eligibleAthletes.find((a) => a.id === athleteId)
@@ -361,6 +377,7 @@ const EventManagement = () => {
   }
 
   const handleAddEntry = (athleteId: string) => {
+    if (addBlocked) return
     const athlete = eligibleAthletes.find((a) => a.id === athleteId)
     if (athlete && !athlete.isEntered) createEntryMutation.mutate(athleteId)
   }
@@ -380,15 +397,13 @@ const EventManagement = () => {
 
   if (!isAdmin && !clubId) {
     return (
-      <AppShell title="Entry management">
-        <Card>
-          <CardContent className="py-10 text-center">
-            <p className="text-sm text-muted-foreground">
-              You don't have permission to access this page.
-            </p>
-          </CardContent>
-        </Card>
-      </AppShell>
+      <Card>
+        <CardContent className="py-10 text-center">
+          <p className="text-sm text-muted-foreground">
+            You don't have permission to access this page.
+          </p>
+        </CardContent>
+      </Card>
     )
   }
 
@@ -398,43 +413,18 @@ const EventManagement = () => {
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
     >
-      <AppShell title="Entry management">
-        <div className="mb-4 sm:mb-6">
-          <h1 className="font-display text-3xl sm:text-4xl tracking-wider">
-            ENTRY MANAGEMENT
-          </h1>
+      <>
+        <div className="mb-4">
+          <h2 className="font-display text-xl tracking-wide sm:text-2xl">Entries</h2>
           <p className="text-sm text-muted-foreground mt-1">
             Add and manage athlete entries into event divisions.
           </p>
         </div>
 
-        {/* Event selection */}
-        <Card className="mb-4">
-          <CardContent className="space-y-3">
-            <div>
-              <Label className="mb-1.5">Event</Label>
-              <Select
-                value={selectedEventId || "none"}
-                onValueChange={(v) => {
-                  setSelectedEventId(v === "none" ? "" : v)
-                  setSelectedDivisionId("")
-                }}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="-- Select event --" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">-- Select event --</SelectItem>
-                  {events.map((event) => (
-                    <SelectItem key={event.id} value={event.id}>
-                      {event.name} — {new Date(event.startDate).toLocaleDateString()}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            {isAdmin && (
+        {/* Club filter (admin) */}
+        {isAdmin && (
+          <Card className="mb-4">
+            <CardContent className="space-y-3">
               <div>
                 <Label className="mb-1.5">Filter by club (optional)</Label>
                 <Select
@@ -454,9 +444,21 @@ const EventManagement = () => {
                   </SelectContent>
                 </Select>
               </div>
-            )}
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+        )}
+
+        {selectedEventId && addBlocked && reg.message && (
+          <div className="mb-4 flex items-start gap-2 rounded-md border border-belt-orange/30 bg-belt-orange/10 px-3 py-2.5 text-sm">
+            <AlertTriangle className="mt-0.5 size-4 shrink-0 text-belt-orange" />
+            <div>
+              <span className="font-medium">{reg.message}</span>{" "}
+              <span className="text-muted-foreground">
+                Adding entries is disabled until the organizer reopens registration.
+              </span>
+            </div>
+          </div>
+        )}
 
         {selectedEventId && (
           <Card className="mb-4">
@@ -626,7 +628,7 @@ const EventManagement = () => {
                         key={athlete.id}
                         athlete={athlete}
                         onAdd={() => handleAddEntry(athlete.id)}
-                        isAdding={createEntryMutation.isPending}
+                        isAdding={createEntryMutation.isPending || addBlocked}
                       />
                     ))}
                   </div>
@@ -713,7 +715,7 @@ const EventManagement = () => {
                             key={athlete.id}
                             athlete={athlete}
                             onAdd={() => handleAddEntry(athlete.id)}
-                            isAdding={createEntryMutation.isPending}
+                            isAdding={createEntryMutation.isPending || addBlocked}
                           />
                         ))}
                       </SortableContext>
@@ -794,7 +796,7 @@ const EventManagement = () => {
             </div>
           </>
         )}
-      </AppShell>
+      </>
 
       <DragOverlay>
         {draggedAthlete ? (

@@ -55,7 +55,12 @@ export const CreateEntry = z.object({
 export const UpdateEntryStatus = z.object({
   id: z.string(),
   status: z.enum(["SUBMITTED","APPROVED","RETURNED"]),
-  reason: z.string().optional(), // stored in AuditLog
+  reason: z.string().optional(), // stored in AuditLog + on entry when RETURNED
+});
+
+export const BulkSubmitEntries = z.object({
+  eventId: z.string(),
+  ids: z.array(z.string()).min(1),
 });
 
 export const DocumentTypeEnum = z.enum([
@@ -138,6 +143,104 @@ export const UpdateClub = CreateClub.partial();
 // ---------------- Query/Param Schemas ----------------
 export const IdParam = z.object({
   id: z.string().min(1),
+});
+
+export const EventIdQuery = z.object({
+  eventId: z.string().min(1),
+});
+
+export const CreateDraw = z.object({
+  eventId: z.string().min(1),
+  divisionId: z.string().min(1),
+  weightClassId: z.string().min(1).optional().nullable(),
+});
+
+export const RegenerateDraw = z.object({
+  force: z.boolean().optional(),
+});
+
+export const SetBoutWinner = z.object({
+  winnerEntryId: z.string().min(1).nullable(),
+});
+
+export const BOUT_OUTCOMES = ["POINTS", "GAP", "SENSHU", "HANTEI", "HANSOKU", "KIKEN"] as const;
+
+export const SetBoutScore = z.object({
+  winnerEntryId: z.string().min(1),
+  outcome: z.enum(BOUT_OUTCOMES),
+  akaScore: z.number().int().min(0).max(99),
+  aoScore: z.number().int().min(0).max(99),
+  scoreJson: z.string().max(20000).optional(),
+});
+
+export const BoutParams = z.object({
+  id: z.string().min(1),
+  boutId: z.string().min(1),
+});
+
+export const SetDrawLock = z.object({
+  locked: z.boolean(),
+});
+
+// ---- Seeding ----
+// Capped at a flat 64 rather than the entry count, which moves as entries are
+// approved or returned. Seeds are a relative ordering and get compacted to
+// dense ranks at draw time, so the exact ceiling is not load-bearing.
+export const SeedValue = z.number().int().min(1).max(64).nullable();
+
+export const CategorySeedsQuery = z.object({
+  eventId: z.string().min(1),
+  divisionId: z.string().min(1),
+  weightClassId: z.string().min(1).optional(),
+});
+
+export const SetCategorySeeds = z.object({
+  eventId: z.string().min(1),
+  divisionId: z.string().min(1),
+  weightClassId: z.string().min(1).optional().nullable(),
+  // Empty array is valid: it clears every seed in the category.
+  seeds: z.array(z.object({ entryId: z.string().min(1), seed: SeedValue })).max(256),
+});
+
+export const SetEntrySeed = z.object({
+  seed: SeedValue,
+});
+
+// ---- Day-of run board ----
+export const CreateMat = z.object({
+  eventId: z.string().min(1),
+  name: z.string().min(1).max(60),
+  order: z.number().int().min(0).optional(),
+});
+
+export const UpdateMat = z.object({
+  name: z.string().min(1).max(60).optional(),
+  order: z.number().int().min(0).optional(),
+});
+
+export const MatIdParam = z.object({
+  matId: z.string().min(1),
+});
+
+export const AssignDrawMat = z.object({
+  matId: z.string().min(1).nullable(),
+  matOrder: z.number().int().min(0).optional().nullable(),
+});
+
+export const SetBoutMat = z.object({
+  matId: z.string().min(1).nullable(),
+});
+
+export const ReorderMatQueue = z.object({
+  boutIds: z.array(z.string().min(1)).min(1),
+});
+
+export const SetPublicAccess = z.object({
+  enabled: z.boolean(),
+});
+
+export const SetCheckIn = z.object({
+  checkedIn: z.boolean(),
 });
 
 export const ClubIdQuery = z.object({

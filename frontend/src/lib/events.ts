@@ -13,6 +13,7 @@ export interface Event {
   regClose: string;
   status: EventStatus;
   configJson: string;
+  publicToken?: string | null;
   createdAt: string;
   updatedAt: string;
   _count?: {
@@ -59,6 +60,7 @@ export interface WeightClass {
 
 export interface EligibleAthlete {
   id: string;
+  clubId: string;
   firstName: string;
   lastName: string;
   dob: string;
@@ -120,6 +122,48 @@ export async function getEvent(id: string): Promise<Event> {
   return res.data;
 }
 
+// ---- Registration window (mirrors backend utils/regWindow.ts) ----
+// Registration is open only when the event is ACTIVE and now ∈ [regOpen, regClose].
+// Clubs are held to this; admins bypass it server-side.
+export interface RegistrationState {
+  open: boolean;
+  message: string | null;
+}
+
+const fmtRegDate = (iso: string) =>
+  new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric" }).format(
+    new Date(iso),
+  );
+
+export function registrationState(
+  event: Pick<Event, "status" | "regOpen" | "regClose"> | undefined,
+  now: Date = new Date(),
+): RegistrationState {
+  if (!event) return { open: false, message: null };
+  if (event.status === "DRAFT")
+    return { open: false, message: "Registration hasn't opened yet — the event is still being set up." };
+  if (event.status === "CLOSED" || event.status === "ARCHIVED")
+    return { open: false, message: "Registration is closed for this event." };
+  if (now < new Date(event.regOpen))
+    return { open: false, message: `Registration opens on ${fmtRegDate(event.regOpen)}.` };
+  if (now > new Date(event.regClose))
+    return { open: false, message: `Registration closed on ${fmtRegDate(event.regClose)}.` };
+  return { open: true, message: null };
+}
+
+export interface EventReadiness {
+  entries: { draft: number; submitted: number; approved: number; returned: number; total: number };
+  draws: { generated: number; completed: number; locked: number };
+  checkin: { done: number; total: number };
+  mats: number;
+  divisions: number;
+}
+
+export async function getReadiness(id: string): Promise<EventReadiness> {
+  const res = await api.get(`/events/${id}/readiness`);
+  return res.data;
+}
+
 export async function createEvent(data: CreateEventDto): Promise<Event> {
   const res = await api.post("/events", data);
   return res.data;
@@ -137,6 +181,12 @@ export async function updateEventStatus(id: string, status: EventStatus): Promis
 
 export async function deleteEvent(id: string): Promise<void> {
   await api.delete(`/events/${id}`);
+}
+
+// Enable/disable (and rotate) the read-only public board token.
+export async function setPublicAccess(id: string, enabled: boolean): Promise<Event> {
+  const res = await api.post(`/events/${id}/public-token`, { enabled });
+  return res.data;
 }
 
 // ============ Divisions ============

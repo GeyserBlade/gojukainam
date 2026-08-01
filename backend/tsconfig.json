@@ -8,14 +8,7 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "outDir": "dist",
-    "rootDir": "./src",
-    "baseUrl": "./src",
-    "paths": {
-      "@routes/*": ["routes/*"],
-      "@utils/*": ["utils/*"],
-      "@lib/*": ["lib/*"]
-    },
-    "ignoreDeprecations": "6.0"
- },
+    "rootDir": "./src"
+  },
   "include": ["src"]
 }

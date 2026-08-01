@@ -11,6 +11,5 @@ interface ImportMeta {
 
 declare const __APP_VERSION__: string
 
-// @fontsource packages ship CSS only, with no type declarations, and TS 6
-// requires a declaration even for a side-effect import.
-declare module "@fontsource-variable/inter"
+// Side-effect CSS-only packages imported without a file extension
+declare module '@fontsource-variable/inter'

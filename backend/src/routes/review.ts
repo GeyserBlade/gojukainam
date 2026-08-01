@@ -67,7 +67,8 @@ router.post("/bulk", requireRoles("SUPERADMIN","ADMIN"), async (req, res, next) 
     const result = await prisma.$transaction(async (tx) => {
       const updated = await tx.entry.updateMany({
         where: { eventId, id: { in: ids }, status: "SUBMITTED" },
-        data: { status }
+        // Record the reason on RETURNED entries so clubs see it; clear on APPROVE.
+        data: { status, statusReason: status === "RETURNED" ? (reason ?? null) : null }
       });
       await tx.auditLog.create({
         data: {

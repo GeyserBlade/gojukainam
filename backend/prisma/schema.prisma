@@ -64,6 +64,17 @@ enum EventStatus {
   ARCHIVED    // Historical event
 }
 
+enum DrawStatus {
+  DRAWN       // Draw generated, no results captured yet
+  IN_PROGRESS // At least one result captured
+  COMPLETED   // All placements decided
+}
+
+enum BoutPhase {
+  MAIN
+  REPECHAGE
+}
+
 enum DocumentType {
   IDENTITY_DOCUMENT
   CLUB_MEMBERSHIP_FORM
@@ -152,6 +163,9 @@ model Event {
   status     EventStatus @default(ACTIVE)
   /// JSON string of your YAML config (persisted snapshot)
   configJson String
+  /// When set, a read-only public board is reachable at /board/<token>.
+  /// null = public board disabled. Rotating the token revokes old links.
+  publicToken String? @unique
 
   divisions     Division[]
   weightClasses WeightClass[]
@@ -159,6 +173,8 @@ model Event {
   teams         Team[]
   invoices      Invoice[]
   documents     Document[]
+  draws         Draw[]
+  mats          Mat[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -186,6 +202,7 @@ model Division {
   entries       Entry[]
   teams         Team[]
   weightClasses WeightClass[] // Only populated for KUMITE divisions
+  draws         Draw[]
 
   @@index([eventId, key, gender])
   @@index([eventId, category, gender])
@@ -203,6 +220,7 @@ model WeightClass {
   maxKg      Float?
 
   entries Entry[]
+  draws   Draw[]
 
   @@index([eventId, gender])
   @@index([divisionId])
@@ -284,9 +302,26 @@ model Entry {
   weightClassId String?
   weightClass   WeightClass? @relation(fields: [weightClassId], references: [id])
 
-  status   EntryStatus @default(DRAFT)
-  feeCents Int         @default(0)
-  notes    String?
+  status       EntryStatus @default(DRAFT)
+  /// Admin's reason when an entry is RETURNED; shown to the club. Cleared on submit/approve.
+  statusReason String?
+  /// Day-of presence flag; ticked at check-in, used by the run board.
+  checkedIn    Boolean     @default(false)
+  /// Manual seeding rank within this entry's category (division + weight class).
+  /// A relative ordering rather than a literal bracket rank: gaps left by a
+  /// withdrawn seeded athlete are compacted to dense ranks 1..N at draw time.
+  /// null = unseeded, and all unseeded entries are equal. Uniqueness within a
+  /// category is enforced in the service layer, not by @@unique — Postgres
+  /// treats NULL weightClassId rows as distinct, so a DB constraint would
+  /// silently not apply to KATA categories at all.
+  seed         Int?
+  feeCents     Int         @default(0)
+  notes        String?
+
+  drawSlots  DrawSlot[]
+  boutsAsAka Bout[]     @relation("BoutAka")
+  boutsAsAo  Bout[]     @relation("BoutAo")
+  boutsWon   Bout[]     @relation("BoutWinner")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -299,6 +334,13 @@ model Entry {
   // Fast filters
   @@index([eventId, divisionId, entryType, status])
   @@index([clubId, status])
+  // Foreign-key indexes: Postgres does not create these automatically, and
+  // without them every cascade/restrict check and every "entries for this
+  // athlete/team/division/weight class" lookup sequentially scans Entry.
+  @@index([athleteId])
+  @@index([teamId])
+  @@index([divisionId])
+  @@index([weightClassId])
 }
 
 model Team {
@@ -364,6 +406,122 @@ model AuditLog {
   @@index([entityType, entityId])
   @@index([createdAt])
   @@index([userId])
+}
+
+model Draw {
+  id            String       @id @default(cuid())
+  eventId       String
+  event         Event        @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  divisionId    String
+  division      Division     @relation(fields: [divisionId], references: [id], onDelete: Cascade)
+  weightClassId String?
+  weightClass   WeightClass? @relation(fields: [weightClassId], references: [id], onDelete: Cascade)
+
+  size   Int // bracket size: 2, 4, 8, 16, 32
+  status DrawStatus @default(DRAWN)
+  /// When true the bracket is frozen: regenerate/delete are blocked until unlocked.
+  locked Boolean    @default(false)
+
+  // Day-of running: which mat this category runs on, and its order within the mat.
+  matId    String?
+  mat      Mat?    @relation(fields: [matId], references: [id], onDelete: SetNull)
+  matOrder Int?
+
+  slots DrawSlot[]
+  bouts Bout[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // One draw per category (division, or division+weight class for kumite).
+  // Postgres allows multiple NULL weightClassId rows, so the service also
+  // guards against duplicates before creating.
+  @@unique([eventId, divisionId, weightClassId])
+  @@index([eventId])
+  // FK index: the run-day board groups draws by mat.
+  @@index([matId])
+}
+
+model DrawSlot {
+  id       String @id @default(cuid())
+  drawId   String
+  draw     Draw   @relation(fields: [drawId], references: [id], onDelete: Cascade)
+  position Int // 1..size; positions without a row are byes
+  entryId  String
+  entry    Entry  @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  /// Dense seed rank (1..N) actually used when this draw was generated; null =
+  /// drawn as unseeded. Snapshotted so the bracket keeps showing what was drawn
+  /// even if Entry.seed changes afterwards, and so seed drift is detectable at
+  /// all: tier placement is randomised, so the seeding cannot be inferred from
+  /// `position` alone.
+  seed     Int?
+
+  @@unique([drawId, position])
+  @@unique([drawId, entryId])
+  // FK index: entry deletion cascades here, and the entry-detail view looks up
+  // an athlete's slots across draws (the [drawId, entryId] unique can't serve
+  // an entryId-only lookup).
+  @@index([entryId])
+}
+
+model Bout {
+  id     String    @id @default(cuid())
+  drawId String
+  draw   Draw      @relation(fields: [drawId], references: [id], onDelete: Cascade)
+  phase  BoutPhase @default(MAIN)
+  // MAIN: round 1..log2(size), position = 0-based bout index within the round.
+  // REPECHAGE: round = stage within the side, position = side (0 = top half, 1 = bottom half).
+  round    Int
+  position Int
+
+  akaEntryId    String?
+  akaEntry      Entry?  @relation("BoutAka", fields: [akaEntryId], references: [id], onDelete: SetNull)
+  aoEntryId     String?
+  aoEntry       Entry?  @relation("BoutAo", fields: [aoEntryId], references: [id], onDelete: SetNull)
+  winnerEntryId String?
+  winnerEntry   Entry?  @relation("BoutWinner", fields: [winnerEntryId], references: [id], onDelete: SetNull)
+
+  // Optional WKF kumite scoring detail (winner-only results leave these null)
+  akaScore  Int?
+  aoScore   Int?
+  outcome   String? // POINTS | GAP | SENSHU | HANTEI | HANSOKU | KIKEN
+  scoreJson String? // full per-side breakdown + action log
+
+  // Per-bout mat override; null = inherit the draw's mat. Survives recompute
+  // (recompute never writes matId), lost only if the bout row is deleted.
+  matId String?
+  mat   Mat?   @relation(fields: [matId], references: [id], onDelete: SetNull)
+
+  // Manual within-mat running order set by the organizer on run day. null =
+  // not manually ordered (sorts after ordered bouts, by natural bracket order).
+  // Survives recompute like matId; lost only if the bout row is deleted.
+  queueOrder Int?
+
+  @@unique([drawId, phase, round, position])
+  @@index([drawId])
+  // FK indexes: the three Entry relations all cascade to SetNull on entry
+  // delete, and results/board queries filter bouts by competitor or by mat.
+  @@index([akaEntryId])
+  @@index([aoEntryId])
+  @@index([winnerEntryId])
+  @@index([matId])
+}
+
+// A competition mat/tatami within an event. Categories (draws) are planned
+// onto mats for day-of running; individual bouts may override the mat.
+model Mat {
+  id      String @id @default(cuid())
+  eventId String
+  event   Event  @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  name    String
+  order   Int    @default(0)
+
+  draws Draw[]
+  bouts Bout[]
+
+  createdAt DateTime @default(now())
+
+  @@index([eventId])
 }
 
 model Document {
