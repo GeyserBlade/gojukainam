@@ -1,0 +1,43 @@
+version: 2
+
+updates:
+  # Both package.json files are in subdirectories, so each needs its own entry —
+  # a single root entry would find nothing.
+  - package-ecosystem: npm
+    directory: /backend
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      # Patch and minor bumps are the ones that are safe to take together; this
+      # keeps them to one PR a week instead of a dozen.
+      backend-minor-and-patch:
+        update-types: [minor, patch]
+    ignore:
+      # exceljs 4.x pins an old archiver (-> glob -> minimatch -> brace-expansion)
+      # and uuid 8. The only "fix" npm offers is a downgrade to exceljs 3.4.0,
+      # which breaks the Excel export. Nothing here is reachable from user input:
+      # the glob DoS needs attacker-controlled patterns and the uuid bounds check
+      # only applies when a buffer is passed. Revisit if exceljs 5 ships.
+      - dependency-name: exceljs
+        update-types: [version-update:semver-major]
+
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      frontend-minor-and-patch:
+        update-types: [minor, patch]
+    ignore:
+      # react-router 8 is a major rewrite; take it deliberately, not automatically.
+      - dependency-name: react-router
+        update-types: [version-update:semver-major]
+      - dependency-name: react-router-dom
+        update-types: [version-update:semver-major]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
