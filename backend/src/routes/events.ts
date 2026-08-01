@@ -15,6 +15,7 @@ import {
   DivisionIdParam,
   WeightClassIdParam,
   EligibleAthletesQuery,
+  AthletePoolQuery,
   ApplyTemplate,
   SetPublicAccess,
 } from "../utils/validators.js";
@@ -223,6 +224,32 @@ router.get("/:id/divisions/:divisionId/eligible-athletes", requireRoles("SUPERAD
     }
 
     const athletes = await EventService.getEligibleAthletes(eventId, divisionId, clubId);
+    res.json(athletes);
+  } catch (err: any) {
+    if (err.status && err.message) {
+      return res.status(err.status).json({ error: err.message });
+    }
+    next(err);
+  }
+});
+
+// get the whole athlete pool for an event (all divisions), for screens that
+// show every division at once and resolve eligibility client-side
+router.get("/:id/athlete-pool", requireRoles("SUPERADMIN", "ADMIN", "CLUB_MANAGER", "COACH"), validate(AthletePoolQuery, "query"), async (req, res, next) => {
+  try {
+    const eventId = getParam(req.params.id);
+
+    // Non-admin roles are always scoped to their own club, ignoring the query param.
+    const isAdmin = req.user!.role === "SUPERADMIN" || req.user!.role === "ADMIN";
+    let clubId: string | undefined;
+    if (isAdmin) {
+      clubId = (req.query as { clubId?: string }).clubId;
+    } else {
+      if (!req.user!.clubId) return res.status(400).json({ error: "User has no club assigned" });
+      clubId = req.user!.clubId;
+    }
+
+    const athletes = await EventService.getAthletePool(eventId, clubId);
     res.json(athletes);
   } catch (err: any) {
     if (err.status && err.message) {

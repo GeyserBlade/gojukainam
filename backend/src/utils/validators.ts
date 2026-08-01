@@ -327,6 +327,10 @@ export const EligibleAthletesQuery = z.object({
   clubId: z.string().optional(),
 });
 
+export const AthletePoolQuery = z.object({
+  clubId: z.string().optional(),
+});
+
 // ---------------- Event Templates ----------------
 export const ApplyTemplate = z.object({
   template: z.enum(["NKF_FULL_2026", "NKF_INDIVIDUAL_2026", "NKF_TEAM_2026", "WKF_2024"]),

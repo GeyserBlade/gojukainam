@@ -108,6 +108,40 @@ flags. What changed, and why it matters beyond the type-check:
 Behavioural changes to sanity-check when someone next runs the app against real
 data: the event admin list should now include CLOSED and ARCHIVED events.
 
+## Entry Management redesign — port in progress (started 2026-08-01)
+
+The redesign (pool + all division boards + bulk enrol + eligibility ghosting)
+is still in `git stash@{0}`, written against the pre-hub architecture. Porting
+it needs three things; **step 1 is done**:
+
+1. ✅ **Event-wide athlete pool endpoint** — `GET /api/events/:id/athlete-pool`.
+   The redesign originally fetched `listAllAthletes()` / `listAthletes()` and
+   computed eligibility client-side, which was wrong twice over: `/athletes/all`
+   is SUPERADMIN-only so the ADMIN path 403'd, and those endpoints return full
+   athlete rows including `idNumber`, `medicalNotes`, and guardian contacts —
+   re-opening the exposure that commit `0276ffb` closed on the eligibility
+   endpoint. The new endpoint returns the same narrow projection as
+   `getEligibleAthletes` (no PII), forces non-admin roles to their own club, and
+   answers the whole event in one request instead of one per division (32 in the
+   seeded event). Client: `getAthletePool()` / `PoolAthlete` in `lib/events.ts`.
+2. ⬜ **Rewire the redesign to the hub** — drop its own `AppShell` and event
+   picker, read the event from `useSelectedEvent()`, and swap its athlete query
+   to `getAthletePool`.
+3. ⬜ **Port the guards added upstream since** — `registrationState`/`addBlocked`
+   (clubs blocked from adding once registration closes; the bulk action bar is
+   the riskiest surface, it creates many entries at once) and `entry.statusReason`
+   on RETURNED entries. Neither appears anywhere in the stashed code.
+
+### Verification of step 1 (against the local database)
+
+| Check | Result |
+|---|---|
+| Response contains no PII field | ✅ keys are id, clubId, firstName, lastName, dob, gender, nationality, weightKg, age, club, belt, isEntered |
+| CLUB_MANAGER passing another club's `?clubId=` | ✅ forced to own club, param ignored |
+| ADMIN filtering by `?clubId=` | ✅ works (intended admin capability) |
+| Unauthenticated / unknown event | ✅ 401 / 404 |
+| Draw-engine suite after the service change | ✅ still passes |
+
 ## Local development database (set up 2026-08-01)
 
 Postgres 16.13 via Homebrew, already running on 5432. Role `gojukainam`,

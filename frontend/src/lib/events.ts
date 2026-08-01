@@ -78,6 +78,31 @@ export interface EligibleAthlete {
   };
 }
 
+/**
+ * An athlete in the event-wide pool. Same projection as EligibleAthlete, but
+ * `isEntered` means "entered in any division of this event" rather than in one
+ * specific division.
+ */
+export interface PoolAthlete {
+  id: string;
+  clubId: string;
+  firstName: string;
+  lastName: string;
+  dob: string;
+  gender: "Male" | "Female";
+  nationality: string;
+  weightKg?: number | null;
+  age: number;
+  isEntered: boolean;
+  club: {
+    name: string;
+  };
+  belt: {
+    name: string | null;
+    colour: string | null;
+  };
+}
+
 export interface CreateEventDto {
   name: string;
   venue: string;
@@ -267,5 +292,19 @@ export async function getEligibleAthletes(eventId: string, divisionId: string, c
   if (clubId) params.clubId = clubId;
 
   const res = await api.get(`/events/${eventId}/divisions/${divisionId}/eligible-athletes`, { params });
+  return res.data;
+}
+
+/**
+ * The whole athlete pool for an event in one request, with age resolved against
+ * the event date. For screens that show every division at once and decide
+ * eligibility client-side — use getEligibleAthletes when you only need one
+ * division. Carries no PII: never swap this for the full athlete list.
+ */
+export async function getAthletePool(eventId: string, clubId?: string): Promise<PoolAthlete[]> {
+  const params: any = {};
+  if (clubId) params.clubId = clubId;
+
+  const res = await api.get(`/events/${eventId}/athlete-pool`, { params });
   return res.data;
 }

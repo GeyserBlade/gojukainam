@@ -261,6 +261,58 @@ export class EventService {
     }));
   }
 
+  /**
+   * Every athlete in scope for an event, with age resolved against the event
+   * date — the whole pool in one request, unfiltered by division.
+   *
+   * getEligibleAthletes answers "who fits THIS division"; screens that show all
+   * divisions at once would otherwise have to call it once per division. The
+   * projection is deliberately identical to that endpoint's: entry-form fields
+   * only, no idNumber, medicalNotes, contact or guardian data. Callers decide
+   * per-division eligibility client-side from age/gender, so this must never be
+   * widened into a general athlete dump.
+   */
+  static async getAthletePool(eventId: string, clubId?: string) {
+    const event = await prisma.event.findUnique({ where: { id: eventId } });
+    if (!event) throw { status: 404, message: "Event not found" };
+
+    const athletes = await prisma.athlete.findMany({
+      where: {
+        ...(clubId ? { clubId } : {}),
+        isActive: true,
+      },
+      select: {
+        id: true,
+        clubId: true,
+        firstName: true,
+        lastName: true,
+        dob: true,
+        gender: true,
+        nationality: true,
+        weightKg: true,
+        club: { select: { name: true } },
+        belt: { select: { name: true, colour: true } },
+      },
+      orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
+    });
+
+    // "Entered" here means entered in any division of this event, which is what
+    // the pool's entered/unentered filter needs.
+    const existingEntries = await prisma.entry.findMany({
+      where: { eventId, ...(clubId ? { clubId } : {}) },
+      select: { athleteId: true },
+    });
+    const enteredAthleteIds = new Set(
+      existingEntries.map(e => e.athleteId).filter(Boolean),
+    );
+
+    return athletes.map(athlete => ({
+      ...athlete,
+      age: ageOn(event.startDate, athlete.dob),
+      isEntered: enteredAthleteIds.has(athlete.id),
+    }));
+  }
+
   static async updateConfig(eventId: string, config: any) {
     return prisma.event.update({
       where: { id: eventId },
