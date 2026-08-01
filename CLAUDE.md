@@ -1,4 +1,4 @@
-# GEMINI.md
+# CLAUDE.md
 
 Instructions for this repo are shared across all coding agents and live in
 [`AGENTS.md`](AGENTS.md). **Read it before doing anything**, along with:
@@ -10,7 +10,3 @@ Instructions for this repo are shared across all coding agents and live in
 Put new durable instructions in `AGENTS.md`, not here — this file is only a
 pointer so that Claude Code, Gemini CLI, Codex, Cursor and Copilot all read the
 same brief.
-
-(The project overview that used to live in this file has been folded into
-`AGENTS.md` and `docs/architecture.md`, with the stale `VITE_API_URL` reference
-corrected to `VITE_API_BASE`.)

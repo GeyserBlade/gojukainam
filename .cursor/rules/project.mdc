@@ -1,0 +1,16 @@
+---
+description: Shared instructions for the gojukainam repo
+alwaysApply: true
+---
+
+Instructions for this repo are shared across all coding agents and live in
+`AGENTS.md` at the repo root. Read it before making changes, along with
+`docs/state.md` (work currently in flight — update it before you finish),
+`docs/architecture.md`, and `docs/conventions.md`.
+
+Key rules: backend is ESM TypeScript (relative imports end in `.js`); every
+Express route needs `requireRoles(...)` plus a club-ownership check for
+non-admin roles; validation is Zod from `backend/src/utils/validators.ts`;
+frontend uses TanStack Query, shadcn primitives from `@/components/ui`, and
+Tailwind v4 semantic tokens rather than hardcoded colours. There is no test
+suite — verify with `npx tsc --noEmit` and `npm run build`.
