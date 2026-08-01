@@ -1,252 +1,60 @@
-import { useEffect, useState } from "react"
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+// Entry management — the athlete pool, division boards, drag-drop and bulk
+// actions for one event. Replaces the previous "pick one division, add athletes
+// one at a time" workflow with a single screen that shows every division at
+// once and uses live eligibility to guide enrolment.
+//
+// Renders inside EventHubLayout, which owns the page chrome and the event
+// picker — this screen reads the current event from useSelectedEvent() and must
+// not wrap itself in AppShell.
+//
+// Auth: SUPERADMIN / ADMIN can target any club; CLUB_MANAGER / COACH are scoped
+// to their own club, enforced server-side by the pool endpoint.
+
+import { useEffect, useMemo, useState } from "react"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   DndContext,
-  closestCenter,
-  type DragEndEvent,
   DragOverlay,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
   type DragStartEvent,
-  useDroppable,
 } from "@dnd-kit/core"
-import { SortableContext, verticalListSortingStrategy, useSortable } from "@dnd-kit/sortable"
-import { CSS } from "@dnd-kit/utilities"
-import {
-  AlertTriangle,
-  Inbox,
-  PlusCircle,
-  Search,
-  Trash2,
-} from "lucide-react"
+import { AlertTriangle, ArrowRight } from "lucide-react"
 
 import { useAuth } from "@/contexts/AuthContext"
 import { useSelectedEvent } from "@/contexts/SelectedEventContext"
-import { useToast, useApiErrorToast } from "@/components/Toast"
+import { useApiErrorToast, useToast } from "@/components/Toast"
 import { useConfirm } from "@/components/ConfirmDialog"
 import { BeltBadge } from "@/components/athletes/BeltBadge"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
+import { Card, CardContent } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { cn } from "@/lib/utils"
-import {
-  listEvents,
-  getEvent,
-  getDivisions,
-  getEligibleAthletes,
-  registrationState,
-  type EligibleAthlete,
-} from "@/lib/events"
+
 import { EntryService, type Entry } from "@/lib/entries"
 import { listClubs } from "@/lib/clubs"
+import { getAthletePool, getDivisions, registrationState, type Division } from "@/lib/events"
 
-const ENTRY_STATUS_STYLES = {
-  DRAFT: "bg-muted text-muted-foreground border-border",
-  SUBMITTED: "bg-belt-orange/15 text-belt-orange border-belt-orange/30",
-  APPROVED: "bg-belt-green/15 text-belt-green border-belt-green/30",
-  RETURNED: "bg-flag-red/15 text-flag-red border-flag-red/30",
-} as const
+import { AthletePool } from "./event-management/AthletePool"
+import type { EnrichedAthlete } from "./event-management/AthleteRow"
+import { BulkActionBar } from "./event-management/BulkActionBar"
+import { DivisionBoard } from "./event-management/DivisionBoard"
+import {
+  groupDivisionsByAge,
+  groupDivisionsByCategory,
+  individualEntryCount,
+  isEligible,
+  parseEventConfig,
+} from "./event-management/eligibility"
 
-interface AthleteCardSurfaceProps {
-  athlete: EligibleAthlete
-  isDragging?: boolean
-}
-
-const AthleteCardSurface: React.FC<AthleteCardSurfaceProps> = ({ athlete, isDragging }) => (
-  <div
-    className={cn(
-      "rounded-md border bg-card p-3 transition-colors",
-      isDragging && "border-primary/40 bg-primary/5",
-      athlete.isEntered && "opacity-50",
-    )}
-  >
-    <div className="flex justify-between items-start gap-2">
-      <div className="min-w-0 flex-1">
-        <p className="font-medium text-sm truncate">
-          {athlete.firstName} {athlete.lastName}
-        </p>
-        <p className="text-xs text-muted-foreground truncate">{athlete.club.name}</p>
-        <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
-          <BeltBadge name={athlete.belt.name} colour={athlete.belt?.colour} />
-          <span className="text-xs text-muted-foreground">
-            {athlete.age}y
-            {athlete.weightKg ? ` · ${athlete.weightKg}kg` : ""}
-          </span>
-        </div>
-      </div>
-      {athlete.isEntered && (
-        <Badge
-          variant="outline"
-          className="font-normal text-[10px] bg-belt-green/15 text-belt-green border-belt-green/30 shrink-0"
-        >
-          Entered
-        </Badge>
-      )}
-    </div>
-  </div>
-)
-
-interface DraggableAthleteCardProps {
-  athlete: EligibleAthlete
-  onAdd: () => void
-  isAdding: boolean
-}
-
-const DraggableAthleteCard: React.FC<DraggableAthleteCardProps> = ({ athlete, onAdd, isAdding }) => {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-    id: athlete.id,
-    disabled: athlete.isEntered,
-  })
-
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDragging ? 0.5 : 1,
-  }
-
-  return (
-    <div
-      ref={setNodeRef}
-      style={style}
-      className={cn("flex items-stretch gap-2", athlete.isEntered && "opacity-60")}
-    >
-      <div
-        {...attributes}
-        {...listeners}
-        className={cn("flex-1 min-w-0", !athlete.isEntered && "cursor-move")}
-      >
-        <AthleteCardSurface athlete={athlete} />
-      </div>
-      {!athlete.isEntered && (
-        <Button
-          size="sm"
-          onClick={onAdd}
-          disabled={isAdding}
-          className="shrink-0 self-stretch h-auto"
-          aria-label={`Add ${athlete.firstName} ${athlete.lastName}`}
-        >
-          <PlusCircle />
-          Add
-        </Button>
-      )}
-    </div>
-  )
-}
-
-interface MobileAthleteCardProps {
-  athlete: EligibleAthlete
-  onAdd: () => void
-  isAdding: boolean
-}
-
-const MobileAthleteCard: React.FC<MobileAthleteCardProps> = ({ athlete, onAdd, isAdding }) => (
-  <div
-    className={cn(
-      "rounded-md border bg-card p-3",
-      athlete.isEntered && "opacity-50",
-    )}
-  >
-    <div className="flex justify-between items-start gap-2">
-      <div className="min-w-0 flex-1">
-        <p className="font-medium truncate">
-          {athlete.firstName} {athlete.lastName}
-        </p>
-        <p className="text-sm text-muted-foreground truncate">{athlete.club.name}</p>
-        <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
-          <BeltBadge name={athlete.belt.name} colour={athlete.belt?.colour} />
-          <span className="text-xs text-muted-foreground">
-            {athlete.age}y
-            {athlete.weightKg ? ` · ${athlete.weightKg}kg` : ""}
-          </span>
-        </div>
-      </div>
-      {athlete.isEntered ? (
-        <Badge
-          variant="outline"
-          className="font-normal text-[10px] bg-belt-green/15 text-belt-green border-belt-green/30 shrink-0"
-        >
-          Entered
-        </Badge>
-      ) : (
-        <Button size="sm" onClick={onAdd} disabled={isAdding} className="shrink-0">
-          <PlusCircle />
-          Add
-        </Button>
-      )}
-    </div>
-  </div>
-)
-
-interface EnteredEntryCardProps {
-  entry: Entry
-  onDelete?: () => void
-  isDeleting?: boolean
-}
-
-const EnteredEntryCard: React.FC<EnteredEntryCardProps> = ({ entry, onDelete, isDeleting }) => {
-  const name = entry.athlete
-    ? `${entry.athlete.firstName} ${entry.athlete.lastName}`
-    : entry.team?.name || "—"
-  const clubName = entry.athlete?.club.name || entry.club.name
-  const beltName = entry.athlete?.belt?.name
-  const canDelete = entry.status === "DRAFT" && !!onDelete
-
-  return (
-    <div className="rounded-md border border-belt-green/30 bg-belt-green/5 p-3">
-      <div className="flex justify-between items-start gap-2">
-        <div className="min-w-0 flex-1">
-          <p className="font-medium text-sm truncate">{name}</p>
-          <p className="text-xs text-muted-foreground truncate">
-            {clubName}
-            {beltName && ` · ${beltName}`}
-            {entry.weightClass && ` · ${entry.weightClass.name}`}
-          </p>
-          {entry.status === "RETURNED" && entry.statusReason && (
-            <p className="mt-1 text-xs text-flag-red">
-              <span className="font-medium">Returned:</span> {entry.statusReason}
-            </p>
-          )}
-        </div>
-        <div className="flex items-center gap-1.5 shrink-0">
-          <Badge
-            variant="outline"
-            className={cn(
-              "font-normal text-[10px]",
-              ENTRY_STATUS_STYLES[entry.status] || ENTRY_STATUS_STYLES.DRAFT,
-            )}
-          >
-            {entry.status}
-          </Badge>
-          {canDelete && (
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              onClick={onDelete}
-              disabled={isDeleting}
-              aria-label={`Remove ${name}`}
-              title="Remove this draft entry"
-            >
-              <Trash2 />
-            </Button>
-          )}
-        </div>
-      </div>
-    </div>
-  )
-}
-
-const DroppableZone: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { setNodeRef } = useDroppable({ id: "drop-zone" })
-  return <div ref={setNodeRef}>{children}</div>
-}
+// ─────────────────────────────────────────────────────────────────────────────
+// Top-level page
+// ─────────────────────────────────────────────────────────────────────────────
 
 const EventManagement = () => {
   const { role, clubId } = useAuth()
@@ -256,30 +64,42 @@ const EventManagement = () => {
   const confirm = useConfirm()
   const isAdmin = role === "SUPERADMIN" || role === "ADMIN"
 
-  const { eventId: selectedEventId } = useSelectedEvent()
-  const [selectedDivisionId, setSelectedDivisionId] = useState<string>("")
-  const [filterClubId, setFilterClubId] = useState<string>(clubId || "")
-  const [searchQuery, setSearchQuery] = useState("")
-  const [entryType, setEntryType] = useState<"KATA" | "KUMITE" | "TEAM_KATA" | "TEAM_KUMITE">("KATA")
-  const [selectedWeightClassId, setSelectedWeightClassId] = useState<string>("")
-  const [draggedAthlete, setDraggedAthlete] = useState<EligibleAthlete | null>(null)
+  // ── Top-level selections ───────────────────────────────────────────────────
+  // The event comes from the hub's picker, not from this screen.
+  const { eventId: selectedEventId, event: selectedEvent } = useSelectedEvent()
+  const [filterClubId, setFilterClubId] = useState<string>(clubId ?? "")
 
-  // Reset division/weight when the hub switches events.
-  useEffect(() => {
-    setSelectedDivisionId("")
-    setSelectedWeightClassId("")
-  }, [selectedEventId])
+  // ── Pool state ─────────────────────────────────────────────────────────────
+  const [search, setSearch] = useState("")
+  const [poolClubFilter, setPoolClubFilter] = useState<string>("")
+  const [filterBelt, setFilterBelt] = useState("")
+  const [filterEnteredMode, setFilterEnteredMode] = useState<"all" | "entered" | "unentered">(
+    "all",
+  )
+  const [selectedAthleteIds, setSelectedAthleteIds] = useState<Set<string>>(() => new Set())
+  const [hoveredAthleteId, setHoveredAthleteId] = useState<string | null>(null)
+  const [expandedAthleteId, setExpandedAthleteId] = useState<string | null>(null)
 
+  // ── Board state ────────────────────────────────────────────────────────────
+  const [categoryFilter, setCategoryFilter] = useState<"all" | "KATA" | "KUMITE">("all")
+  const [showEmptyBoards, setShowEmptyBoards] = useState(true)
+  const [groupBy, setGroupBy] = useState<"age" | "category">("age")
+  const [density, setDensity] = useState<"compact" | "comfortable">("comfortable")
+  const [showFees, setShowFees] = useState(true)
+  const [ghostingEnabled, setGhostingEnabled] = useState(true)
+
+  // ── Drag state ─────────────────────────────────────────────────────────────
+  const [draggedAthleteId, setDraggedAthleteId] = useState<string | null>(null)
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+  )
+
+  // ── Queries ────────────────────────────────────────────────────────────────
   const { data: clubs = [] } = useQuery({
     queryKey: ["clubs"],
     queryFn: listClubs,
     enabled: isAdmin,
-  })
-
-  const { data: selectedEvent } = useQuery({
-    queryKey: ["event", selectedEventId],
-    queryFn: () => getEvent(selectedEventId),
-    enabled: !!selectedEventId,
   })
 
   const { data: divisions = [] } = useQuery({
@@ -288,46 +108,161 @@ const EventManagement = () => {
     enabled: !!selectedEventId,
   })
 
-  const { data: eligibleAthletes = [], isLoading: loadingAthletes } = useQuery({
-    queryKey: ["eligibleAthletes", selectedEventId, selectedDivisionId, filterClubId],
-    queryFn: () => getEligibleAthletes(selectedEventId, selectedDivisionId, filterClubId),
-    enabled: !!selectedEventId && !!selectedDivisionId,
+  // The event's whole athlete pool in one request, with age already resolved
+  // against the event date. Eligibility per division is computed client-side
+  // from age/gender, so no per-division fetching is needed.
+  //
+  // This must stay on the pool endpoint rather than the general athlete list:
+  // /athletes/all is SUPERADMIN-only, and both athlete-list endpoints return
+  // full rows including idNumber, medicalNotes and guardian contacts.
+  const { data: athletes = [], isLoading: loadingAthletes } = useQuery({
+    queryKey: ["athlete-pool", selectedEventId, filterClubId],
+    queryFn: () => getAthletePool(selectedEventId, filterClubId || undefined),
+    enabled: !!selectedEventId && (isAdmin || !!clubId),
   })
 
-  const { data: currentEntries = [], isLoading: loadingEntries } = useQuery({
-    queryKey: ["entries", selectedEventId, selectedDivisionId, filterClubId],
+  // All entries for the event (we filter by club/division client-side).
+  const { data: entries = [], isLoading: loadingEntries } = useQuery({
+    queryKey: ["entries", "event", selectedEventId, filterClubId],
     queryFn: () =>
       EntryService.list({
         eventId: selectedEventId,
-        divisionId: selectedDivisionId,
         ...(filterClubId ? { clubId: filterClubId } : {}),
       }),
-    enabled: !!selectedEventId && !!selectedDivisionId,
+    enabled: !!selectedEventId && (isAdmin || !!clubId),
   })
 
+  // ── Derived data ───────────────────────────────────────────────────────────
+  const eventDate = selectedEvent?.startDate ?? new Date().toISOString()
+  const eventConfig = useMemo(
+    () => parseEventConfig(selectedEvent?.configJson),
+    [selectedEvent?.configJson],
+  )
+
+  // Clubs can only change entries while registration is open; admins bypass it.
+  // The backend enforces this too — this is the UI half, and it matters most on
+  // the bulk actions, which create many entries per click.
+  const reg = registrationState(selectedEvent)
+  const addBlocked = !isAdmin && !reg.open
+
+  // The pool endpoint resolves age server-side against the event date, so the
+  // rows are already in the shape the boards and rows want.
+  const enrichedAthletes: EnrichedAthlete[] = athletes
+
+  // Pool filtering (search + club + belt + entered mode)
+  const visibleAthletes = useMemo(() => {
+    let list = enrichedAthletes
+    if (search) {
+      const q = search.toLowerCase()
+      list = list.filter((a) =>
+        `${a.firstName} ${a.lastName}`.toLowerCase().includes(q),
+      )
+    }
+    if (poolClubFilter) list = list.filter((a) => a.clubId === poolClubFilter)
+    if (filterBelt) {
+      list = list.filter((a) => {
+        const c = (a.belt?.colour ?? a.belt?.name ?? "").toLowerCase()
+        return c.includes(filterBelt)
+      })
+    }
+    if (filterEnteredMode !== "all") {
+      const isEntered = (id: string) => entries.some((e) => e.athleteId === id)
+      list = list.filter((a) =>
+        filterEnteredMode === "entered" ? isEntered(a.id) : !isEntered(a.id),
+      )
+    }
+    return list
+  }, [enrichedAthletes, search, poolClubFilter, filterBelt, filterEnteredMode, entries])
+
+  // Boards filtering
+  const groupedDivisions = useMemo(() => {
+    let list = divisions
+    if (categoryFilter !== "all") list = list.filter((d) => d.category === categoryFilter)
+    if (!showEmptyBoards) {
+      list = list.filter((d) => entries.some((e) => e.divisionId === d.id))
+    }
+    return groupBy === "age" ? groupDivisionsByAge(list) : groupDivisionsByCategory(list)
+  }, [divisions, entries, categoryFilter, showEmptyBoards, groupBy])
+
+  // ── Eligibility focus (which athletes drive board ghosting) ────────────────
+  const focusAthleteIds = useMemo(() => {
+    if (selectedAthleteIds.size > 0) return Array.from(selectedAthleteIds)
+    if (hoveredAthleteId) return [hoveredAthleteId]
+    if (expandedAthleteId) return [expandedAthleteId]
+    if (draggedAthleteId) return [draggedAthleteId]
+    return [] as string[]
+  }, [selectedAthleteIds, hoveredAthleteId, expandedAthleteId, draggedAthleteId])
+
+  const eligibilityForDivision = (d: Division) => {
+    if (focusAthleteIds.length === 0) {
+      return { kind: "neutral" as const, count: 0, total: 0 }
+    }
+    const focused = focusAthleteIds
+      .map((id) => enrichedAthletes.find((a) => a.id === id))
+      .filter((x): x is EnrichedAthlete => !!x)
+    const eligible = focused.filter((a) => isEligible(a, d, eventDate))
+    if (eligible.length === 0) {
+      return { kind: "ineligible" as const, count: 0, total: focused.length }
+    }
+    if (eligible.length === focused.length) {
+      return { kind: "eligible" as const, count: eligible.length, total: focused.length }
+    }
+    return { kind: "partial" as const, count: eligible.length, total: focused.length }
+  }
+
+  // ── Stats strip ────────────────────────────────────────────────────────────
+  const stats = useMemo(() => {
+    const total = entries.length
+    const draft = entries.filter((e) => e.status === "DRAFT").length
+    const submitted = entries.filter((e) => e.status === "SUBMITTED").length
+    const approved = entries.filter((e) => e.status === "APPROVED").length
+    const returned = entries.filter((e) => e.status === "RETURNED").length
+    const athletesEntered = new Set(entries.map((e) => e.athleteId)).size
+    const fees = entries.reduce((s, e) => {
+      switch (e.entryType) {
+        case "KATA":
+          return s + eventConfig.fees.kataIndividual
+        case "KUMITE":
+          return s + eventConfig.fees.kumiteIndividual
+        case "TEAM_KATA":
+          return s + eventConfig.fees.teamKata
+        case "TEAM_KUMITE":
+          return s + eventConfig.fees.teamKumite
+        default:
+          return s
+      }
+    }, 0)
+    const overLimit = enrichedAthletes.filter(
+      (a) => individualEntryCount(a.id, entries) > eventConfig.limits.maxIndividualEventsPerAthlete,
+    ).length
+    return { total, draft, submitted, approved, returned, athletesEntered, fees, overLimit }
+  }, [entries, enrichedAthletes, eventConfig])
+
+  // ── Mutations ──────────────────────────────────────────────────────────────
   const createEntryMutation = useMutation({
-    mutationFn: async (athleteId: string) => {
-      // The entry belongs to the athlete's own club; the club filter is
-      // only a view filter and admins may have no club at all.
-      const athlete = eligibleAthletes.find((a) => a.id === athleteId)
-      const effectiveClubId = athlete?.clubId || filterClubId || clubId
-      if (!effectiveClubId) throw new Error("Could not determine the athlete's club")
-      const entryData: Parameters<typeof EntryService.create>[0] = {
+    mutationFn: async ({
+      athleteId,
+      divisionId,
+    }: {
+      athleteId: string
+      divisionId: string
+    }) => {
+      const div = divisions.find((d) => d.id === divisionId)
+      if (!div) throw new Error("Division not found")
+      const athlete = athletes.find((a) => a.id === athleteId)
+      if (!athlete) throw new Error("Athlete not found")
+      const effectiveClubId = filterClubId || athlete.clubId || clubId
+      if (!effectiveClubId) throw new Error("Club ID is required")
+      return EntryService.create({
         eventId: selectedEventId,
         clubId: effectiveClubId,
-        divisionId: selectedDivisionId,
-        entryType,
+        divisionId,
+        entryType: div.category,
         athleteId,
-      }
-      if (entryType === "KUMITE" && selectedWeightClassId) {
-        entryData.weightClassId = selectedWeightClassId
-      }
-      return EntryService.create(entryData)
+      })
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["eligibleAthletes"] })
       queryClient.invalidateQueries({ queryKey: ["entries"] })
-      toast.success("Entry created")
     },
     onError: (e) => showApiError(e, "Failed to create entry"),
   })
@@ -336,117 +271,196 @@ const EventManagement = () => {
     mutationFn: (entryId: string) => EntryService.delete(entryId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["entries"] })
-      queryClient.invalidateQueries({ queryKey: ["eligibleAthletes"] })
-      toast.success("Entry removed")
     },
     onError: (e) => showApiError(e, "Failed to remove entry"),
   })
 
-  const filteredAthletes = eligibleAthletes.filter((athlete) => {
-    if (!searchQuery) return true
-    const query = searchQuery.toLowerCase()
-    const fullName = `${athlete.firstName} ${athlete.lastName}`.toLowerCase()
-    return (
-      fullName.includes(query) ||
-      athlete.club.name.toLowerCase().includes(query) ||
-      (athlete.belt.name || "").toLowerCase().includes(query)
+  // ── Action helpers ─────────────────────────────────────────────────────────
+  const handleAddEntry = (athleteId: string, divisionId: string) => {
+    if (addBlocked) return
+    const exists = entries.find(
+      (e) => e.athleteId === athleteId && e.divisionId === divisionId,
     )
-  })
-
-  const selectedDivision = divisions.find((d) => d.id === selectedDivisionId)
-
-  // Clubs can only add entries while registration is open; admins bypass it.
-  const reg = registrationState(selectedEvent)
-  const addBlocked = !isAdmin && !reg.open
-
-  const handleDragStart = (event: DragStartEvent) => {
-    const athlete = eligibleAthletes.find((a) => a.id === event.active.id)
-    setDraggedAthlete(athlete || null)
+    if (exists) return
+    const div = divisions.find((d) => d.id === divisionId)
+    const athlete = athletes.find((a) => a.id === athleteId)
+    if (!div || !athlete || !isEligible(athlete, div, eventDate)) {
+      toast.error("Athlete is not eligible for this division")
+      return
+    }
+    createEntryMutation.mutate({ athleteId, divisionId })
   }
 
-  const handleDragEnd = (event: DragEndEvent) => {
-    setDraggedAthlete(null)
+  const handleRemoveEntry = async (athleteId: string, divisionId: string) => {
+    const entry = entries.find(
+      (e) => e.athleteId === athleteId && e.divisionId === divisionId,
+    )
+    if (!entry) return
+    if (entry.status !== "DRAFT") {
+      const ok = await confirm({
+        title: `Remove this entry?`,
+        description: `Status is "${entry.status}". Removing it will also clear that state.`,
+        confirmText: "Remove",
+        destructive: true,
+      })
+      if (!ok) return
+    }
+    deleteEntryMutation.mutate(entry.id)
+  }
+
+  const handleBulkAdd = async (category: "KATA" | "KUMITE" | "BOTH") => {
     if (addBlocked) return
-    if (event.over?.id === "drop-zone") {
-      const athleteId = event.active.id as string
-      const athlete = eligibleAthletes.find((a) => a.id === athleteId)
-      if (athlete && !athlete.isEntered) {
-        createEntryMutation.mutate(athleteId)
-      }
+    const ids = Array.from(selectedAthleteIds)
+    const tasks: Array<{ athleteId: string; divisionId: string }> = []
+    ids.forEach((athleteId) => {
+      const a = athletes.find((x) => x.id === athleteId)
+      if (!a) return
+      divisions.forEach((d) => {
+        if (!isEligible(a, d, eventDate)) return
+        if (category !== "BOTH" && d.category !== category) return
+        const exists = entries.find(
+          (e) => e.athleteId === athleteId && e.divisionId === d.id,
+        )
+        if (exists) return
+        tasks.push({ athleteId, divisionId: d.id })
+      })
+    })
+    if (tasks.length === 0) return
+
+    // Fire in parallel; refresh once at the end.
+    const results = await Promise.allSettled(
+      tasks.map((t) =>
+        EntryService.create({
+          eventId: selectedEventId,
+          clubId:
+            filterClubId ||
+            athletes.find((a) => a.id === t.athleteId)?.clubId ||
+            clubId ||
+            "",
+          divisionId: t.divisionId,
+          entryType: divisions.find((d) => d.id === t.divisionId)!.category,
+          athleteId: t.athleteId,
+        }),
+      ),
+    )
+    const failed = results.filter((r) => r.status === "rejected").length
+    queryClient.invalidateQueries({ queryKey: ["entries"] })
+    setSelectedAthleteIds(new Set())
+    if (failed > 0) {
+      toast.error(`Created ${tasks.length - failed} entries · ${failed} failed`)
+    } else {
+      toast.success(`Created ${tasks.length} entries`)
     }
   }
 
-  const handleAddEntry = (athleteId: string) => {
+  const handleSubmitAllDrafts = async () => {
     if (addBlocked) return
-    const athlete = eligibleAthletes.find((a) => a.id === athleteId)
-    if (athlete && !athlete.isEntered) createEntryMutation.mutate(athleteId)
-  }
-
-  const handleDeleteEntry = async (entry: Entry) => {
-    const label = entry.athlete
-      ? `${entry.athlete.firstName} ${entry.athlete.lastName}`
-      : entry.team?.name || "this entry"
+    const drafts = entries.filter((e) => e.status === "DRAFT")
+    if (drafts.length === 0) return
     const ok = await confirm({
-      title: `Remove ${label}?`,
-      description: "They will be removed from this division.",
-      confirmText: "Remove",
-      destructive: true,
+      title: `Submit ${drafts.length} draft entr${drafts.length === 1 ? "y" : "ies"} for approval?`,
+      description: "Submitted entries can only be changed by event admins.",
+      confirmText: "Submit all",
     })
-    if (ok) deleteEntryMutation.mutate(entry.id)
+    if (!ok) return
+    const results = await Promise.allSettled(
+      drafts.map((e) => EntryService.updateStatus(e.id, "SUBMITTED")),
+    )
+    const failed = results.filter((r) => r.status === "rejected").length
+    queryClient.invalidateQueries({ queryKey: ["entries"] })
+    if (failed > 0) toast.error(`Submitted ${drafts.length - failed} · ${failed} failed`)
+    else toast.success(`Submitted ${drafts.length} entries`)
   }
 
+  // Reset event-scoped state when event changes
+  useEffect(() => {
+    setSelectedAthleteIds(new Set())
+    setExpandedAthleteId(null)
+    setHoveredAthleteId(null)
+  }, [selectedEventId])
+
+  // ── Selection ──────────────────────────────────────────────────────────────
+  const toggleSelect = (id: string) =>
+    setSelectedAthleteIds((prev) => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  const clearSelection = () => setSelectedAthleteIds(new Set())
+  const selectAllVisible = () =>
+    setSelectedAthleteIds(new Set(visibleAthletes.map((a) => a.id)))
+
+  // ── Drag handlers ──────────────────────────────────────────────────────────
+  const handleDragStart = (e: DragStartEvent) => {
+    const data = e.active.data.current as { athleteId?: string } | undefined
+    setDraggedAthleteId(data?.athleteId ?? null)
+  }
+  const handleDragEnd = (e: DragEndEvent) => {
+    const dragged = draggedAthleteId
+    setDraggedAthleteId(null)
+    if (addBlocked) return
+    if (!dragged || !e.over) return
+    const overData = e.over.data.current as { divisionId?: string } | undefined
+    if (!overData?.divisionId) return
+    // If the dragged athlete is part of the multi-selection, add ALL of them.
+    const ids = selectedAthleteIds.has(dragged)
+      ? Array.from(selectedAthleteIds)
+      : [dragged]
+    ids.forEach((id) => handleAddEntry(id, overData.divisionId!))
+  }
+
+  // ── Permission gate ────────────────────────────────────────────────────────
   if (!isAdmin && !clubId) {
     return (
       <Card>
         <CardContent className="py-10 text-center">
           <p className="text-sm text-muted-foreground">
-            You don't have permission to access this page.
+            You don&apos;t have permission to access this page.
           </p>
         </CardContent>
       </Card>
     )
   }
 
+  // ── Render ────────────────────────────────────────────────────────────────
+  const draggedAthlete = draggedAthleteId
+    ? enrichedAthletes.find((a) => a.id === draggedAthleteId)
+    : null
+
   return (
     <DndContext
+      sensors={sensors}
       collisionDetection={closestCenter}
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
     >
       <>
+        {/* Page header. The hub supplies the event picker and status badge. */}
         <div className="mb-4">
-          <h2 className="font-display text-xl tracking-wide sm:text-2xl">Entries</h2>
-          <p className="text-sm text-muted-foreground mt-1">
-            Add and manage athlete entries into event divisions.
-          </p>
+          <div className="flex flex-wrap items-baseline justify-between gap-3">
+            <div>
+              <h2 className="font-display text-xl tracking-wide sm:text-2xl">Entries</h2>
+              <p className="text-sm text-muted-foreground mt-1">
+                Pool athletes into divisions. Drag, click, or bulk-enrol — eligibility is live.
+              </p>
+            </div>
+            {selectedEventId && (
+              <Button
+                size="sm"
+                onClick={handleSubmitAllDrafts}
+                disabled={stats.draft === 0 || addBlocked}
+                title={
+                  addBlocked
+                    ? "Registration is closed"
+                    : "Submit all draft entries for approval"
+                }
+              >
+                <ArrowRight />
+                Submit {stats.draft} draft{stats.draft === 1 ? "" : "s"}
+              </Button>
+            )}
+          </div>
         </div>
-
-        {/* Club filter (admin) */}
-        {isAdmin && (
-          <Card className="mb-4">
-            <CardContent className="space-y-3">
-              <div>
-                <Label className="mb-1.5">Filter by club (optional)</Label>
-                <Select
-                  value={filterClubId || "all"}
-                  onValueChange={(v) => setFilterClubId(v === "all" ? "" : v)}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All clubs</SelectItem>
-                    {clubs.map((club) => (
-                      <SelectItem key={club.id} value={club.id}>
-                        {club.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </CardContent>
-          </Card>
-        )}
 
         {selectedEventId && addBlocked && reg.message && (
           <div className="mb-4 flex items-start gap-2 rounded-md border border-belt-orange/30 bg-belt-orange/10 px-3 py-2.5 text-sm">
@@ -460,352 +474,331 @@ const EventManagement = () => {
           </div>
         )}
 
-        {selectedEventId && (
-          <Card className="mb-4">
-            <CardContent className="space-y-3">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                <div>
-                  <Label className="mb-1.5">Division</Label>
-                  <Select
-                    value={selectedDivisionId || "none"}
-                    onValueChange={(v) => {
-                      const value = v === "none" ? "" : v
-                      setSelectedDivisionId(value)
-                      setSelectedWeightClassId("")
-                      const div = divisions.find((d) => d.id === value)
-                      if (div) {
-                        if (div.category === "KATA") setEntryType("KATA")
-                        else if (div.category === "KUMITE") setEntryType("KUMITE")
-                      }
-                    }}
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">-- Select division --</SelectItem>
-                      {divisions.map((division) => {
-                        const categoryLabel =
-                          division.category === "KATA" ? "Kata" : "Kumite"
-                        return (
-                          <SelectItem key={division.id} value={division.id}>
-                            {division.name} ({categoryLabel})
-                          </SelectItem>
-                        )
-                      })}
-                    </SelectContent>
-                  </Select>
+        {/* Stats + club filter */}
+        <Card className="mb-4">
+          <CardContent className="px-4 py-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              {/* Stats strip */}
+              {selectedEventId && (
+                <div className="flex items-stretch divide-x border rounded-md">
+                  <Stat label="Athletes" value={stats.athletesEntered} />
+                  <Stat label="Entries" value={stats.total} />
+                  <Stat label="Pending" value={stats.submitted} tone="orange" />
+                  <Stat label="Approved" value={stats.approved} tone="green" />
+                  {stats.overLimit > 0 && (
+                    <Stat label="Over limit" value={stats.overLimit} tone="red" />
+                  )}
+                  {showFees && (
+                    <Stat
+                      label={`Fees (${eventConfig.currency})`}
+                      value={`${eventConfig.currency === "NAD" ? "N$" : ""}${stats.fees.toLocaleString()}`}
+                      mono
+                    />
+                  )}
                 </div>
+              )}
+            </div>
 
-                <div>
-                  <Label className="mb-1.5">Entry type</Label>
-                  <Select
-                    value={entryType}
-                    onValueChange={(v) =>
-                      setEntryType(v as typeof entryType)
+            {/* Admin club filter */}
+            {isAdmin && selectedEventId && clubs.length > 0 && (
+              <div className="mt-3 pt-3 border-t flex flex-wrap items-center gap-1.5">
+                <span className="text-[10px] uppercase tracking-wider text-muted-foreground mr-1">
+                  Club filter
+                </span>
+                <ChipButton
+                  active={!filterClubId}
+                  onClick={() => setFilterClubId("")}
+                >
+                  All clubs
+                </ChipButton>
+                {clubs.map((c) => (
+                  <ChipButton
+                    key={c.id}
+                    active={filterClubId === c.id}
+                    onClick={() =>
+                      setFilterClubId(filterClubId === c.id ? "" : c.id)
                     }
-                    disabled={!selectedDivisionId}
                   >
-                    <SelectTrigger className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {selectedDivision?.category === "KATA" && (
-                        <>
-                          <SelectItem value="KATA">Kata (Individual)</SelectItem>
-                          <SelectItem value="TEAM_KATA">Kata (Team)</SelectItem>
-                        </>
-                      )}
-                      {selectedDivision?.category === "KUMITE" && (
-                        <>
-                          <SelectItem value="KUMITE">Kumite (Individual)</SelectItem>
-                          <SelectItem value="TEAM_KUMITE">Kumite (Team)</SelectItem>
-                        </>
-                      )}
-                    </SelectContent>
-                  </Select>
-                </div>
+                    {c.name}
+                  </ChipButton>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
 
-                {entryType === "KUMITE" && selectedEvent && (
-                  <div>
-                    <Label className="mb-1.5">Weight class</Label>
-                    <Select
-                      value={selectedWeightClassId || "none"}
-                      onValueChange={(v) =>
-                        setSelectedWeightClassId(v === "none" ? "" : v)
-                      }
-                    >
-                      <SelectTrigger className="w-full">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">-- Select --</SelectItem>
-                        {(selectedEvent.weightClasses || [])
-                          .filter(
-                            (wc) =>
-                              wc.gender === selectedDivision?.gender &&
-                              (!wc.divisionId || wc.divisionId === selectedDivisionId),
-                          )
-                          .map((wc) => (
-                            <SelectItem key={wc.id} value={wc.id}>
-                              {wc.name}
-                            </SelectItem>
-                          ))}
-                      </SelectContent>
-                    </Select>
+        {!selectedEventId ? (
+          <Card>
+            <CardContent className="py-16 text-center text-sm text-muted-foreground">
+              Select an event to begin managing entries.
+            </CardContent>
+          </Card>
+        ) : (
+          <>
+            {/* Board controls */}
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+              <div className="flex items-center gap-2">
+                <Tabs
+                  value={categoryFilter}
+                  onValueChange={(v) =>
+                    setCategoryFilter(v as "all" | "KATA" | "KUMITE")
+                  }
+                >
+                  <TabsList>
+                    <TabsTrigger value="all">All</TabsTrigger>
+                    <TabsTrigger value="KATA">Kata</TabsTrigger>
+                    <TabsTrigger value="KUMITE">Kumite</TabsTrigger>
+                  </TabsList>
+                </Tabs>
+                <div className="hidden md:flex items-center gap-1 ml-1">
+                  <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                    Group by
+                  </span>
+                  <Tabs value={groupBy} onValueChange={(v) => setGroupBy(v as "age" | "category")}>
+                    <TabsList className="h-7">
+                      <TabsTrigger value="age" className="text-xs">Age</TabsTrigger>
+                      <TabsTrigger value="category" className="text-xs">Category</TabsTrigger>
+                    </TabsList>
+                  </Tabs>
+                </div>
+              </div>
+              <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                <label className="inline-flex items-center gap-1.5 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={showEmptyBoards}
+                    onChange={(e) => setShowEmptyBoards(e.target.checked)}
+                    className="accent-primary"
+                  />
+                  Empty boards
+                </label>
+                <label className="inline-flex items-center gap-1.5 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={ghostingEnabled}
+                    onChange={(e) => setGhostingEnabled(e.target.checked)}
+                    className="accent-primary"
+                  />
+                  Ghost ineligible
+                </label>
+                <label className="inline-flex items-center gap-1.5 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={density === "compact"}
+                    onChange={(e) => setDensity(e.target.checked ? "compact" : "comfortable")}
+                    className="accent-primary"
+                  />
+                  Compact
+                </label>
+              </div>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-[360px_1fr] lg:grid-cols-[400px_1fr] xl:grid-cols-[440px_1fr]">
+              {/* Pool */}
+              {loadingAthletes ? (
+                <Skeleton className="h-[600px] w-full" />
+              ) : (
+                <AthletePool
+                  athletes={visibleAthletes}
+                  totalCount={enrichedAthletes.length}
+                  divisions={divisions}
+                  entries={entries}
+                  clubs={clubs}
+                  eventDate={eventDate}
+                  isAdmin={isAdmin}
+                  search={search}
+                  setSearch={setSearch}
+                  filterClubId={poolClubFilter}
+                  setFilterClubId={setPoolClubFilter}
+                  filterBelt={filterBelt}
+                  setFilterBelt={setFilterBelt}
+                  filterEnteredMode={filterEnteredMode}
+                  setFilterEnteredMode={setFilterEnteredMode}
+                  selectedAthleteIds={selectedAthleteIds}
+                  toggleSelect={toggleSelect}
+                  clearSelection={clearSelection}
+                  selectAllVisible={selectAllVisible}
+                  hoveredAthleteId={hoveredAthleteId}
+                  setHoveredAthleteId={setHoveredAthleteId}
+                  expandedAthleteId={expandedAthleteId}
+                  setExpandedAthleteId={setExpandedAthleteId}
+                  onAddEntry={handleAddEntry}
+                  onRemoveEntry={handleRemoveEntry}
+                  addDisabled={addBlocked}
+                  density={density}
+                  showFees={showFees}
+                  maxIndividualEvents={eventConfig.limits.maxIndividualEventsPerAthlete}
+                />
+              )}
+
+              {/* Boards */}
+              <div>
+                {loadingEntries && (
+                  <div className="space-y-3">
+                    {[0, 1, 2].map((i) => (
+                      <Skeleton key={i} className="h-40 w-full" />
+                    ))}
+                  </div>
+                )}
+                {!loadingEntries && groupedDivisions.length === 0 && (
+                  <Card>
+                    <CardContent className="py-12 text-center text-sm text-muted-foreground">
+                      No divisions match the current filter.
+                    </CardContent>
+                  </Card>
+                )}
+                {!loadingEntries && (
+                  <div className="space-y-6">
+                    {groupedDivisions.map((group) => {
+                      const groupEntries = entries.filter((e) =>
+                        group.divisions.some((d) => d.id === e.divisionId),
+                      )
+                      return (
+                        <section key={group.key}>
+                          <div className="flex items-baseline justify-between gap-2 mb-2">
+                            <h3 className="font-display text-lg tracking-wider whitespace-nowrap">
+                              {group.label.toUpperCase()}
+                            </h3>
+                            <span className="text-[11px] text-muted-foreground tabular-nums whitespace-nowrap">
+                              {group.divisions.length} div · {groupEntries.length}{" "}
+                              {groupEntries.length === 1 ? "entry" : "entries"}
+                            </span>
+                          </div>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            {group.divisions.map((d) => (
+                              <DivisionBoard
+                                key={d.id}
+                                division={d}
+                                entries={entries.filter((e) => e.divisionId === d.id)}
+                                athletes={enrichedAthletes}
+                                eligibility={eligibilityForDivision(d)}
+                                hasFocus={focusAthleteIds.length > 0}
+                                hoveredAthleteId={hoveredAthleteId}
+                                setHoveredAthleteId={setHoveredAthleteId}
+                                onRemoveEntry={handleRemoveEntry}
+                                density={density}
+                                showFees={showFees}
+                                config={eventConfig}
+                                ghostingEnabled={ghostingEnabled}
+                              />
+                            ))}
+                          </div>
+                        </section>
+                      )
+                    })}
                   </div>
                 )}
               </div>
-
-              {selectedDivisionId && (
-                <div className="rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-sm">
-                  <span className="text-muted-foreground">Adding to:</span>{" "}
-                  <span className="font-medium">{selectedDivision?.name}</span>
-                  <span className="text-muted-foreground">
-                    {" "}
-                    ·{" "}
-                    {entryType === "KATA"
-                      ? "Kata (Individual)"
-                      : entryType === "KUMITE"
-                      ? "Kumite (Individual)"
-                      : entryType === "TEAM_KATA"
-                      ? "Kata (Team)"
-                      : "Kumite (Team)"}
-                    {entryType === "KUMITE" && selectedWeightClassId && (
-                      <>
-                        {" "}
-                        ·{" "}
-                        {
-                          selectedEvent?.weightClasses?.find(
-                            (wc) => wc.id === selectedWeightClassId,
-                          )?.name
-                        }
-                      </>
-                    )}
-                  </span>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        )}
-
-        {selectedEventId && selectedDivisionId && (
-          <>
-            {/* Mobile (no dnd) */}
-            <div className="lg:hidden space-y-6">
-              <section>
-                <div className="flex items-baseline justify-between mb-3">
-                  <h2 className="font-medium">Eligible athletes</h2>
-                  <span className="text-xs text-muted-foreground">
-                    {filteredAthletes.filter((a) => !a.isEntered).length} available
-                  </span>
-                </div>
-                <div className="relative mb-3">
-                  <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-                  <Input
-                    placeholder="Search athletes..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="pl-9"
-                  />
-                </div>
-                {loadingAthletes && (
-                  <div className="space-y-2">
-                    {[0, 1, 2].map((i) => (
-                      <Skeleton key={i} className="h-20 w-full" />
-                    ))}
-                  </div>
-                )}
-                {!loadingAthletes && filteredAthletes.length === 0 && (
-                  <p className="text-sm text-muted-foreground text-center py-8">
-                    No eligible athletes found.
-                  </p>
-                )}
-                {!loadingAthletes && filteredAthletes.length > 0 && (
-                  <div className="space-y-2">
-                    {filteredAthletes.map((athlete) => (
-                      <MobileAthleteCard
-                        key={athlete.id}
-                        athlete={athlete}
-                        onAdd={() => handleAddEntry(athlete.id)}
-                        isAdding={createEntryMutation.isPending || addBlocked}
-                      />
-                    ))}
-                  </div>
-                )}
-              </section>
-
-              <section>
-                <div className="flex items-baseline justify-between mb-3">
-                  <h2 className="font-medium">Current entries</h2>
-                  <span className="text-xs text-muted-foreground">
-                    {currentEntries.length}
-                  </span>
-                </div>
-                {loadingEntries && (
-                  <div className="space-y-2">
-                    {[0, 1].map((i) => (
-                      <Skeleton key={i} className="h-16 w-full" />
-                    ))}
-                  </div>
-                )}
-                {!loadingEntries && currentEntries.length === 0 && (
-                  <div className="rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">
-                    No entries yet. Tap{" "}
-                    <span className="text-primary font-medium">Add</span> on an eligible
-                    athlete.
-                  </div>
-                )}
-                {!loadingEntries && currentEntries.length > 0 && (
-                  <div className="space-y-2">
-                    {currentEntries.map((entry) => (
-                      <EnteredEntryCard
-                        key={entry.id}
-                        entry={entry}
-                        onDelete={() => handleDeleteEntry(entry)}
-                        isDeleting={
-                          deleteEntryMutation.isPending &&
-                          deleteEntryMutation.variables === entry.id
-                        }
-                      />
-                    ))}
-                  </div>
-                )}
-              </section>
-            </div>
-
-            {/* Desktop with drag-and-drop */}
-            <div className="hidden lg:grid grid-cols-2 gap-4">
-              <Card>
-                <CardHeader className="flex-row items-center justify-between gap-2">
-                  <CardTitle className="text-base">Eligible athletes</CardTitle>
-                  <span className="text-xs text-muted-foreground">
-                    {filteredAthletes.filter((a) => !a.isEntered).length} available
-                  </span>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-                    <Input
-                      placeholder="Search athletes..."
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      className="pl-9"
-                    />
-                  </div>
-
-                  {loadingAthletes && (
-                    <div className="space-y-2">
-                      {[0, 1, 2, 3].map((i) => (
-                        <Skeleton key={i} className="h-16 w-full" />
-                      ))}
-                    </div>
-                  )}
-                  {!loadingAthletes && filteredAthletes.length === 0 && (
-                    <p className="text-sm text-muted-foreground">No eligible athletes found.</p>
-                  )}
-                  {!loadingAthletes && filteredAthletes.length > 0 && (
-                    <div className="space-y-2 max-h-[600px] overflow-y-auto pr-1">
-                      <SortableContext
-                        items={filteredAthletes.map((a) => a.id)}
-                        strategy={verticalListSortingStrategy}
-                      >
-                        {filteredAthletes.map((athlete) => (
-                          <DraggableAthleteCard
-                            key={athlete.id}
-                            athlete={athlete}
-                            onAdd={() => handleAddEntry(athlete.id)}
-                            isAdding={createEntryMutation.isPending || addBlocked}
-                          />
-                        ))}
-                      </SortableContext>
-                    </div>
-                  )}
-                  <p className="text-xs text-muted-foreground">
-                    Click <span className="text-primary font-medium">Add</span> or drag a
-                    card onto the entries panel.
-                  </p>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader className="flex-row items-center justify-between gap-2">
-                  <CardTitle className="text-base">Current entries</CardTitle>
-                  <span className="text-xs text-muted-foreground">
-                    {currentEntries.length} entered
-                  </span>
-                </CardHeader>
-                <CardContent>
-                  <DroppableZone>
-                    <div
-                      id="drop-zone"
-                      className={cn(
-                        "rounded-md p-4 min-h-[400px] border-2 border-dashed transition-colors",
-                        draggedAthlete
-                          ? "border-primary bg-primary/5"
-                          : "border-border bg-muted/30",
-                      )}
-                    >
-                      {draggedAthlete && (
-                        <div className="mb-4 p-3 rounded-md bg-primary/10 border border-primary/30">
-                          <p className="text-sm text-primary mb-2 font-medium">
-                            Drop to enter:
-                          </p>
-                          <AthleteCardSurface athlete={draggedAthlete} isDragging />
-                        </div>
-                      )}
-
-                      {loadingEntries && (
-                        <div className="space-y-2">
-                          {[0, 1, 2].map((i) => (
-                            <Skeleton key={i} className="h-16 w-full" />
-                          ))}
-                        </div>
-                      )}
-                      {!loadingEntries && currentEntries.length === 0 && (
-                        <div className="flex flex-col items-center justify-center text-center py-12">
-                          <div className="flex size-12 items-center justify-center rounded-full bg-muted text-muted-foreground mb-3">
-                            <Inbox className="size-6" />
-                          </div>
-                          <p className="text-foreground">No entries yet</p>
-                          <p className="text-xs text-muted-foreground mt-1">
-                            Drag an athlete here or click{" "}
-                            <span className="text-primary font-medium">Add</span>.
-                          </p>
-                        </div>
-                      )}
-                      {!loadingEntries && currentEntries.length > 0 && (
-                        <div className="space-y-2">
-                          {currentEntries.map((entry) => (
-                            <EnteredEntryCard
-                              key={entry.id}
-                              entry={entry}
-                              onDelete={() => handleDeleteEntry(entry)}
-                              isDeleting={
-                                deleteEntryMutation.isPending &&
-                                deleteEntryMutation.variables === entry.id
-                              }
-                            />
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </DroppableZone>
-                </CardContent>
-              </Card>
             </div>
           </>
         )}
       </>
 
+      {selectedAthleteIds.size > 0 && selectedEventId && (
+        <BulkActionBar
+          selectedAthleteIds={selectedAthleteIds}
+          athletes={enrichedAthletes}
+          divisions={divisions}
+          entries={entries}
+          eventDate={eventDate}
+          onClear={clearSelection}
+          onBulkAdd={handleBulkAdd}
+          isPending={createEntryMutation.isPending || addBlocked}
+        />
+      )}
+
+      {/* Drag ghost */}
       <DragOverlay>
         {draggedAthlete ? (
-          <div className="rotate-3 scale-105">
-            <AthleteCardSurface athlete={draggedAthlete} isDragging />
+          <div className="rounded-md border bg-card px-3 py-2 shadow-2xl rotate-2">
+            <div className="flex items-center gap-2">
+              <BeltBadge
+                name={draggedAthlete.belt?.name}
+                colour={draggedAthlete.belt?.colour}
+                iconOnly
+              />
+              <div>
+                <p className="text-sm font-medium">
+                  {draggedAthlete.firstName} {draggedAthlete.lastName}
+                </p>
+                {selectedAthleteIds.has(draggedAthlete.id) &&
+                  selectedAthleteIds.size > 1 && (
+                    <p className="text-[10px] text-muted-foreground">
+                      +{selectedAthleteIds.size - 1} more
+                    </p>
+                  )}
+              </div>
+            </div>
           </div>
         ) : null}
       </DragOverlay>
     </DndContext>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tiny presentational atoms
+// ─────────────────────────────────────────────────────────────────────────────
+
+function Stat({
+  label,
+  value,
+  tone,
+  mono,
+}: {
+  label: string
+  value: number | string
+  tone?: "orange" | "green" | "red"
+  mono?: boolean
+}) {
+  const toneClass =
+    tone === "orange"
+      ? "text-belt-orange"
+      : tone === "green"
+        ? "text-belt-green"
+        : tone === "red"
+          ? "text-flag-red"
+          : ""
+  return (
+    <div className="px-3 py-1.5 min-w-[72px]">
+      <p
+        className={cn(
+          "font-display text-2xl md:text-3xl leading-none tabular-nums",
+          mono && "font-sans text-base md:text-lg",
+          toneClass,
+        )}
+      >
+        {value}
+      </p>
+      <p className="text-[9px] uppercase tracking-wider text-muted-foreground mt-1">
+        {label}
+      </p>
+    </div>
+  )
+}
+
+function ChipButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean
+  onClick: () => void
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-medium transition-colors",
+        active
+          ? "border-primary/60 bg-primary/15 text-foreground"
+          : "border-border text-muted-foreground hover:text-foreground hover:border-ring",
+      )}
+    >
+      {children}
+    </button>
   )
 }
 

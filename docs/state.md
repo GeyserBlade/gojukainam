@@ -4,48 +4,30 @@ This file is the handoff between coding agents. It describes what is in flight
 right now, not the permanent architecture (that's
 [`architecture.md`](architecture.md)).
 
-**Last updated:** 2026-08-01 — by Claude Code: shared agent docs created, then
-both projects type-checked and built (results under "Verification" below).
+**Last updated:** 2026-08-01 — by Claude Code: shared agent docs, 18 type-error
+fixes, merge of 10 upstream PRs, local Postgres + seed repair, the athlete-pool
+endpoint, and the Entry Management redesign port.
 
 ## Branch
 
 `main`. Pushing to `main` deploys to Railway, so it is a release, not a save.
 
-Last commit: `fca040b — Full frontend redesign with shadcn/ui and karate-themed identity`.
+**Local `main` is ahead of `origin/main` by several commits that have not been
+pushed** — the pool endpoint and the redesign port among them. Verified locally
+against a database, but never run against production data.
 
 ## In flight (uncommitted)
 
-**Entry Management "wired redesign"** — a rewrite of the entry-management screen:
+Nothing. The Entry Management redesign that used to sit here is committed and
+live — see "Entry Management redesign" below.
 
-- `frontend/src/pages/EventManagement.tsx` — rewritten (~686 lines changed)
-- `frontend/src/pages/event-management/` — new: `AthletePool.tsx`,
-  `AthleteRow.tsx`, `DivisionBoard.tsx`, `BulkActionBar.tsx`, `eligibility.ts`,
-  `types.ts`
-- `Entry Management — Wired Redesign README.md` (repo root) — the design note
-  for this change; read it before touching these files
+Still carried as known gaps of that screen (from its README at the repo root):
 
-What it changes: instead of "pick a division → see eligible athletes → add one
-at a time", the screen shows an athlete pool on the left and every division
-board on the right, with drag-and-drop enrolment (`@dnd-kit`), live eligibility
-ghosting, multi-select bulk enrol into all eligible kata/kumite divisions, and a
-submit-all-drafts action. Eligibility is computed **client-side** from
-`athlete.dob` / `athlete.gender` vs `division.minAge` / `maxAge` / `gender`; the
-`/events/:id/divisions/:id/eligible-athletes` endpoint is no longer called from
-this screen (it still exists). No backend changes and no new dependencies.
-
-Status: **type-clean and builds; not yet exercised in a browser.** See
-"Verification" below — `EventManagement.tsx` and every file in
-`event-management/` produce zero type errors, and `npm run build` succeeds.
-Nobody has driven the actual screen (drag-and-drop, bulk enrol, submit-all) yet.
-Do that before committing.
-
-Known gaps carried by this change, called out in its README:
-
-- Team entries (`TEAM_KATA` / `TEAM_KUMITE`) can be *displayed* but not created
-  from this screen — team enrolment wants its own flow.
+- Team entries (`TEAM_KATA` / `TEAM_KUMITE`) are *displayed* but not creatable
+  here — team enrolment wants its own flow.
 - Weight classes are not auto-assigned on individual kumite creates.
-- The athlete pool fetches all athletes for admins on "All clubs"; virtualise
-  it if the dataset grows into the thousands.
+- The athlete pool renders every athlete for admins on "All clubs"; virtualise
+  the list if the dataset grows into the thousands.
 
 ## Verification (run 2026-08-01, TypeScript 6.0.3)
 
@@ -108,11 +90,11 @@ flags. What changed, and why it matters beyond the type-check:
 Behavioural changes to sanity-check when someone next runs the app against real
 data: the event admin list should now include CLOSED and ARCHIVED events.
 
-## Entry Management redesign — port in progress (started 2026-08-01)
+## Entry Management redesign — ported and live (2026-08-01)
 
-The redesign (pool + all division boards + bulk enrol + eligibility ghosting)
-is still in `git stash@{0}`, written against the pre-hub architecture. Porting
-it needs three things; **step 1 is done**:
+The redesign (athlete pool + all division boards at once + bulk enrol +
+live eligibility ghosting) has **replaced** the old one-division-at-a-time
+screen at `/hub/entries`. All three steps are done:
 
 1. ✅ **Event-wide athlete pool endpoint** — `GET /api/events/:id/athlete-pool`.
    The redesign originally fetched `listAllAthletes()` / `listAthletes()` and
@@ -124,23 +106,45 @@ it needs three things; **step 1 is done**:
    `getEligibleAthletes` (no PII), forces non-admin roles to their own club, and
    answers the whole event in one request instead of one per division (32 in the
    seeded event). Client: `getAthletePool()` / `PoolAthlete` in `lib/events.ts`.
-2. ⬜ **Rewire the redesign to the hub** — drop its own `AppShell` and event
-   picker, read the event from `useSelectedEvent()`, and swap its athlete query
-   to `getAthletePool`.
-3. ⬜ **Port the guards added upstream since** — `registrationState`/`addBlocked`
-   (clubs blocked from adding once registration closes; the bulk action bar is
-   the riskiest surface, it creates many entries at once) and `entry.statusReason`
-   on RETURNED entries. Neither appears anywhere in the stashed code.
+2. ✅ **Rewired to the hub** — dropped its own `AppShell` and event picker
+   (`EventHubLayout` owns both), reads the event from `useSelectedEvent()`, and
+   fetches via `getAthletePool`. Two queries disappeared: `listEvents` is the
+   hub's, and `getEvent` was unnecessary because `/events` already returns
+   `configJson`. `EnrichedAthlete` is now just `PoolAthlete` — the server
+   resolves age, so the client-side enrichment pass is gone, and `isEligible`
+   takes a structural `{dob, gender}` so nothing in this screen depends on the
+   PII-carrying `Athlete` type.
+3. ✅ **Guards ported** — `registrationState`/`addBlocked` now gates all four
+   mutation paths (single add, drag-drop, bulk add, submit-all-drafts), shows
+   the closed-registration banner, and disables the submit button, the bulk
+   action bar and the per-athlete division toggles. `entry.statusReason` renders
+   on RETURNED entries in `DivisionBoard`.
 
-### Verification of step 1 (against the local database)
+**A note for whoever touches this next:** the guard belongs on *every* create
+path, not just the visible button. The bulk bar creates many entries per click,
+and drag-drop bypasses the row controls entirely — both are gated at the handler
+as well as in the UI.
+
+### Verification (against the local database, in the browser)
 
 | Check | Result |
 |---|---|
-| Response contains no PII field | ✅ keys are id, clubId, firstName, lastName, dob, gender, nationality, weightKg, age, club, belt, isEntered |
+| Pool response contains no PII field | ✅ id, clubId, firstName, lastName, dob, gender, nationality, weightKg, age, club, belt, isEntered |
 | CLUB_MANAGER passing another club's `?clubId=` | ✅ forced to own club, param ignored |
 | ADMIN filtering by `?clubId=` | ✅ works (intended admin capability) |
 | Unauthenticated / unknown event | ✅ 401 / 404 |
+| Requests to render the screen | ✅ 1 pool call, not 32 per-division calls; no `/athletes/all` |
+| Screen renders in hub with no duplicate chrome | ✅ |
+| Eligibility ghosting + bulk counts | ✅ selecting an already-entered 14yo gave `KATA +0 · KUMITE +0` |
+| CLUB_MANAGER on a closed event | ✅ banner shown, submit disabled, division toggles `disabled` with "Registration is closed" |
+| ADMIN on the same closed event | ✅ no banner, controls enabled (admins bypass) |
+| Club scoping visible in UI | ✅ club manager sees 2 athletes, admin sees 28 |
+| Creating an entry through the new path | ✅ 20→21 entries; stats, pool count and board all updated |
 | Draw-engine suite after the service change | ✅ still passes |
+
+Not exercised: actual pointer drag-and-drop (the handler is shared with the
+click path, which is covered) and team entries, which this screen still does not
+create — see the redesign README at the repo root.
 
 ## Local development database (set up 2026-08-01)
 
