@@ -183,8 +183,8 @@ const EntriesView = () => {
   const [expandedDivisions, setExpandedDivisions] = useState<Set<string>>(new Set())
 
   const { data: events = [] } = useQuery({
-    queryKey: ["events"],
-    queryFn: listEvents,
+    queryKey: ["events", "active"],
+    queryFn: () => listEvents(true),
   })
 
   const { data: clubs = [] } = useQuery({

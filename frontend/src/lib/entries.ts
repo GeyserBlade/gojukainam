@@ -30,23 +30,12 @@ export interface Team {
   }[];
 }
 
-export interface Division {
-  id: string;
-  name: string;
-  key: string;
-  category: "KATA" | "KUMITE";
-  gender: "Male" | "Female";
-  minAge: number;
-  maxAge: number;
-}
-
-export interface WeightClass {
-  id: string;
-  name: string;
-  gender: "Male" | "Female";
-  minKg?: number | null;
-  maxKg?: number | null;
-}
+// The entries API returns the full division/weight-class rows, so reuse the
+// canonical types from ./events rather than keeping a narrower duplicate here —
+// two `Division` types that differ only by `eventId` are not assignable to each
+// other and silently split consumers.
+export type { Division, WeightClass } from "./events";
+import type { Division, WeightClass } from "./events";
 
 export interface Club {
   id: string;

@@ -129,10 +129,9 @@ const AthleteFormPage = () => {
     setError(null)
     setSaving(true)
     try {
-      const payload: Partial<Athlete> & { weightKg?: number } = { ...form }
-      if (typeof payload.weightKg === "string") {
-        payload.weightKg = Number(payload.weightKg) || undefined
-      }
+      // The weight input already coerces to a number (or undefined) on change,
+      // so no string ever reaches here; null means "clear the stored weight".
+      const payload: Partial<Athlete> = { ...form }
       if (!payload.clubId && clubId) payload.clubId = clubId
       if (mode === "create") {
         await createAthlete(payload as Parameters<typeof createAthlete>[0])

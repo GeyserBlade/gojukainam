@@ -119,7 +119,16 @@ const EventsAdmin = () => {
   const [templateForNewEvent, setTemplateForNewEvent] = useState<TemplateId | "">("")
   const [templateToApply, setTemplateToApply] = useState<TemplateId | "">("")
 
-  const [eventForm, setEventForm] = useState<CreateEventDto>({
+  // CreateEventDto allows `string | Date` for the date fields, but this form
+  // only ever holds the `yyyy-mm-dd` strings that <input type="date"> works
+  // with — narrow them so the inputs type-check.
+  type EventFormState = Omit<CreateEventDto, "startDate" | "regOpen" | "regClose"> & {
+    startDate: string
+    regOpen: string
+    regClose: string
+  }
+
+  const [eventForm, setEventForm] = useState<EventFormState>({
     name: "",
     venue: "",
     city: "",
@@ -148,8 +157,10 @@ const EventsAdmin = () => {
   })
 
   const { data: events = [], isLoading: loadingEvents } = useQuery({
-    queryKey: ["events"],
-    queryFn: listEvents,
+    // Event admin lists every event, including CLOSED and ARCHIVED ones — a
+    // different result set from ["events", "active"], so it needs its own key.
+    queryKey: ["events", "all"],
+    queryFn: () => listEvents(),
   })
 
   const { data: templates = [] } = useQuery({
