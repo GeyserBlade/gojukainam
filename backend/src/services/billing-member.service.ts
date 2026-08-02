@@ -258,28 +258,45 @@ export class BillingMemberService {
     });
 
     const name = (m: { firstName: string; lastName: string }) => `${m.firstName} ${m.lastName}`;
-    const pick = (rows: typeof members) =>
-      rows.map((m) => ({ athleteId: m.id, name: name(m) }));
+
+    // Names are capped. The full roster across seven categories runs to ~14KB,
+    // which is past what a caller will paste into a model's context intact —
+    // and a truncated list is worse than a short one, because a count taken
+    // from it looks right and is not. The counts below are computed from the
+    // whole set before any capping.
+    const NAME_LIMIT = 15;
+    const pick = (rows: typeof members) => ({
+      count: rows.length,
+      names: rows.slice(0, NAME_LIMIT).map((m) => ({ athleteId: m.id, name: name(m) })),
+      ...(rows.length > NAME_LIMIT
+        ? { andMore: rows.length - NAME_LIMIT, note: "names truncated; count is complete" }
+        : {}),
+    });
 
     const minorNoGuardian = members.filter(
       (m) => ageInYears(m.dob, asOf) < 18 && !m.guardianPhone1 && !m.contactPhone,
     );
 
+    const gaps = {
+      noWeight: pick(members.filter((m) => m.weightKg === null)),
+      noJoinDate: pick(members.filter((m) => m.joinDate === null)),
+      neverGraded: pick(members.filter((m) => m.lastGraded === null)),
+      noPaymentReference: pick(members.filter((m) => !m.invoiceRef)),
+        // Nobody to send an invoice to.
+      noContactAtAll: pick(members.filter((m) => !m.contactPhone && !m.guardianPhone1)),
+        // A minor with no reachable adult — the sharper version of the above.
+      minorWithNoGuardianContact: pick(minorNoGuardian),
+        // Would not appear in any invoice run.
+      noActiveSubscription: pick(members.filter((m) => m.subscriptions.length === 0)),
+    };
+
     return {
       asOf: toIsoDate(asOf),
       activeMembers: members.length,
-      gaps: {
-        noWeight: pick(members.filter((m) => m.weightKg === null)),
-        noJoinDate: pick(members.filter((m) => m.joinDate === null)),
-        neverGraded: pick(members.filter((m) => m.lastGraded === null)),
-        noPaymentReference: pick(members.filter((m) => !m.invoiceRef)),
-        // Nobody to send an invoice to.
-        noContactAtAll: pick(members.filter((m) => !m.contactPhone && !m.guardianPhone1)),
-        // A minor with no reachable adult — the sharper version of the above.
-        minorWithNoGuardianContact: pick(minorNoGuardian),
-        // Would not appear in any invoice run.
-        noActiveSubscription: pick(members.filter((m) => m.subscriptions.length === 0)),
-      },
+      // Counts first and separately, so the number is read rather than
+      // derived. Never count the name lists — they are capped.
+      counts: Object.fromEntries(Object.entries(gaps).map(([k, v]) => [k, v.count])),
+      gaps,
     };
   }
 
