@@ -481,3 +481,9 @@ export const CreateSubscription = z.object({
   quantity: z.number().int().min(1).max(20).optional(),
   overrideAmountCents: z.number().int().nonnegative().optional().nullable(),
 });
+
+export const ApplyInvoiceDiscount = z.object({
+  clubId: z.string().min(1),
+  discountCents: z.number().int().nonnegative(),
+  reason: z.string().trim().min(1).max(200),
+});

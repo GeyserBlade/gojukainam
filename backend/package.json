@@ -14,7 +14,8 @@
     "create-superuser": "tsx scripts/create-superuser.ts",
     "check-user": "tsx scripts/check-user.ts",
     "create-agent-key": "tsx scripts/create-agent-key.ts",
-    "enable-club-billing": "tsx scripts/enable-club-billing.ts"
+    "enable-club-billing": "tsx scripts/enable-club-billing.ts",
+    "seed-club-fees": "tsx scripts/seed-club-fees.ts"
   },
   "keywords": [],
   "author": "",

@@ -6,7 +6,7 @@ import { requireBillingEnabled } from "../utils/billing-guard.js";
 import { getParam } from "../utils/params.js";
 import { startOfUtcDay } from "../utils/dates.js";
 import {
-  AllocatePayment, ArrearsQuery, BillingClubQuery, BillingInvoicesQuery, BillingMemberSearchQuery,
+  AllocatePayment, ApplyInvoiceDiscount, ArrearsQuery, BillingClubQuery, BillingInvoicesQuery, BillingMemberSearchQuery,
   BillingMembersQuery, BillingPaymentsQuery, BillingSummaryQuery, BirthdaysQuery,
   CreateFeeSchedule, CreateInvoiceRun, CreateSubscription, OpenInvoicesQuery,
   RecordPayment, SetMemberInvoiceStatus,
@@ -380,5 +380,20 @@ router.post("/subscriptions", writeGate, validate(CreateSubscription), async (re
 
     const { clubId, ...data } = body;
     res.status(201).json(await prisma.memberSubscription.create({ data }));
+  } catch (err) { next(err); }
+});
+
+router.post("/invoices/:id/discount", writeGate, validate(ApplyInvoiceDiscount), async (req, res, next) => {
+  try {
+    const body = ApplyInvoiceDiscount.parse(req.body);
+    await gate(req, body.clubId);
+    res.json(
+      await MemberInvoiceService.applyDiscount(
+        body.clubId,
+        getParam(req.params.id),
+        body.discountCents,
+        body.reason,
+      ),
+    );
   } catch (err) { next(err); }
 });

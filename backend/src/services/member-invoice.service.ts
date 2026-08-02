@@ -3,6 +3,14 @@ import { prisma } from "../lib/prisma.js";
 import { parsePeriodKey, toIsoDate, utcDate } from "../utils/dates.js";
 import { assignMemberRefs, formatInvoiceRef } from "../utils/references.js";
 
+/** Advance-payment discounts, from the club's 2026 Class Information sheet. */
+export const ADVANCE_DISCOUNTS = {
+  /** Per student, for paying three months up front. Excludes January. */
+  THREE_MONTHS_CENTS: 26_000,
+  /** For paying the entire year up front. */
+  FULL_YEAR_CENTS: 79_000,
+} as const;
+
 /**
  * The invoice run and the invoice state machine.
  *
@@ -322,6 +330,79 @@ export class MemberInvoiceService {
         data: { status: "APPROVED", approvedAt: new Date() },
       });
       return { approved: updated.count };
+    });
+  }
+
+  /**
+   * Apply a discount to an issued invoice.
+   *
+   * The advance-payment discounts (N$260 for three months up front, N$790 for
+   * the year) are earned by HOW someone pays, so the invoice run cannot know
+   * about them — it only sees subscriptions. They land here instead, against
+   * an invoice that already exists, which keeps the arithmetic visible: the
+   * subtotal stays as billed, the discount is named, and the total is derived.
+   *
+   * discountCents is set, not added to, so re-applying the same discount is
+   * idempotent rather than compounding.
+   */
+  static async applyDiscount(
+    clubId: string,
+    invoiceId: string,
+    discountCents: number,
+    reason: string,
+  ) {
+    return prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "MemberInvoice" WHERE id = ${invoiceId} FOR UPDATE`;
+
+      const invoice = await tx.memberInvoice.findFirst({
+        where: { id: invoiceId, clubId },
+        select: {
+          id: true, status: true, subtotalCents: true,
+          discountCents: true, amountPaidCents: true, notes: true,
+        },
+      });
+      if (!invoice) throw { status: 404, message: "Not found" };
+      if (invoice.status === "CANCELLED" || invoice.status === "WRITTEN_OFF") {
+        throw { status: 422, message: `Cannot discount a ${invoice.status} invoice` };
+      }
+      if (discountCents < 0 || discountCents > invoice.subtotalCents) {
+        throw {
+          status: 422,
+          message: `Discount must be between 0 and the subtotal (${invoice.subtotalCents})`,
+        };
+      }
+
+      const newTotal = invoice.subtotalCents - discountCents;
+      // Discounting below what has already been allocated would leave the
+      // invoice overpaid and break the allocation invariant. Refuse rather
+      // than silently creating a credit nobody asked for.
+      if (newTotal < invoice.amountPaidCents) {
+        throw {
+          status: 422,
+          message:
+            `Discount would drop the total to ${newTotal}, below the ` +
+            `${invoice.amountPaidCents} already allocated. Unallocate first.`,
+        };
+      }
+
+      await tx.memberInvoice.update({
+        where: { id: invoiceId },
+        data: {
+          discountCents,
+          totalCents: newTotal,
+          notes: invoice.notes ? `${invoice.notes}\n${reason}` : reason,
+        },
+      });
+
+      // The status follows the new total: a discount can settle an invoice.
+      const state = await recomputeInvoicePaidState(tx, invoiceId);
+      return {
+        id: invoiceId,
+        subtotalCents: invoice.subtotalCents,
+        discountCents,
+        totalCents: newTotal,
+        ...state,
+      };
     });
   }
 
