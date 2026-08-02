@@ -128,11 +128,13 @@ export async function verifyApiKey(raw: string): Promise<AgentIdentity | null> {
 }
 
 /**
- * Path prefixes an agent key is allowed to reach at all. Billing lands in M1b
- * and adds "/api/billing"; until then this is empty and a key authenticates
- * successfully but can reach nothing.
+ * Path prefixes an agent key is allowed to reach at all.
+ *
+ * Adding an entry here is the single act that exposes a route family to
+ * machine callers — keep the list short, and keep it a list of prefixes rather
+ * than a wildcard, so widening it is always a visible diff.
  */
-const AGENT_ALLOWED_PREFIXES: readonly string[] = [];
+const AGENT_ALLOWED_PREFIXES: readonly string[] = ["/api/billing"];
 
 /**
  * Structural default-deny for agent callers, mounted immediately after
