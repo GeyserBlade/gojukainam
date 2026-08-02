@@ -10,6 +10,7 @@ import { dirname, join } from "path";
 import { prisma } from "./lib/prisma.js";
 import { errorHandler } from "./utils/error-handler.js";
 import { authMiddleware, ensureDevUser } from "./utils/auth.js";
+import { agentRouteGuard, ensureAgentUser } from "./utils/agent-auth.js";
 import { router as auth } from "./routes/auth.js";
 import { router as athletes } from "./routes/athletes.js";
 import { router as entries } from "./routes/entries.js";
@@ -109,6 +110,11 @@ app.use("/api/public", publicBoard);
 
 app.use(authMiddleware); // populates req.user with { id, role, clubId }
 
+// Service-account keys reach only explicitly allowlisted paths. Humans pass
+// through untouched. This is what keeps a key off every existing route without
+// relying on each handler having remembered requireRoles.
+app.use(agentRouteGuard);
+
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
 
 app.get("/api/version", async (_req, res) => {
@@ -136,6 +142,7 @@ app.use(errorHandler);
 const PORT = process.env.PORT ?? 4000;
 app.listen(PORT, async () => {
   await ensureDevUser().catch((e) => console.error("ensureDevUser failed:", e));
+  await ensureAgentUser().catch((e) => console.error("ensureAgentUser failed:", e));
   console.log(`API on http://localhost:${PORT}`);
 });
 
