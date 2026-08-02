@@ -33,6 +33,7 @@ const prisma = new PrismaClient();
  *
  * Usage:
  *   npm run seed-club-fees -- <clubId> --fees
+ *   npm run seed-club-fees -- <clubId> --assign-by-class [--apply]
  *   npm run seed-club-fees -- <clubId> --assign MONTHLY_BEGINNER --all-active
  *   npm run seed-club-fees -- <clubId> --assign MONTHLY_SENIOR --athlete <id>
  *   npm run seed-club-fees -- <clubId> --family <id,id,...>
@@ -43,6 +44,27 @@ const prisma = new PrismaClient();
 const YEAR_START = new Date("2026-01-01T00:00:00Z");
 /** N$160 off each additional sibling. */
 const FAMILY_DISCOUNT_CENTS = 16_000;
+
+/**
+ * Class placement, from the Class Information sheet:
+ *   Beginners  white to green belt, up to 15 years of age   N$770
+ *   Advanced   green belt and up, up to 16 years of age     N$830
+ *   Seniors    over 16 years of age                         N$830
+ *
+ * Green is belt order 40 (7th Kyu). The sheet says plainly that these are
+ * guidelines and instructors place each student, so this decides the obvious
+ * cases and reports the rest rather than pretending it knows.
+ */
+const GREEN_BELT_ORDER = 40;
+
+function placeMember(ageYears: number, beltOrder: number): { code: string; sure: boolean } {
+  if (ageYears > 16) return { code: "MONTHLY_SENIOR", sure: true };
+  if (beltOrder >= GREEN_BELT_ORDER) return { code: "MONTHLY_ADVANCED", sure: true };
+  if (ageYears <= 15) return { code: "MONTHLY_BEGINNER", sure: true };
+  // 16 years old and below green: too old for Beginners, not graded for
+  // Advanced. A real person an instructor places by hand.
+  return { code: "MONTHLY_BEGINNER", sure: false };
+}
 
 const SCHEDULES = [
   { code: "MONTHLY_BEGINNER", name: "Monthly tuition — Beginners", feeType: "MONTHLY", cadence: "MONTHLY", amountCents: 77_000 },
@@ -239,6 +261,89 @@ async function main() {
     }
     console.log(
       `\n${schedule.name}: ${created} subscribed, ${skipped} skipped (already on a monthly fee).\n`,
+    );
+  }
+
+  // --- assign by belt and age -------------------------------------------
+  if (args.includes("--assign-by-class")) {
+    const apply = args.includes("--apply");
+    const athletes = await prisma.athlete.findMany({
+      where: { clubId, isActive: true },
+      select: {
+        id: true, firstName: true, lastName: true, dob: true,
+        belt: { select: { name: true, order: true } },
+        subscriptions: {
+          where: { endDate: null, feeSchedule: { cadence: "MONTHLY" } },
+          select: { feeSchedule: { select: { code: true } } },
+        },
+      },
+      orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
+    });
+
+    const schedules = await prisma.feeSchedule.findMany({
+      where: { clubId, cadence: "MONTHLY" },
+      select: { id: true, code: true },
+    });
+    const byCode = new Map(schedules.map((s) => [s.code, s.id]));
+
+    const asOf = new Date();
+    const review: string[] = [];
+    let placed = 0;
+    let already = 0;
+
+    console.log(`\n${clubName} — placement by belt and age${apply ? "" : "  (PREVIEW — pass --apply to write)"}\n`);
+    for (const a of athletes) {
+      // UTC components: dob is a date-only value read back as UTC (see
+      // utils/dates.ts and the August 2026 normalisation).
+      let age = asOf.getUTCFullYear() - a.dob.getUTCFullYear();
+      const md = asOf.getUTCMonth() - a.dob.getUTCMonth();
+      if (md < 0 || (md === 0 && asOf.getUTCDate() < a.dob.getUTCDate())) age -= 1;
+
+      const { code, sure } = placeMember(age, a.belt.order);
+      const current = a.subscriptions[0]?.feeSchedule.code;
+      const name = `${a.firstName} ${a.lastName}`;
+
+      if (current) {
+        already += 1;
+        if (current !== code) {
+          review.push(`  ${name.padEnd(24)} on ${current}, rule says ${code}`);
+        }
+        continue;
+      }
+
+      console.log(
+        `  ${name.padEnd(24)} age ${String(age).padStart(2)}  ${(a.belt.name ?? "?").padEnd(18)} -> ${code}${sure ? "" : "   ** review **"}`,
+      );
+      if (!sure) review.push(`  ${name.padEnd(24)} age ${age}, ${a.belt.name} — placed in Beginners, confirm`);
+
+      if (apply) {
+        const feeScheduleId = byCode.get(code);
+        if (!feeScheduleId) {
+          console.error(`    no fee schedule ${code} — run --fees first`);
+          continue;
+        }
+        await prisma.memberSubscription.upsert({
+          where: {
+            athleteId_feeScheduleId_startDate: {
+              athleteId: a.id, feeScheduleId, startDate: YEAR_START,
+            },
+          },
+          update: {},
+          create: { athleteId: a.id, feeScheduleId, startDate: YEAR_START },
+        });
+      }
+      placed += 1;
+    }
+
+    console.log(`\n  ${placed} to place, ${already} already subscribed`);
+    if (review.length) {
+      console.log(`\n  Needs your eye (${review.length}):`);
+      for (const r of review) console.log(r);
+    }
+    console.log(
+      apply
+        ? "\n  Written. Correct exceptions with --assign <CODE> --athlete <id>.\n"
+        : "\n  Nothing written. Re-run with --apply.\n",
     );
   }
 

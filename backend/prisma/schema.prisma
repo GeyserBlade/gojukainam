@@ -666,6 +666,13 @@ model ClubBillingConfig {
   invoiceDay   Int @default(1)
   dueDaysAfter Int @default(7)
 
+  /// Calendar months (1-12) the club does not charge for — school holidays it
+  /// closes through. Windhoek is [5, 12]. Stored rather than left to whoever
+  /// runs the job to remember: running a closed month would generate an
+  /// invoice per active member, all of which then need cancelling, and the
+  /// mistake looks like a pricing decision rather than a slip.
+  nonBillableMonths Int[] @default([])
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }

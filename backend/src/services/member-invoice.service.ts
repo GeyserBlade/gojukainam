@@ -3,6 +3,12 @@ import { prisma } from "../lib/prisma.js";
 import { parsePeriodKey, toIsoDate, utcDate } from "../utils/dates.js";
 import { assignMemberRefs, formatInvoiceRef } from "../utils/references.js";
 
+const MONTH_NAMES = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+const monthName = (month: number) => MONTH_NAMES[month - 1] ?? `month ${month}`;
+
 /** Advance-payment discounts, from the club's 2026 Class Information sheet. */
 export const ADVANCE_DISCOUNTS = {
   /** Per student, for paying three months up front. Excludes January. */
@@ -120,6 +126,8 @@ export type PlannedInvoice = {
 export type InvoicePlan = {
   clubId: string;
   periodKey: string;
+  /** Set when the club does not charge for this month; invoices will be empty. */
+  nonBillable?: string;
   issueDate: string;
   dueDate: string;
   currency: string;
@@ -147,6 +155,25 @@ export class MemberInvoiceService {
       config.invoiceDay,
     );
     const dueDate = new Date(issueDate.getTime() + config.dueDaysAfter * 86_400_000);
+
+    // Months the club closes through are not billed at all. Returning an empty
+    // plan with a reason beats returning a full one and trusting whoever reads
+    // it to remember the dojo is shut.
+    const month = periodStart.getUTCMonth() + 1;
+    if (config.nonBillableMonths.includes(month)) {
+      return {
+        clubId,
+        periodKey,
+        nonBillable: `${monthName(month)} is a non-billable month for this club`,
+        issueDate: toIsoDate(issueDate),
+        dueDate: toIsoDate(dueDate),
+        currency: config.currency,
+        invoices: [],
+        skipped: [],
+        invoiceCount: 0,
+        totalCents: 0,
+      };
+    }
 
     // A subscription counts if it overlaps the invoice date. Endless
     // subscriptions (endDate null) always overlap.
@@ -246,6 +273,9 @@ export class MemberInvoiceService {
     }
 
     const plan = await this.planRun(clubId, periodKey);
+    if (plan.nonBillable) {
+      throw { status: 422, message: plan.nonBillable };
+    }
     if (plan.invoices.length === 0) {
       throw {
         status: 422,
