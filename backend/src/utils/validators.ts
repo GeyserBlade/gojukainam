@@ -335,3 +335,84 @@ export const AthletePoolQuery = z.object({
 export const ApplyTemplate = z.object({
   template: z.enum(["NKF_FULL_2026", "NKF_INDIVIDUAL_2026", "NKF_TEAM_2026", "WKF_2024"]),
 });
+
+// ---------------------------------------------------------------------------
+// Club billing (M1b: read endpoints)
+// ---------------------------------------------------------------------------
+
+export const FeeTypeEnum = z.enum([
+  "MONTHLY", "GRADING", "TOURNAMENT_ENTRY", "CAMP", "REGISTRATION", "OTHER",
+]);
+export const FeeCadenceEnum = z.enum(["MONTHLY", "ONE_OFF"]);
+export const MemberInvoiceStatusEnum = z.enum([
+  "DRAFT", "APPROVED", "SENT", "PARTIALLY_PAID", "PAID", "CANCELLED", "WRITTEN_OFF",
+]);
+export const PaymentMethodEnum = z.enum(["EFT", "CASH", "CARD", "DEBIT_ORDER", "OTHER"]);
+
+/** "2026-08". Rejected early so a malformed key never reaches a query. */
+export const periodKeySchema = z
+  .string()
+  .regex(/^\d{4}-(0[1-9]|1[0-2])$/, "Expected YYYY-MM");
+
+/** Every billing read is club-scoped; there is no federation-wide billing view. */
+export const BillingClubQuery = z.object({
+  clubId: z.string().min(1),
+});
+
+export const BillingMembersQuery = z.object({
+  clubId: z.string().min(1),
+  /** Defaults to active-only: the invoice run bills active members. */
+  includeInactive: z.coerce.boolean().optional(),
+  q: z.string().trim().min(1).optional(),
+});
+
+export const BillingMemberSearchQuery = z.object({
+  clubId: z.string().min(1),
+  name: z.string().trim().min(1),
+  limit: z.coerce.number().int().min(1).max(25).optional(),
+});
+
+export const BirthdaysQuery = z
+  .object({
+    clubId: z.string().min(1),
+    /** Either a day count, or an explicit window — not both. */
+    days: z.coerce.number().int().min(0).max(366).optional(),
+    from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  })
+  .refine((v) => !(v.days !== undefined && (v.from || v.to)), {
+    message: "Pass either days, or from/to — not both",
+  })
+  .refine((v) => !((v.from && !v.to) || (v.to && !v.from)), {
+    message: "from and to must be given together",
+  });
+
+export const ArrearsQuery = z.object({
+  clubId: z.string().min(1),
+  asOf: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+});
+
+export const BillingInvoicesQuery = z.object({
+  clubId: z.string().min(1),
+  status: MemberInvoiceStatusEnum.optional(),
+  periodKey: periodKeySchema.optional(),
+  athleteId: z.string().min(1).optional(),
+  asOf: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+});
+
+export const OpenInvoicesQuery = z.object({
+  clubId: z.string().min(1),
+  asOf: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+});
+
+export const BillingPaymentsQuery = z.object({
+  clubId: z.string().min(1),
+  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  unallocatedOnly: z.coerce.boolean().optional(),
+});
+
+export const BillingSummaryQuery = z.object({
+  clubId: z.string().min(1),
+  periodKey: periodKeySchema.optional(),
+});

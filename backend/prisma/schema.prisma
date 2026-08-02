@@ -146,6 +146,13 @@ model Club {
   documents  Document[]
   apiKeys    ApiKey[]
 
+  // Club billing — see the billing section at the end of this file.
+  billingConfig  ClubBillingConfig?
+  feeSchedules   FeeSchedule[]
+  invoiceRuns    InvoiceRun[]
+  memberInvoices MemberInvoice[]
+  payments       Payment[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -301,6 +308,10 @@ model Athlete {
   entries     Entry[]
   teamMembers TeamMember[]
   documents   Document[]
+
+  // Club billing — see the billing section at the end of this file.
+  subscriptions  MemberSubscription[]
+  memberInvoices MemberInvoice[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -580,4 +591,280 @@ model Document {
   @@index([eventId])
   @@index([clubId])
   @@index([uploadedById])
+}
+
+// ============================================================================
+// Club billing — monthly member fees, payments and reconciliation.
+//
+// Entirely separate from the event-scoped `Invoice` model above, which bills a
+// CLUB for a competition. This section bills a MEMBER for training. The two are
+// never mixed; `prisma.invoice` and `prisma.memberInvoice` read differently at
+// every call site on purpose.
+//
+// Every table here is club-scoped, and every route guards on ClubBillingConfig
+// before touching them, so clubs that have not opted in are unaffected.
+// ============================================================================
+
+enum FeeType {
+  MONTHLY
+  GRADING
+  TOURNAMENT_ENTRY
+  CAMP
+  REGISTRATION
+  OTHER
+}
+
+enum FeeCadence {
+  MONTHLY
+  ONE_OFF
+}
+
+enum MemberInvoiceStatus {
+  DRAFT
+  APPROVED
+  SENT
+  PARTIALLY_PAID
+  PAID
+  CANCELLED
+  WRITTEN_OFF
+}
+
+enum MemberInvoiceKind {
+  SUBSCRIPTION
+  ONE_OFF
+}
+
+enum PaymentMethod {
+  EFT
+  CASH
+  CARD
+  DEBIT_ORDER
+  OTHER
+}
+
+/// Per-club opt-in switch and billing settings. A club with no row here has no
+/// billing: every route returns 404, so the feature is invisible to it.
+model ClubBillingConfig {
+  id       String  @id @default(cuid())
+  clubId   String  @unique
+  club     Club    @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  enabled  Boolean @default(false)
+  currency String  @default("NAD")
+  /// IANA zone. All billing date arithmetic resolves through this, never the
+  /// server's local time.
+  timezone String  @default("Africa/Windhoek")
+
+  /// Member reference scheme: <refPrefix>-<zero-padded seq>, e.g. KAR-0231.
+  /// nextRefSeq is allocated inside the same transaction that assigns a ref,
+  /// so references are never model- or client-generated.
+  refPrefix  String @default("KAR")
+  nextRefSeq Int    @default(1)
+
+  /// Day of month the monthly run targets, and how long members get to pay.
+  invoiceDay   Int @default(1)
+  dueDaysAfter Int @default(7)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// A priced thing a member can be billed for.
+model FeeSchedule {
+  id            String     @id @default(cuid())
+  clubId        String
+  club          Club       @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  code          String
+  name          String
+  feeType       FeeType
+  cadence       FeeCadence
+  amountCents   Int
+  active        Boolean    @default(true)
+  effectiveFrom DateTime
+  effectiveTo   DateTime?
+
+  subscriptions MemberSubscription[]
+  lines         MemberInvoiceLine[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([clubId, code])
+  @@index([clubId, active])
+}
+
+/// Who gets billed what. Deliberately an explicit row per member per fee
+/// rather than a rules blob: the monthly run is then a pure function of
+/// (club, period, subscriptions overlapping it, athlete.isActive), which a
+/// human can check by hand. That is what "you approved but computed nothing"
+/// requires.
+model MemberSubscription {
+  id            String      @id @default(cuid())
+  athleteId     String
+  athlete       Athlete     @relation(fields: [athleteId], references: [id], onDelete: Cascade)
+  feeScheduleId String
+  feeSchedule   FeeSchedule @relation(fields: [feeScheduleId], references: [id], onDelete: Restrict)
+  startDate     DateTime
+  endDate       DateTime?
+  quantity      Int         @default(1)
+  /// Family discount, hardship rate. Overrides FeeSchedule.amountCents.
+  overrideAmountCents Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([athleteId, feeScheduleId, startDate])
+  @@index([athleteId])
+  @@index([feeScheduleId])
+}
+
+/// One month's generation for one club. Exists so the approval gate is a
+/// single queue item per month rather than one per member — per-invoice
+/// approval for a 50-member club is how "review everything" becomes
+/// "approve everything".
+model InvoiceRun {
+  id           String    @id @default(cuid())
+  clubId       String
+  club         Club      @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  periodKey    String
+  status       String    @default("DRAFT") // DRAFT | APPROVED | CANCELLED
+  invoiceCount Int       @default(0)
+  totalCents   Int       @default(0)
+  createdVia   String
+  approvedAt   DateTime?
+
+  invoices MemberInvoice[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([clubId, periodKey])
+}
+
+model MemberInvoice {
+  id        String            @id @default(cuid())
+  /// Denormalised from the athlete: every billing query filters on it, and a
+  /// member moving club must not drag their invoice history along.
+  clubId    String
+  club      Club              @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  athleteId String
+  athlete   Athlete           @relation(fields: [athleteId], references: [id], onDelete: Restrict)
+  kind      MemberInvoiceKind @default(SUBSCRIPTION)
+  /// "2026-08" for subscription invoices; NULL for one-offs.
+  periodKey String?
+
+  issueDate DateTime
+  dueDate   DateTime
+
+  subtotalCents Int
+  discountCents Int @default(0)
+  totalCents    Int
+  /// Maintained by recomputeInvoicePaidState inside the allocation
+  /// transaction. Never incremented by hand.
+  amountPaidCents Int @default(0)
+
+  status MemberInvoiceStatus @default(DRAFT)
+  /// <memberRef>-<YYMM>, e.g. KAR-0231-2608. Globally unique.
+  paymentRef String @unique
+  currency   String @default("NAD")
+
+  runId String?
+  run   InvoiceRun? @relation(fields: [runId], references: [id], onDelete: SetNull)
+
+  /// Rendered PDF, stored via the existing Document model and Supabase bucket.
+  pdfDocumentId String? @unique
+
+  createdVia  String
+  approvedAt  DateTime?
+  sentAt      DateTime?
+  cancelledAt DateTime?
+  notes       String?
+
+  lines       MemberInvoiceLine[]
+  allocations PaymentAllocation[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// The anti-double-invoice guard, and the most important line here.
+  /// Postgres treats NULLs as distinct, so this permits unlimited one-off
+  /// invoices per athlete while making a second August subscription invoice
+  /// physically impossible — a database-level guarantee that survives the
+  /// agent stack being rebuilt from scratch.
+  @@unique([clubId, athleteId, periodKey])
+  @@index([clubId, status, dueDate])
+  @@index([athleteId, status])
+  @@index([clubId, periodKey])
+}
+
+model MemberInvoiceLine {
+  id        String        @id @default(cuid())
+  invoiceId String
+  invoice   MemberInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  feeScheduleId String?
+  feeSchedule   FeeSchedule? @relation(fields: [feeScheduleId], references: [id], onDelete: SetNull)
+
+  description     String
+  quantity        Int @default(1)
+  unitAmountCents Int
+  /// quantity * unitAmountCents, recomputed server-side — never trusted from
+  /// the caller.
+  amountCents     Int
+
+  @@index([invoiceId])
+  @@index([feeScheduleId])
+}
+
+/// Money received. Separate from its allocations because a payment is not an
+/// invoice payment: three months paid up front is one bank line and three
+/// allocations, and an overpayment leaves a credit that a single invoiceId FK
+/// could not represent without lying.
+model Payment {
+  id           String        @id @default(cuid())
+  clubId       String
+  club         Club          @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  receivedDate DateTime
+  /// Positive: money in.
+  amountCents  Int
+  currency     String        @default("NAD")
+  method       PaymentMethod
+
+  /// Raw fields as the bank wrote them. UNTRUSTED — a description can contain
+  /// anything, and it reaches a model's context during reconciliation.
+  bankReference String?
+  description   String?
+
+  /// CanonicalTransaction.hash. The authoritative replay guard, independent of
+  /// the ingest file hash and of the agent idempotency table — the only one of
+  /// the three that still holds if the agent stack is rebuilt.
+  externalHash String? @unique
+
+  source          String // "bank-csv" | "cash" | "manual"
+  matchMethod     String? // "rule:exact-ref" | "rule:amount+name" | "rule:amount-in-period" | "agent-proposed" | "manual"
+  matchConfidence Decimal? @db.Decimal(4, 3)
+  recordedVia     String
+  notes           String?
+
+  allocations PaymentAllocation[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([clubId, receivedDate])
+  @@index([bankReference])
+}
+
+model PaymentAllocation {
+  id        String        @id @default(cuid())
+  paymentId String
+  payment   Payment       @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  invoiceId String
+  invoice   MemberInvoice @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  amountCents Int
+  createdVia  String
+
+  createdAt DateTime @default(now())
+
+  @@unique([paymentId, invoiceId])
+  @@index([invoiceId])
 }
