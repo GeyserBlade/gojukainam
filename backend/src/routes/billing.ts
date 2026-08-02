@@ -1,20 +1,24 @@
 import { Router } from "express";
 import type { Request } from "express";
-import { validate } from "../middleware/validate.js";
+import { validate, validateMultiple } from "../middleware/validate.js";
 import { requireAgentOrRoles, assertAgentClub } from "../utils/agent-auth.js";
 import { requireBillingEnabled } from "../utils/billing-guard.js";
 import { getParam } from "../utils/params.js";
 import { startOfUtcDay } from "../utils/dates.js";
 import {
-  ArrearsQuery, BillingClubQuery, BillingInvoicesQuery, BillingMemberSearchQuery,
+  AllocatePayment, ArrearsQuery, BillingClubQuery, BillingInvoicesQuery, BillingMemberSearchQuery,
   BillingMembersQuery, BillingPaymentsQuery, BillingSummaryQuery, BirthdaysQuery,
-  OpenInvoicesQuery,
+  CreateFeeSchedule, CreateInvoiceRun, CreateSubscription, OpenInvoicesQuery,
+  RecordPayment, SetMemberInvoiceStatus,
 } from "../utils/validators.js";
 import { BillingMemberService } from "../services/billing-member.service.js";
+import { MemberInvoiceService } from "../services/member-invoice.service.js";
+import { BillingPaymentWriteService } from "../services/billing-payment.service.js";
 import {
   BillingConfigService, BillingInvoiceService, BillingPaymentService,
   FeeScheduleService, SubscriptionService,
 } from "../services/billing.service.js";
+import { prisma } from "../lib/prisma.js";
 
 export const router = Router();
 
@@ -244,5 +248,137 @@ router.get("/health", readGate, async (_req, res, next) => {
     const { prisma } = await import("../lib/prisma.js");
     const enabledClubs = await prisma.clubBillingConfig.count({ where: { enabled: true } });
     res.json({ ok: true, enabledClubs });
+  } catch (err) { next(err); }
+});
+
+// ---------------------------------------------------------------------------
+// Writes (M3)
+//
+// Same gate as the reads: 404 for a club that has not opted in, then 403 for
+// any caller reaching outside its own club. The scope is billing:write, so a
+// key issued for reads alone cannot reach any of this.
+// ---------------------------------------------------------------------------
+
+const writeGate = requireAgentOrRoles(
+  ["billing:write"],
+  "SUPERADMIN", "ADMIN", "CLUB_MANAGER",
+);
+
+/** Who is doing this, for the createdVia / recordedVia audit trail. */
+function actorLabel(req: Request): string {
+  if (req.agent) return `agent:${req.agent.name}`;
+  return `human:${req.user?.id ?? "unknown"}`;
+}
+
+router.post("/invoice-runs", writeGate, validate(CreateInvoiceRun), async (req, res, next) => {
+  try {
+    const body = CreateInvoiceRun.parse(req.body);
+    await gate(req, body.clubId);
+
+    // dryRun is the default. Generating a month of invoices should be the
+    // deliberate branch, not the one you get by forgetting a flag.
+    if (body.dryRun !== false) {
+      return res.json({ dryRun: true, ...(await MemberInvoiceService.planRun(body.clubId, body.periodKey)) });
+    }
+
+    const result = await MemberInvoiceService.executeRun(
+      body.clubId,
+      body.periodKey,
+      actorLabel(req),
+    );
+    res.status(result.replayed ? 200 : 201).json({ dryRun: false, ...result });
+  } catch (err) { next(err); }
+});
+
+router.post("/invoice-runs/:id/approve", writeGate, validate(BillingClubQuery, "query"), async (req, res, next) => {
+  try {
+    const q = BillingClubQuery.parse(req.query);
+    await gate(req, q.clubId);
+    res.json(await MemberInvoiceService.approveRun(q.clubId, getParam(req.params.id)));
+  } catch (err) { next(err); }
+});
+
+router.post("/invoices/:id/status", writeGate, validateMultiple({ body: SetMemberInvoiceStatus, query: BillingClubQuery }), async (req, res, next) => {
+  try {
+    const q = BillingClubQuery.parse(req.query);
+    const body = SetMemberInvoiceStatus.parse(req.body);
+    await gate(req, q.clubId);
+    res.json(
+      await MemberInvoiceService.setStatus(
+        q.clubId,
+        getParam(req.params.id),
+        body.status,
+        body.reason,
+      ),
+    );
+  } catch (err) { next(err); }
+});
+
+router.post("/payments", writeGate, validate(RecordPayment), async (req, res, next) => {
+  try {
+    const body = RecordPayment.parse(req.body);
+    await gate(req, body.clubId);
+    const result = await BillingPaymentWriteService.record({
+      clubId: body.clubId,
+      receivedDate: body.receivedDate,
+      amountCents: body.amountCents,
+      method: body.method,
+      source: body.source,
+      recordedVia: actorLabel(req),
+      bankReference: body.bankReference,
+      description: body.description,
+      externalHash: body.externalHash,
+      matchMethod: body.matchMethod,
+      matchConfidence: body.matchConfidence,
+      notes: body.notes,
+      allocations: body.allocations,
+    });
+    // A replayed bank line is a no-op, not a conflict: the caller should not
+    // have to tell "already recorded" apart from "failed".
+    res.status(result.replayed ? 200 : 201).json(result);
+  } catch (err) { next(err); }
+});
+
+router.post("/payments/:id/allocations", writeGate, validate(AllocatePayment), async (req, res, next) => {
+  try {
+    const body = AllocatePayment.parse(req.body);
+    await gate(req, body.clubId);
+    res.json(
+      await BillingPaymentWriteService.allocate(
+        body.clubId,
+        getParam(req.params.id),
+        body.allocations,
+        actorLabel(req),
+      ),
+    );
+  } catch (err) { next(err); }
+});
+
+router.post("/fee-schedules", writeGate, validate(CreateFeeSchedule), async (req, res, next) => {
+  try {
+    const body = CreateFeeSchedule.parse(req.body);
+    await gate(req, body.clubId);
+    const { clubId, ...data } = body;
+    res.status(201).json(
+      await prisma.feeSchedule.create({ data: { clubId, ...data } }),
+    );
+  } catch (err) { next(err); }
+});
+
+router.post("/subscriptions", writeGate, validate(CreateSubscription), async (req, res, next) => {
+  try {
+    const body = CreateSubscription.parse(req.body);
+    await gate(req, body.clubId);
+
+    // The athlete must belong to the club the caller is scoped to, or a
+    // subscription becomes a way to reach across the tenant boundary.
+    const athlete = await prisma.athlete.findFirst({
+      where: { id: body.athleteId, clubId: body.clubId },
+      select: { id: true },
+    });
+    if (!athlete) return res.status(404).json({ error: "Not found" });
+
+    const { clubId, ...data } = body;
+    res.status(201).json(await prisma.memberSubscription.create({ data }));
   } catch (err) { next(err); }
 });
