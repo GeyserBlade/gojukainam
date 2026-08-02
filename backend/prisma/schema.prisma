@@ -654,10 +654,12 @@ model ClubBillingConfig {
   /// server's local time.
   timezone String  @default("Africa/Windhoek")
 
-  /// Member reference scheme: <refPrefix>-<zero-padded seq>, e.g. KAR-0231.
+  /// Member reference scheme: <refPrefix>-<zero-padded seq>, e.g. GKWI-0231.
+  /// No default: a prefix identifies one club, so any default would be wrong
+  /// for the next club and would collide on the globally-unique invoice ref.
   /// nextRefSeq is allocated inside the same transaction that assigns a ref,
   /// so references are never model- or client-generated.
-  refPrefix  String @default("KAR")
+  refPrefix  String
   nextRefSeq Int    @default(1)
 
   /// Day of month the monthly run targets, and how long members get to pay.

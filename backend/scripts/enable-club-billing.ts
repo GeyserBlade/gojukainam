@@ -10,7 +10,7 @@ const prisma = new PrismaClient();
  * a club, and the only one.
  *
  * Usage:
- *   tsx scripts/enable-club-billing.ts <clubId> [--prefix KAR] [--invoice-day 1]
+ *   tsx scripts/enable-club-billing.ts <clubId> --prefix GKWI [--invoice-day 1]
  *                                      [--due-days 7] [--currency NAD] [--tz Africa/Windhoek]
  *   tsx scripts/enable-club-billing.ts --list
  *   tsx scripts/enable-club-billing.ts --disable <clubId>
@@ -88,7 +88,7 @@ async function main() {
   if (!clubId || clubId.startsWith("--")) {
     console.error(
       "Usage:\n" +
-        "  tsx scripts/enable-club-billing.ts <clubId> [--prefix KAR] [--invoice-day 1]\n" +
+        "  tsx scripts/enable-club-billing.ts <clubId> --prefix GKWI [--invoice-day 1]\n" +
         "                                     [--due-days 7] [--currency NAD] [--tz Africa/Windhoek]\n" +
         "  tsx scripts/enable-club-billing.ts --list\n" +
         "  tsx scripts/enable-club-billing.ts --disable <clubId>\n",
@@ -96,7 +96,22 @@ async function main() {
     process.exit(1);
   }
 
-  const refPrefix = (flag(args, "prefix") ?? "KAR").toUpperCase();
+  // No default. A reference prefix identifies one club — "GKWI" for Goju Kai
+  // Windhoek — so any value that could be defaulted would be wrong for the
+  // next club to enable billing, and would then collide (see the check below).
+  const prefixArg = flag(args, "prefix");
+  const existingConfig = await prisma.clubBillingConfig.findUnique({ where: { clubId } });
+  if (!prefixArg && !existingConfig) {
+    console.error(
+      "\n--prefix is required when enabling a club.\n\n" +
+        "  It identifies this club in every payment reference a parent ever sees\n" +
+        "  (GKWI-0231-2608), so it is club-specific and has no sensible default.\n" +
+        "  2-5 letters. Pick it carefully: it cannot be changed once references\n" +
+        "  are in circulation.\n",
+    );
+    process.exit(1);
+  }
+  const refPrefix = (prefixArg ?? existingConfig!.refPrefix).toUpperCase();
   const currency = (flag(args, "currency") ?? "NAD").toUpperCase();
   const timezone = flag(args, "tz") ?? "Africa/Windhoek";
   const invoiceDay = Number(flag(args, "invoice-day") ?? 1);
@@ -136,7 +151,34 @@ async function main() {
     process.exit(1);
   }
 
-  const existing = await prisma.clubBillingConfig.findUnique({ where: { clubId } });
+  const existing = existingConfig;
+
+  // Two clubs must never share a prefix.
+  //
+  // Member references are unique per club — (clubId, invoiceRef) — so both
+  // clubs would happily assign 0001. But MemberInvoice.paymentRef is globally
+  // unique, deliberately: a bank line quoting GKWI-0001-2607 then identifies
+  // exactly one invoice in the whole system without anyone knowing which club
+  // it belongs to, which is what makes reconciliation work.
+  //
+  // Sharing a prefix therefore breaks at INVOICE-RUN time, months later, as an
+  // opaque unique-constraint error in the middle of a billing cycle. Catch it
+  // here instead, where someone is actually making the choice.
+  const clash = await prisma.clubBillingConfig.findFirst({
+    where: { refPrefix, NOT: { clubId } },
+    select: { clubId: true, club: { select: { name: true } } },
+  });
+  if (clash) {
+    console.error(
+      `\nPrefix ${refPrefix} is already used by ${clash.club.name} (${clash.clubId}).\n\n` +
+        "  Member references are unique per club, so both clubs would assign\n" +
+        `  ${refPrefix}-0001 quite happily — but invoice references are globally unique,\n` +
+        `  so the second club's first invoice run would fail on ${refPrefix}-0001-2607\n` +
+        "  with a unique-constraint error, mid-cycle, months from now.\n\n" +
+        "  Pick a different prefix for this club.\n",
+    );
+    process.exit(1);
+  }
 
   // Changing the prefix after references are in circulation is the one edit
   // here that cannot be undone by editing a row: parents set up a beneficiary
