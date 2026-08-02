@@ -4,6 +4,23 @@ import { generateApiKey, AGENT_SCOPES } from "../src/utils/agent-auth.js";
 const prisma = new PrismaClient();
 
 /**
+ * Which database are we actually talking to? Without this the "no such club"
+ * error is unactionable: the commonest cause by far is running against the
+ * local .env database while holding an id copied from production.
+ * Never prints the password.
+ */
+function describeTarget(): string {
+  const url = process.env.DATABASE_URL;
+  if (!url) return "(DATABASE_URL unset)";
+  try {
+    const u = new URL(url);
+    return `${u.hostname}:${u.port || "5432"}${u.pathname}`;
+  } catch {
+    return "(unparseable DATABASE_URL)";
+  }
+}
+
+/**
  * Mint a service-account API key.
  *
  * Rotation is issue-then-revoke, with no shared-secret edit window:
@@ -86,14 +103,29 @@ async function main() {
   // rejected by every club check — confusing to debug. Fail here instead.
   const club = await prisma.club.findUnique({ where: { id: clubId }, select: { name: true } });
   if (!club) {
-    console.error(`No club with id ${clubId}. Run with --list to see existing keys, or check the id.`);
+    const total = await prisma.club.count();
+    const sample = await prisma.club.findMany({
+      select: { id: true, name: true },
+      orderBy: { name: "asc" },
+      take: 5,
+    });
+    console.error(`\nNo club with id ${clubId} in ${describeTarget()}\n`);
+    console.error(`That database has ${total} club(s):`);
+    for (const c of sample) console.error(`  ${c.id}  ${c.name}`);
+    if (total > sample.length) console.error(`  … and ${total - sample.length} more`);
+    console.error(
+      "\nIf you expected production, this script reads DATABASE_URL from " +
+        "backend/.env,\nwhich normally points at your local database. Override it " +
+        "for one command:\n" +
+        '  DATABASE_URL="$DBURL" npx tsx scripts/create-agent-key.ts …\n',
+    );
     process.exit(1);
   }
 
   const { key, prefix, hashedKey } = generateApiKey();
   await prisma.apiKey.create({ data: { name, prefix, hashedKey, clubId, scopes } });
 
-  console.log(`\nKey created for ${club.name}\n`);
+  console.log(`\nKey created for ${club.name} in ${describeTarget()}\n`);
   console.log(`  name    ${name}`);
   console.log(`  prefix  ${prefix}`);
   console.log(`  club    ${clubId} (${club.name})`);
