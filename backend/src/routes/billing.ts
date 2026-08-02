@@ -9,7 +9,7 @@ import {
   AllocatePayment, ApplyInvoiceDiscount, ArrearsQuery, BillingClubQuery, BillingInvoicesQuery, BillingMemberSearchQuery,
   BillingMembersQuery, BillingPaymentsQuery, BillingSummaryQuery, BirthdaysQuery,
   CreateFeeSchedule, CreateInvoiceRun, CreateSubscription, OpenInvoicesQuery,
-  RecordPayment, SetMemberInvoiceStatus,
+  RecordPayment, RosterGapsQuery, SetMemberInvoiceStatus,
 } from "../utils/validators.js";
 import { BillingMemberService } from "../services/billing-member.service.js";
 import { MemberInvoiceService } from "../services/member-invoice.service.js";
@@ -137,6 +137,14 @@ router.get("/birthdays", readGate, validate(BirthdaysQuery, "query"), async (req
         asOfFrom(undefined),
       ),
     );
+  } catch (err) { next(err); }
+});
+
+router.get("/roster-gaps", readGate, validate(RosterGapsQuery, "query"), async (req, res, next) => {
+  try {
+    const q = RosterGapsQuery.parse(req.query);
+    await gate(req, q.clubId);
+    res.json(await BillingMemberService.gaps(q.clubId, asOfFrom(q.asOf)));
   } catch (err) { next(err); }
 });
 
