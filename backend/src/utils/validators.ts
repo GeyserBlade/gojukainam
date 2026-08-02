@@ -416,3 +416,74 @@ export const BillingSummaryQuery = z.object({
   clubId: z.string().min(1),
   periodKey: periodKeySchema.optional(),
 });
+
+// --- Billing writes (M3) ---------------------------------------------------
+
+export const CreateInvoiceRun = z.object({
+  clubId: z.string().min(1),
+  periodKey: periodKeySchema,
+  /** true computes and returns without writing — what the approval gate previews. */
+  dryRun: z.boolean().optional(),
+});
+
+export const SetMemberInvoiceStatus = z.object({
+  // PAID / PARTIALLY_PAID are absent on purpose: they are derived from
+  // allocations, and the service returns 422 if anyone asks for them anyway.
+  status: z.enum(["APPROVED", "SENT", "CANCELLED", "WRITTEN_OFF"]),
+  reason: z.string().trim().min(1).max(500).optional(),
+});
+
+const allocationSchema = z.object({
+  invoiceId: z.string().min(1),
+  amountCents: z.number().int().positive(),
+});
+
+export const RecordPayment = z.object({
+  clubId: z.string().min(1),
+  receivedDate: dateSchema,
+  amountCents: z.number().int().positive(),
+  method: PaymentMethodEnum,
+  source: z.enum(["bank-csv", "cash", "manual"]),
+  bankReference: z.string().trim().max(200).optional(),
+  description: z.string().trim().max(500).optional(),
+  externalHash: z.string().trim().min(16).max(128).optional(),
+  matchMethod: z.string().trim().max(64).optional(),
+  matchConfidence: z.number().min(0).max(1).optional(),
+  notes: z.string().trim().max(500).optional(),
+  allocations: z.array(allocationSchema).max(50).optional(),
+});
+
+export const AllocatePayment = z.object({
+  clubId: z.string().min(1),
+  allocations: z.array(allocationSchema).min(1).max(50),
+});
+
+export const CreateFeeSchedule = z.object({
+  clubId: z.string().min(1),
+  code: z.string().trim().regex(/^[A-Z0-9_]{2,40}$/, "A-Z, 0-9 and underscore"),
+  name: z.string().trim().min(1).max(120),
+  feeType: FeeTypeEnum,
+  cadence: FeeCadenceEnum,
+  amountCents: z.number().int().nonnegative(),
+  effectiveFrom: dateSchema,
+  effectiveTo: dateSchema.optional().nullable(),
+  active: z.boolean().optional(),
+});
+
+export const UpdateFeeSchedule = CreateFeeSchedule.omit({ clubId: true, code: true }).partial();
+
+export const CreateSubscription = z.object({
+  clubId: z.string().min(1),
+  athleteId: z.string().min(1),
+  feeScheduleId: z.string().min(1),
+  startDate: dateSchema,
+  endDate: dateSchema.optional().nullable(),
+  quantity: z.number().int().min(1).max(20).optional(),
+  overrideAmountCents: z.number().int().nonnegative().optional().nullable(),
+});
+
+export const ApplyInvoiceDiscount = z.object({
+  clubId: z.string().min(1),
+  discountCents: z.number().int().nonnegative(),
+  reason: z.string().trim().min(1).max(200),
+});

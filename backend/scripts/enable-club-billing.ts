@@ -43,6 +43,7 @@ async function main() {
       select: {
         clubId: true, enabled: true, currency: true, timezone: true,
         refPrefix: true, nextRefSeq: true, invoiceDay: true, dueDaysAfter: true,
+        nonBillableMonths: true,
         club: { select: { name: true, _count: { select: { athletes: true } } } },
       },
       orderBy: { createdAt: "asc" },
@@ -58,6 +59,7 @@ async function main() {
           `    clubId    ${c.clubId}\n` +
           `    refs      ${c.refPrefix}-${String(c.nextRefSeq).padStart(4, "0")} next  (${c.currency}, ${c.timezone})\n` +
           `    cycle     invoice on day ${c.invoiceDay}, due ${c.dueDaysAfter} days later\n` +
+          `    skipped   ${c.nonBillableMonths.length ? "months " + c.nonBillableMonths.join(", ") : "none"}\n` +
           `    athletes  ${c.club._count.athletes}\n`,
       );
     }
@@ -116,6 +118,17 @@ async function main() {
   const timezone = flag(args, "tz") ?? "Africa/Windhoek";
   const invoiceDay = Number(flag(args, "invoice-day") ?? 1);
   const dueDaysAfter = Number(flag(args, "due-days") ?? 7);
+  // Months the club closes through — Windhoek is "5,12" (May and December
+  // school holidays). Omitting the flag leaves an existing setting alone
+  // rather than silently clearing it.
+  const nonBillableArg = flag(args, "non-billable");
+  const nonBillableMonths = nonBillableArg
+    ? nonBillableArg.split(",").map((m) => Number(m.trim())).filter((m) => Number.isInteger(m))
+    : undefined;
+  if (nonBillableArg && nonBillableMonths!.some((m) => m < 1 || m > 12)) {
+    console.error("--non-billable takes calendar months 1-12, e.g. 5,12");
+    process.exit(1);
+  }
 
   if (!/^[A-Z]{2,5}$/.test(refPrefix)) {
     console.error(`Invalid --prefix "${refPrefix}": 2-5 letters. It must match the reference`);
@@ -206,8 +219,14 @@ async function main() {
     where: { clubId },
     // nextRefSeq is deliberately absent from the update: it is an allocation
     // counter, and lowering it would hand out a reference twice.
-    update: { enabled: true, currency, timezone, refPrefix, invoiceDay, dueDaysAfter },
-    create: { clubId, enabled: true, currency, timezone, refPrefix, invoiceDay, dueDaysAfter },
+    update: {
+      enabled: true, currency, timezone, refPrefix, invoiceDay, dueDaysAfter,
+      ...(nonBillableMonths ? { nonBillableMonths } : {}),
+    },
+    create: {
+      clubId, enabled: true, currency, timezone, refPrefix, invoiceDay, dueDaysAfter,
+      nonBillableMonths: nonBillableMonths ?? [],
+    },
   });
 
   console.log(`\nBilling ${existing ? "updated" : "enabled"} for ${club.name}`);
@@ -218,6 +237,9 @@ async function main() {
   console.log(`  timezone      ${config.timezone}`);
   console.log(`  refs          ${config.refPrefix}-${String(config.nextRefSeq).padStart(4, "0")} next`);
   console.log(`  cycle         invoice on day ${config.invoiceDay}, due ${config.dueDaysAfter} days later`);
+  console.log(
+    `  not billed    ${config.nonBillableMonths.length ? config.nonBillableMonths.join(", ") : "(every month billed)"}`,
+  );
 
   const feeCount = await prisma.feeSchedule.count({ where: { clubId, active: true } });
   const subCount = await prisma.memberSubscription.count({ where: { athlete: { clubId } } });

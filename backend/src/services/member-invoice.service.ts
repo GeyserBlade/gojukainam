@@ -1,0 +1,469 @@
+import type { MemberInvoiceStatus, Prisma } from "@prisma/client";
+import { prisma } from "../lib/prisma.js";
+import { parsePeriodKey, toIsoDate, utcDate } from "../utils/dates.js";
+import { assignMemberRefs, formatInvoiceRef } from "../utils/references.js";
+
+const MONTH_NAMES = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+const monthName = (month: number) => MONTH_NAMES[month - 1] ?? `month ${month}`;
+
+/** Advance-payment discounts, from the club's 2026 Class Information sheet. */
+export const ADVANCE_DISCOUNTS = {
+  /** Per student, for paying three months up front. Excludes January. */
+  THREE_MONTHS_CENTS: 26_000,
+  /** For paying the entire year up front. */
+  FULL_YEAR_CENTS: 79_000,
+} as const;
+
+/**
+ * The invoice run and the invoice state machine.
+ *
+ * The run is a pure function of (club, period, subscriptions overlapping it,
+ * athlete.isActive). Nothing is judged; everything is looked up. That is what
+ * "you approved but computed nothing" requires — a human can check the preview
+ * against a spreadsheet by hand, which is exactly the point.
+ */
+
+const ALLOWED: Record<MemberInvoiceStatus, MemberInvoiceStatus[]> = {
+  DRAFT: ["APPROVED", "CANCELLED"],
+  APPROVED: ["SENT", "CANCELLED"],
+  SENT: ["CANCELLED", "WRITTEN_OFF"],
+  PARTIALLY_PAID: ["WRITTEN_OFF"],
+  PAID: [],
+  CANCELLED: [],
+  WRITTEN_OFF: [],
+};
+
+/**
+ * PAID and PARTIALLY_PAID appear in no allowed-transition list on purpose.
+ *
+ * They are reachable only from recomputeInvoicePaidState(), inside the
+ * allocation transaction. No caller — model, human, or cron — can declare an
+ * invoice paid without a payment row behind it. That is "LLMs never write
+ * financial state directly" made mechanical rather than promised.
+ */
+export function assertTransition(from: MemberInvoiceStatus, to: MemberInvoiceStatus): void {
+  if (to === "PAID" || to === "PARTIALLY_PAID") {
+    throw {
+      status: 422,
+      message: "paid status is derived from allocations, not set directly",
+    };
+  }
+  if (!ALLOWED[from].includes(to)) {
+    throw { status: 422, message: `Cannot move an invoice from ${from} to ${to}` };
+  }
+}
+
+/**
+ * Recompute an invoice's paid state from its allocations.
+ *
+ * Recomputed, never incremented: an increment drifts the moment anything is
+ * retried, and the sum is cheap. Must be called inside the same transaction
+ * that changed the allocations, with the invoice row already locked.
+ */
+export async function recomputeInvoicePaidState(
+  tx: Prisma.TransactionClient,
+  invoiceId: string,
+): Promise<{ amountPaidCents: number; status: MemberInvoiceStatus }> {
+  const invoice = await tx.memberInvoice.findUniqueOrThrow({
+    where: { id: invoiceId },
+    select: { id: true, totalCents: true, status: true },
+  });
+
+  const agg = await tx.paymentAllocation.aggregate({
+    where: { invoiceId },
+    _sum: { amountCents: true },
+  });
+  const paid = agg._sum.amountCents ?? 0;
+
+  if (paid > invoice.totalCents) {
+    throw {
+      status: 422,
+      message: `Allocations (${paid}) exceed invoice total (${invoice.totalCents})`,
+    };
+  }
+
+  // CANCELLED and WRITTEN_OFF are terminal decisions about the debt itself;
+  // money arriving afterwards must not silently resurrect them.
+  let status = invoice.status;
+  if (invoice.status !== "CANCELLED" && invoice.status !== "WRITTEN_OFF") {
+    if (paid === 0) status = invoice.status === "PARTIALLY_PAID" || invoice.status === "PAID"
+      ? "SENT"
+      : invoice.status;
+    else if (paid >= invoice.totalCents) status = "PAID";
+    else status = "PARTIALLY_PAID";
+  }
+
+  await tx.memberInvoice.update({
+    where: { id: invoiceId },
+    data: { amountPaidCents: paid, status },
+  });
+
+  return { amountPaidCents: paid, status };
+}
+
+export type PlannedLine = {
+  feeScheduleId: string;
+  description: string;
+  quantity: number;
+  unitAmountCents: number;
+  amountCents: number;
+};
+
+export type PlannedInvoice = {
+  athleteId: string;
+  athleteName: string;
+  memberRef: string | null;
+  paymentRef: string | null;
+  lines: PlannedLine[];
+  totalCents: number;
+  /** Set when this athlete already has an invoice for the period. */
+  skipReason?: string;
+};
+
+export type InvoicePlan = {
+  clubId: string;
+  periodKey: string;
+  /** Set when the club does not charge for this month; invoices will be empty. */
+  nonBillable?: string;
+  issueDate: string;
+  dueDate: string;
+  currency: string;
+  invoices: PlannedInvoice[];
+  skipped: PlannedInvoice[];
+  totalCents: number;
+  invoiceCount: number;
+};
+
+export class MemberInvoiceService {
+  /**
+   * Compute what a run would produce. Writes nothing.
+   *
+   * This is what the approval gate previews, and it is the whole "you approved
+   * but computed nothing" done-condition made concrete: a human clicking one
+   * button in front of a fully computed table.
+   */
+  static async planRun(clubId: string, periodKey: string): Promise<InvoicePlan> {
+    const config = await prisma.clubBillingConfig.findUniqueOrThrow({ where: { clubId } });
+    const periodStart = parsePeriodKey(periodKey);
+
+    const issueDate = utcDate(
+      periodStart.getUTCFullYear(),
+      periodStart.getUTCMonth() + 1,
+      config.invoiceDay,
+    );
+    const dueDate = new Date(issueDate.getTime() + config.dueDaysAfter * 86_400_000);
+
+    // Months the club closes through are not billed at all. Returning an empty
+    // plan with a reason beats returning a full one and trusting whoever reads
+    // it to remember the dojo is shut.
+    const month = periodStart.getUTCMonth() + 1;
+    if (config.nonBillableMonths.includes(month)) {
+      return {
+        clubId,
+        periodKey,
+        nonBillable: `${monthName(month)} is a non-billable month for this club`,
+        issueDate: toIsoDate(issueDate),
+        dueDate: toIsoDate(dueDate),
+        currency: config.currency,
+        invoices: [],
+        skipped: [],
+        invoiceCount: 0,
+        totalCents: 0,
+      };
+    }
+
+    // A subscription counts if it overlaps the invoice date. Endless
+    // subscriptions (endDate null) always overlap.
+    const subscriptions = await prisma.memberSubscription.findMany({
+      where: {
+        athlete: { clubId, isActive: true },
+        startDate: { lte: issueDate },
+        OR: [{ endDate: null }, { endDate: { gte: issueDate } }],
+        feeSchedule: {
+          active: true,
+          cadence: "MONTHLY",
+          effectiveFrom: { lte: issueDate },
+          OR: [{ effectiveTo: null }, { effectiveTo: { gte: issueDate } }],
+        },
+      },
+      select: {
+        athleteId: true,
+        quantity: true,
+        overrideAmountCents: true,
+        athlete: { select: { firstName: true, lastName: true, invoiceRef: true } },
+        feeSchedule: { select: { id: true, name: true, amountCents: true } },
+      },
+      orderBy: [{ athlete: { lastName: "asc" } }, { athlete: { firstName: "asc" } }],
+    });
+
+    const existing = await prisma.memberInvoice.findMany({
+      where: { clubId, periodKey },
+      select: { athleteId: true },
+    });
+    const alreadyInvoiced = new Set(existing.map((e) => e.athleteId));
+
+    const byAthlete = new Map<string, PlannedInvoice>();
+    for (const sub of subscriptions) {
+      const unit = sub.overrideAmountCents ?? sub.feeSchedule.amountCents;
+      const line: PlannedLine = {
+        feeScheduleId: sub.feeSchedule.id,
+        description: `${sub.feeSchedule.name} — ${periodKey}`,
+        quantity: sub.quantity,
+        unitAmountCents: unit,
+        // Recomputed server-side; never taken from a caller.
+        amountCents: unit * sub.quantity,
+      };
+
+      const entry = byAthlete.get(sub.athleteId) ?? {
+        athleteId: sub.athleteId,
+        athleteName: `${sub.athlete.firstName} ${sub.athlete.lastName}`,
+        memberRef: sub.athlete.invoiceRef,
+        paymentRef: sub.athlete.invoiceRef
+          ? formatInvoiceRef(sub.athlete.invoiceRef, periodKey)
+          : null,
+        lines: [],
+        totalCents: 0,
+      };
+      entry.lines.push(line);
+      entry.totalCents += line.amountCents;
+      byAthlete.set(sub.athleteId, entry);
+    }
+
+    const all = [...byAthlete.values()];
+    const invoices = all.filter((i) => !alreadyInvoiced.has(i.athleteId));
+    const skipped = all
+      .filter((i) => alreadyInvoiced.has(i.athleteId))
+      .map((i) => ({ ...i, skipReason: `already invoiced for ${periodKey}` }));
+
+    return {
+      clubId,
+      periodKey,
+      issueDate: toIsoDate(issueDate),
+      dueDate: toIsoDate(dueDate),
+      currency: config.currency,
+      invoices,
+      skipped,
+      invoiceCount: invoices.length,
+      totalCents: invoices.reduce((s, i) => s + i.totalCents, 0),
+    };
+  }
+
+  /**
+   * Create the run and its invoices, in one transaction.
+   *
+   * Idempotent at the database level twice over: InvoiceRun is unique on
+   * (clubId, periodKey), and MemberInvoice on (clubId, athleteId, periodKey).
+   * Both survive the agent stack being rebuilt, which the tools-api
+   * idempotency table does not.
+   */
+  static async executeRun(
+    clubId: string,
+    periodKey: string,
+    createdVia: string,
+  ): Promise<{ runId: string; invoiceCount: number; totalCents: number; replayed: boolean }> {
+    const existingRun = await prisma.invoiceRun.findUnique({
+      where: { clubId_periodKey: { clubId, periodKey } },
+      select: { id: true, invoiceCount: true, totalCents: true },
+    });
+    if (existingRun) {
+      return { runId: existingRun.id, ...existingRun, replayed: true, invoiceCount: existingRun.invoiceCount, totalCents: existingRun.totalCents };
+    }
+
+    const plan = await this.planRun(clubId, periodKey);
+    if (plan.nonBillable) {
+      throw { status: 422, message: plan.nonBillable };
+    }
+    if (plan.invoices.length === 0) {
+      throw {
+        status: 422,
+        message:
+          `Nothing to invoice for ${periodKey}. Active members need a subscription ` +
+          "to an active monthly fee schedule.",
+      };
+    }
+
+    return prisma.$transaction(async (tx) => {
+      const run = await tx.invoiceRun.create({
+        data: {
+          clubId,
+          periodKey,
+          status: "DRAFT",
+          createdVia,
+          invoiceCount: plan.invoices.length,
+          totalCents: plan.totalCents,
+        },
+        select: { id: true },
+      });
+
+      // References are allocated here, in the write phase — a dry run must not
+      // consume sequence numbers.
+      const refs = await assignMemberRefs(
+        tx,
+        clubId,
+        plan.invoices.map((i) => i.athleteId),
+      );
+
+      for (const planned of plan.invoices) {
+        const memberRef = refs.get(planned.athleteId);
+        if (!memberRef) throw new Error(`No reference allocated for ${planned.athleteId}`);
+
+        await tx.memberInvoice.create({
+          data: {
+            clubId,
+            athleteId: planned.athleteId,
+            kind: "SUBSCRIPTION",
+            periodKey,
+            issueDate: new Date(`${plan.issueDate}T00:00:00Z`),
+            dueDate: new Date(`${plan.dueDate}T00:00:00Z`),
+            subtotalCents: planned.totalCents,
+            totalCents: planned.totalCents,
+            currency: plan.currency,
+            paymentRef: formatInvoiceRef(memberRef, periodKey),
+            runId: run.id,
+            createdVia,
+            lines: { create: planned.lines },
+          },
+        });
+      }
+
+      return {
+        runId: run.id,
+        invoiceCount: plan.invoices.length,
+        totalCents: plan.totalCents,
+        replayed: false,
+      };
+    });
+  }
+
+  /** DRAFT → APPROVED for the run and every invoice in it. */
+  static async approveRun(clubId: string, runId: string): Promise<{ approved: number }> {
+    return prisma.$transaction(async (tx) => {
+      const run = await tx.invoiceRun.findFirst({
+        where: { id: runId, clubId },
+        select: { id: true, status: true },
+      });
+      if (!run) throw { status: 404, message: "Not found" };
+      if (run.status === "APPROVED") return { approved: 0 };
+      if (run.status !== "DRAFT") {
+        throw { status: 422, message: `Cannot approve a ${run.status} run` };
+      }
+
+      const updated = await tx.memberInvoice.updateMany({
+        where: { runId, status: "DRAFT" },
+        data: { status: "APPROVED", approvedAt: new Date() },
+      });
+      await tx.invoiceRun.update({
+        where: { id: runId },
+        data: { status: "APPROVED", approvedAt: new Date() },
+      });
+      return { approved: updated.count };
+    });
+  }
+
+  /**
+   * Apply a discount to an issued invoice.
+   *
+   * The advance-payment discounts (N$260 for three months up front, N$790 for
+   * the year) are earned by HOW someone pays, so the invoice run cannot know
+   * about them — it only sees subscriptions. They land here instead, against
+   * an invoice that already exists, which keeps the arithmetic visible: the
+   * subtotal stays as billed, the discount is named, and the total is derived.
+   *
+   * discountCents is set, not added to, so re-applying the same discount is
+   * idempotent rather than compounding.
+   */
+  static async applyDiscount(
+    clubId: string,
+    invoiceId: string,
+    discountCents: number,
+    reason: string,
+  ) {
+    return prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "MemberInvoice" WHERE id = ${invoiceId} FOR UPDATE`;
+
+      const invoice = await tx.memberInvoice.findFirst({
+        where: { id: invoiceId, clubId },
+        select: {
+          id: true, status: true, subtotalCents: true,
+          discountCents: true, amountPaidCents: true, notes: true,
+        },
+      });
+      if (!invoice) throw { status: 404, message: "Not found" };
+      if (invoice.status === "CANCELLED" || invoice.status === "WRITTEN_OFF") {
+        throw { status: 422, message: `Cannot discount a ${invoice.status} invoice` };
+      }
+      if (discountCents < 0 || discountCents > invoice.subtotalCents) {
+        throw {
+          status: 422,
+          message: `Discount must be between 0 and the subtotal (${invoice.subtotalCents})`,
+        };
+      }
+
+      const newTotal = invoice.subtotalCents - discountCents;
+      // Discounting below what has already been allocated would leave the
+      // invoice overpaid and break the allocation invariant. Refuse rather
+      // than silently creating a credit nobody asked for.
+      if (newTotal < invoice.amountPaidCents) {
+        throw {
+          status: 422,
+          message:
+            `Discount would drop the total to ${newTotal}, below the ` +
+            `${invoice.amountPaidCents} already allocated. Unallocate first.`,
+        };
+      }
+
+      await tx.memberInvoice.update({
+        where: { id: invoiceId },
+        data: {
+          discountCents,
+          totalCents: newTotal,
+          notes: invoice.notes ? `${invoice.notes}\n${reason}` : reason,
+        },
+      });
+
+      // The status follows the new total: a discount can settle an invoice.
+      const state = await recomputeInvoicePaidState(tx, invoiceId);
+      return {
+        id: invoiceId,
+        subtotalCents: invoice.subtotalCents,
+        discountCents,
+        totalCents: newTotal,
+        ...state,
+      };
+    });
+  }
+
+  static async setStatus(
+    clubId: string,
+    invoiceId: string,
+    to: MemberInvoiceStatus,
+    reason?: string,
+  ) {
+    return prisma.$transaction(async (tx) => {
+      const invoice = await tx.memberInvoice.findFirst({
+        where: { id: invoiceId, clubId },
+        select: { id: true, status: true, notes: true },
+      });
+      if (!invoice) throw { status: 404, message: "Not found" };
+
+      assertTransition(invoice.status, to);
+
+      const now = new Date();
+      return tx.memberInvoice.update({
+        where: { id: invoiceId },
+        data: {
+          status: to,
+          ...(to === "SENT" ? { sentAt: now } : {}),
+          ...(to === "CANCELLED" ? { cancelledAt: now } : {}),
+          ...(reason
+            ? { notes: invoice.notes ? `${invoice.notes}\n${reason}` : reason }
+            : {}),
+        },
+        select: { id: true, status: true, sentAt: true, cancelledAt: true, notes: true },
+      });
+    });
+  }
+}
