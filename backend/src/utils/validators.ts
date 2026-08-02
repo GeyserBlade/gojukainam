@@ -487,3 +487,8 @@ export const ApplyInvoiceDiscount = z.object({
   discountCents: z.number().int().nonnegative(),
   reason: z.string().trim().min(1).max(200),
 });
+
+export const RosterGapsQuery = z.object({
+  clubId: z.string().min(1),
+  asOf: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+});

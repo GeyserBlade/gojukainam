@@ -22,6 +22,11 @@ const memberSelect = {
   gender: true,
   isActive: true,
   isInstructor: true,
+  // Competition weight class. Included because it is roster admin a club runs
+  // on; medicalNotes and idNumber are deliberately NOT — minors' medical
+  // details and identity numbers are not something billing or an assistant
+  // needs, and output redaction protects the audit log, not the conversation.
+  weightKg: true,
   joinDate: true,
   lastGraded: true,
   contactEmail: true,
@@ -221,6 +226,61 @@ export class BillingMemberService {
       map.set(inv.athleteId, acc);
     }
     return map;
+  }
+
+  /**
+   * What is missing from the roster.
+   *
+   * Computed here rather than by making a caller pull 54 records and count.
+   * A model asked to tally a list gets it wrong often enough to matter, and
+   * the whole roster in its context crowds out the question.
+   *
+   * "No active subscription" is the one that costs money: those members are
+   * silently absent from every invoice run.
+   */
+  static async gaps(clubId: string, asOf: Date) {
+    const members = await prisma.athlete.findMany({
+      where: { clubId, isActive: true },
+      select: {
+        id: true, firstName: true, lastName: true, weightKg: true,
+        joinDate: true, lastGraded: true, invoiceRef: true,
+        contactPhone: true, guardianPhone1: true, guardianName1: true, dob: true,
+        subscriptions: {
+          where: {
+            startDate: { lte: asOf },
+            OR: [{ endDate: null }, { endDate: { gte: asOf } }],
+            feeSchedule: { cadence: "MONTHLY", active: true },
+          },
+          select: { id: true },
+        },
+      },
+      orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
+    });
+
+    const name = (m: { firstName: string; lastName: string }) => `${m.firstName} ${m.lastName}`;
+    const pick = (rows: typeof members) =>
+      rows.map((m) => ({ athleteId: m.id, name: name(m) }));
+
+    const minorNoGuardian = members.filter(
+      (m) => ageInYears(m.dob, asOf) < 18 && !m.guardianPhone1 && !m.contactPhone,
+    );
+
+    return {
+      asOf: toIsoDate(asOf),
+      activeMembers: members.length,
+      gaps: {
+        noWeight: pick(members.filter((m) => m.weightKg === null)),
+        noJoinDate: pick(members.filter((m) => m.joinDate === null)),
+        neverGraded: pick(members.filter((m) => m.lastGraded === null)),
+        noPaymentReference: pick(members.filter((m) => !m.invoiceRef)),
+        // Nobody to send an invoice to.
+        noContactAtAll: pick(members.filter((m) => !m.contactPhone && !m.guardianPhone1)),
+        // A minor with no reachable adult — the sharper version of the above.
+        minorWithNoGuardianContact: pick(minorNoGuardian),
+        // Would not appear in any invoice run.
+        noActiveSubscription: pick(members.filter((m) => m.subscriptions.length === 0)),
+      },
+    };
   }
 
   /**
