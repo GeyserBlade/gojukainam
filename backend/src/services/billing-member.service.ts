@@ -264,7 +264,10 @@ export class BillingMemberService {
     // and a truncated list is worse than a short one, because a count taken
     // from it looks right and is not. The counts below are computed from the
     // whole set before any capping.
-    const NAME_LIMIT = 15;
+    // 8, not 15: at 15 the payload was 7KB and still truncating, and a
+    // truncated response confuses a small model more than a short one helps.
+    // Anyone who wants the full list can filter list_members.
+    const NAME_LIMIT = 8;
     const pick = (rows: typeof members) => ({
       count: rows.length,
       names: rows.slice(0, NAME_LIMIT).map((m) => ({ athleteId: m.id, name: name(m) })),
