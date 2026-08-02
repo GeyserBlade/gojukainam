@@ -1,6 +1,7 @@
 import type { Request, Response, NextFunction } from "express";
 import { AuthService } from "../services/auth.service.js";
 import { prisma } from "../lib/prisma.js";
+import { verifyApiKey } from "./agent-auth.js";
 
 export type AuthUser = {
   id: string;
@@ -26,7 +27,7 @@ declare global {
   }
 }
 
-export function authMiddleware(req: Request, res: Response, next: NextFunction) {
+export async function authMiddleware(req: Request, res: Response, next: NextFunction) {
   // 1. Try Cookie Auth (JWT)
   const token = req.cookies?.auth_token;
   if (token) {
@@ -47,6 +48,29 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction) 
     return next();
   }
 
+  // 3. Try Agent Auth (service-account API key).
+  //
+  // Deliberately sets req.agent and NOT req.user: requireRoles() rejects on
+  // !req.user, so a key is default-denied on every route that has not opted in
+  // with requireAgent/requireAgentOrRoles. See utils/agent-auth.ts.
+  //
+  // Gated on the header being present and well-prefixed, so a normal cookie
+  // request never pays for the key lookup — this branch is only reached after
+  // the two above have declined.
+  const bearer = /^Bearer (gjk_\S+)$/.exec(req.header("authorization") ?? "")?.[1];
+  if (bearer) {
+    try {
+      const agent = await verifyApiKey(bearer);
+      if (!agent) return res.status(401).json({ error: "Unauthorized" });
+      req.agent = agent;
+      return next();
+    } catch (err) {
+      // A database hiccup must fail closed, not fall through to the 401 below
+      // as though the credential had been evaluated and rejected.
+      return next(err);
+    }
+  }
+
   return res.status(401).json({ error: "Unauthorized" });
 }
 
@@ -63,6 +87,17 @@ export async function ensureDevUser() {
   });
 }
 
+/**
+ * Human role gate.
+ *
+ * The `!req.user` half is doing more work than it looks: an agent request
+ * (branch 3 of authMiddleware) authenticates without ever setting `req.user`,
+ * so every route guarded by this is closed to service accounts by
+ * construction. Do not "fix" this by falling back to `req.agent` here — that
+ * would silently open the entire federation API to a key in a container.
+ * Routes that want machine callers opt in with requireAgent /
+ * requireAgentOrRoles from utils/agent-auth.ts.
+ */
 export function requireRoles(...roles: AuthUser["role"][]) {
   return (req: Request, res: Response, next: NextFunction) => {
     if (!req.user || !roles.includes(req.user.role)) {

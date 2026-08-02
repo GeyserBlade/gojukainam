@@ -144,11 +144,42 @@ model Club {
   entries    Entry[]
   invoices   Invoice[]
   documents  Document[]
+  apiKeys    ApiKey[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([name])
+}
+
+/// Service-account credential for machine callers (the sensai agent stack).
+/// Deliberately NOT a User: a key must never mint a role. See utils/agent-auth.ts.
+model ApiKey {
+  id     String  @id @default(cuid())
+  name   String
+  /// First 8 chars of the key — the lookup handle. Safe to log.
+  prefix String  @unique
+  /// sha256 of the whole key. The key itself is shown once, at creation, and
+  /// is not recoverable from here.
+  hashedKey String @unique
+  /// Which club this key may act for. Required, and Restrict on delete, on
+  /// purpose: a nullable clubId would mean "federation-wide" to
+  /// assertAgentClub, so ON DELETE SET NULL would silently promote a
+  /// club-scoped key to every club the moment someone deleted its club.
+  /// Restrict makes that a loud failure the admin must resolve by revoking.
+  clubId String
+  club   Club   @relation(fields: [clubId], references: [id], onDelete: Restrict)
+  /// e.g. ["members:read","billing:read","billing:write","payments:write"]
+  scopes String[]
+
+  lastUsedAt DateTime?
+  expiresAt  DateTime?
+  revokedAt  DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([clubId])
 }
 
 model Event {

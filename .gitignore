@@ -43,6 +43,13 @@ Thumbs.db
 *.swp
 .claude/settings.local.json
 
+# Local agent/skill tooling. Kept out of git deliberately: this repo is public,
+# and these are per-machine working files rather than anything a collaborator
+# needs to build or run the app.
+.agents/
+.claude/skills/
+skills-lock.json
+
 # TypeScript build outputs
 *.tsbuildinfo
 tsconfig.tsbuildinfo
