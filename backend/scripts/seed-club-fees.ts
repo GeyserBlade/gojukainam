@@ -36,12 +36,37 @@ const prisma = new PrismaClient();
  *   npm run seed-club-fees -- <clubId> --assign-by-class [--apply]
  *   npm run seed-club-fees -- <clubId> --assign MONTHLY_BEGINNER --all-active
  *   npm run seed-club-fees -- <clubId> --assign MONTHLY_SENIOR --athlete <id>
+ *   npm run seed-club-fees -- <clubId> --end --athlete <id> [--from 2026-09]
  *   npm run seed-club-fees -- <clubId> --family <id,id,...>
  *   npm run seed-club-fees -- <clubId> --suggest-families
  *   npm run seed-club-fees -- <clubId> --status
  */
 
 const YEAR_START = new Date("2026-01-01T00:00:00Z");
+
+/**
+ * First day of a billing period, and the last day before it.
+ *
+ * An invoice run counts a subscription when `endDate >= issueDate`, and
+ * issueDate is the 1st of the period. So "stop billing them from September"
+ * means endDate = 31 August, not "today" — an endDate of today still bills the
+ * whole current month, which is the sort of off-by-one a parent notices on an
+ * invoice and nobody notices in a script.
+ */
+function periodStart(periodKey: string): Date {
+  const m = /^(\d{4})-(0[1-9]|1[0-2])$/.exec(periodKey);
+  if (!m) throw new Error(`Expected YYYY-MM, got "${periodKey}"`);
+  return new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, 1));
+}
+
+function dayBefore(d: Date): Date {
+  return new Date(d.getTime() - 24 * 60 * 60 * 1000);
+}
+
+function currentPeriodKey(): string {
+  const now = new Date();
+  return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
+}
 /** N$160 off each additional sibling. */
 const FAMILY_DISCOUNT_CENTS = 16_000;
 
@@ -207,6 +232,48 @@ async function main() {
     console.log("Confirm each before applying — a shared phone is a hint, not a fact.\n");
   }
 
+  // --- end a monthly subscription ----------------------------------------
+  //
+  // The missing half of "I'll correct the exceptions". Without it the only way
+  // to stop billing someone was a hand-written UPDATE, and the roster has
+  // instructors on it who train free — a subscription assigned in bulk had no
+  // sanctioned way back out.
+  if (args.includes("--end")) {
+    const athleteId = flag(args, "athlete");
+    if (!athleteId) {
+      console.error("--end needs --athlete <id>.");
+      process.exit(1);
+    }
+    const from = flag(args, "from") ?? currentPeriodKey();
+    const endDate = dayBefore(periodStart(from));
+
+    const sub = await prisma.memberSubscription.findFirst({
+      where: {
+        athleteId,
+        endDate: null,
+        feeSchedule: { cadence: "MONTHLY" },
+        athlete: { clubId },
+      },
+      select: {
+        id: true,
+        athlete: { select: { firstName: true, lastName: true } },
+        feeSchedule: { select: { code: true } },
+      },
+    });
+    if (!sub) {
+      console.error(`\nNo open monthly subscription for ${athleteId} in this club.\n`);
+      process.exit(1);
+    }
+
+    await prisma.memberSubscription.update({ where: { id: sub.id }, data: { endDate } });
+    const who = `${sub.athlete.firstName} ${sub.athlete.lastName}`;
+    console.log(
+      `\n${who}: ${sub.feeSchedule.code} ended ${endDate.toISOString().slice(0, 10)}.\n` +
+        `  Not billed from ${from} onwards. Invoices already issued are untouched —\n` +
+        `  cancel or write those off individually if they should not stand.\n`,
+    );
+  }
+
   // --- assign subscriptions ----------------------------------------------
   const code = flag(args, "assign");
   if (code) {
@@ -238,6 +305,13 @@ async function main() {
       process.exit(1);
     }
 
+    // When one athlete is moved between classes, the switch takes effect at a
+    // period boundary rather than mid-month: the old subscription ends the day
+    // before, the new one starts on the 1st, and no month is billed twice or
+    // skipped.
+    const switchKey = flag(args, "from") ?? currentPeriodKey();
+    const switchOn = periodStart(switchKey);
+
     let created = 0;
     let skipped = 0;
     for (const a of targets) {
@@ -249,26 +323,52 @@ async function main() {
           endDate: null,
           feeSchedule: { cadence: "MONTHLY" },
         },
-        select: { feeSchedule: { select: { code: true } } },
+        select: { id: true, feeSchedule: { select: { code: true } } },
       });
+      let replaced = false;
       if (clash && schedule.cadence === "MONTHLY") {
-        if (clash.feeSchedule.code !== code) {
-          console.log(`  skip ${a.firstName} ${a.lastName} — already on ${clash.feeSchedule.code}`);
+        if (clash.feeSchedule.code === code) {
+          skipped += 1;
+          continue;
         }
-        skipped += 1;
-        continue;
+        // Naming ONE athlete is an instruction to put that person in that
+        // class, so honour it: close the old subscription and open the new one
+        // at the period boundary. Bulk (--all-active) still skips, because
+        // there the clash is a member who was already placed deliberately and
+        // silently re-classing the whole club is not what anyone asked for.
+        //
+        // Before this, the script's own closing line told you to correct
+        // exceptions with --assign --athlete <id> and that command did nothing
+        // but print "skip".
+        if (!athleteId) {
+          console.log(`  skip ${a.firstName} ${a.lastName} — already on ${clash.feeSchedule.code}`);
+          skipped += 1;
+          continue;
+        }
+        await prisma.memberSubscription.update({
+          where: { id: clash.id },
+          data: { endDate: dayBefore(switchOn) },
+        });
+        console.log(
+          `  ${a.firstName} ${a.lastName}: ${clash.feeSchedule.code} -> ${code} from ${switchKey}`,
+        );
+        replaced = true;
       }
 
+      // A replacement starts at the switch boundary, not in January: the
+      // member genuinely was on the old fee until then, and back-dating the
+      // new one to YEAR_START would rewrite months already invoiced.
+      const startDate = replaced ? switchOn : YEAR_START;
       await prisma.memberSubscription.upsert({
         where: {
           athleteId_feeScheduleId_startDate: {
             athleteId: a.id,
             feeScheduleId: schedule.id,
-            startDate: YEAR_START,
+            startDate,
           },
         },
         update: {},
-        create: { athleteId: a.id, feeScheduleId: schedule.id, startDate: YEAR_START },
+        create: { athleteId: a.id, feeScheduleId: schedule.id, startDate },
       });
       created += 1;
     }
@@ -355,7 +455,9 @@ async function main() {
     }
     console.log(
       apply
-        ? "\n  Written. Correct exceptions with --assign <CODE> --athlete <id>.\n"
+        ? "\n  Written. Move someone with --assign <CODE> --athlete <id>, or stop\n" +
+          "  billing them entirely with --end --athlete <id>. Both take effect at a\n" +
+          "  period boundary; add --from YYYY-MM to choose which.\n"
         : "\n  Nothing written. Re-run with --apply.\n",
     );
   }
