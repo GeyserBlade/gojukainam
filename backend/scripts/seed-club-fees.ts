@@ -51,11 +51,24 @@ const FAMILY_DISCOUNT_CENTS = 16_000;
  *   Advanced   green belt and up, up to 16 years of age     N$830
  *   Seniors    over 16 years of age                         N$830
  *
- * Green is belt order 40 (7th Kyu). The sheet says plainly that these are
- * guidelines and instructors place each student, so this decides the obvious
- * cases and reports the rest rather than pretending it knows.
+ * Green is 6th Kyu, which is Belt.order 4 — verified against the club's own
+ * belt table, not assumed:
+ *
+ *   1 White    2 Yellow(8th Kyu)  3 Orange(7th Kyu)  4 GREEN(6th Kyu)
+ *   5 Blue     6 Purple           7-9 Brown          10+ Black (dan grades)
+ *
+ * This was 40, from a guess that the order column was a 0-100 scale. It is
+ * 1-15, so `beltOrder >= 40` was unsatisfiable: every member of 16 or under
+ * fell through to Beginners regardless of grade, and the Advanced class would
+ * have had nobody in it. Thirteen juniors from green to 1st Kyu would have
+ * been billed N$770 instead of N$830 — about N$7,800 a year across the club,
+ * and nothing about the output would have looked wrong.
+ *
+ * The sheet says plainly that these are guidelines and instructors place each
+ * student, so this decides the obvious cases and reports the rest rather than
+ * pretending it knows.
  */
-const GREEN_BELT_ORDER = 40;
+const GREEN_BELT_ORDER = 4;
 
 function placeMember(ageYears: number, beltOrder: number): { code: string; sure: boolean } {
   if (ageYears > 16) return { code: "MONTHLY_SENIOR", sure: true };
