@@ -354,6 +354,30 @@ export const periodKeySchema = z
   .string()
   .regex(/^\d{4}-(0[1-9]|1[0-2])$/, "Expected YYYY-MM");
 
+/**
+ * A boolean that survives a query string.
+ *
+ * NOT z.coerce.boolean(). That is Boolean(value), and Boolean("false") is true,
+ * so every explicit `false` a caller sent arrived as `true`:
+ * ?includeInactive=false returned inactive members, and ?unallocatedOnly=false
+ * would have narrowed a payment list to exactly the payments it was meant to
+ * stop excluding. No error either time — the endpoint answered a different
+ * question confidently.
+ *
+ * Found when the Telegram model started passing the flag explicitly rather
+ * than omitting it: "how many members do we have?" answered "61 active
+ * members" when 54 are active. The bug predates the model and was simply never
+ * reached, which is the argument for fixing it here rather than teaching
+ * callers to omit the parameter.
+ *
+ * Unrecognised values are rejected rather than coerced, so a typo is a 400 and
+ * not a silent flip.
+ */
+const QueryBoolean = z.union([
+  z.boolean(),
+  z.enum(["true", "false", "1", "0"]).transform((v) => v === "true" || v === "1"),
+]);
+
 /** Every billing read is club-scoped; there is no federation-wide billing view. */
 export const BillingClubQuery = z.object({
   clubId: z.string().min(1),
@@ -362,7 +386,7 @@ export const BillingClubQuery = z.object({
 export const BillingMembersQuery = z.object({
   clubId: z.string().min(1),
   /** Defaults to active-only: the invoice run bills active members. */
-  includeInactive: z.coerce.boolean().optional(),
+  includeInactive: QueryBoolean.optional(),
   q: z.string().trim().min(1).optional(),
 });
 
@@ -409,7 +433,7 @@ export const BillingPaymentsQuery = z.object({
   clubId: z.string().min(1),
   from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  unallocatedOnly: z.coerce.boolean().optional(),
+  unallocatedOnly: QueryBoolean.optional(),
 });
 
 export const BillingSummaryQuery = z.object({
