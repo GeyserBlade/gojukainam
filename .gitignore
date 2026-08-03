@@ -19,6 +19,16 @@ build/
 .env.local
 .env.*.local
 
+# Backend env files hold real credentials — the production DATABASE_URL among
+# them. The three patterns above do NOT cover backend/.env.production, which is
+# exactly the name someone reaches for when they need a production connection
+# string, and it sat untracked-but-committable until this rule existed.
+#
+# Scoped to backend/ rather than a blanket .env.* because frontend/.env.production
+# is deliberately tracked: it holds VITE_API_BASE, a public build-time value.
+backend/.env.*
+!backend/.env.example
+
 # Prisma
 /prisma/dev.db
 /prisma/dev.db-journal
