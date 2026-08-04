@@ -22,13 +22,20 @@ const MANAGE: Role[] = ["SUPERADMIN", "ADMIN", "CLUB_MANAGER"]
 const CLUB: Role[] = ["SUPERADMIN", "ADMIN", "CLUB_MANAGER", "COACH"]
 const ADMIN: Role[] = ["SUPERADMIN", "ADMIN"]
 
-type HubTab = { to: string; label: string; end?: boolean; roles: Role[] }
+type HubTab = {
+  to: string
+  label: string
+  end?: boolean
+  roles: Role[]
+  /** Also visible to a coordinator of the *selected* event, whatever their role. */
+  coordinator?: boolean
+}
 
 const TABS: HubTab[] = [
   { to: "/hub", label: "Overview", end: true, roles: ALL },
-  { to: "/hub/setup", label: "Setup", roles: ADMIN },
-  { to: "/hub/entries", label: "Entries", roles: MANAGE },
-  { to: "/hub/review", label: "Review", roles: CLUB },
+  { to: "/hub/setup", label: "Setup", roles: ADMIN, coordinator: true },
+  { to: "/hub/entries", label: "Entries", roles: MANAGE, coordinator: true },
+  { to: "/hub/review", label: "Review", roles: CLUB, coordinator: true },
   { to: "/hub/draws", label: "Draws", roles: ALL },
   { to: "/hub/run", label: "Run", roles: ALL },
   { to: "/hub/results", label: "Results", roles: ALL },
@@ -42,11 +49,16 @@ const STATUS_STYLES: Record<EventStatus, string> = {
 }
 
 export function EventHubLayout() {
-  const { role } = useAuth()
+  const { role, canManageEvent } = useAuth()
   const { eventId, setEventId, events, event, loading } = useSelectedEvent()
   const location = useLocation()
 
-  const tabs = TABS.filter((t) => !role || t.roles.includes(role))
+  // Tab visibility is per-event now: a coordinator's extra tabs appear only
+  // while the event they coordinate is the one selected.
+  const canManageSelected = canManageEvent(eventId)
+  const tabs = TABS.filter(
+    (t) => !role || t.roles.includes(role) || (t.coordinator && canManageSelected),
+  )
   const isActive = (t: HubTab) =>
     t.end ? location.pathname === t.to : location.pathname.startsWith(t.to)
 

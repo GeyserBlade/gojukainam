@@ -256,9 +256,51 @@ export async function deleteWeightClass(id: string): Promise<void> {
   await api.delete(`/events/weights/${id}`);
 }
 
+// ============ Coordinators ============
+
+export interface CoordinatorUser {
+  id: string;
+  name: string | null;
+  email: string;
+  role: "CLUB_MANAGER" | "COACH";
+  club: { id: string; name: string } | null;
+}
+
+export interface Coordinator {
+  id: string;
+  createdAt: string;
+  user: CoordinatorUser;
+  grantedBy: { id: string; name: string | null; email: string } | null;
+}
+
+export async function listCoordinators(eventId: string): Promise<Coordinator[]> {
+  const res = await api.get(`/events/${eventId}/coordinators`);
+  return res.data;
+}
+
+export async function listCoordinatorCandidates(
+  eventId: string,
+  search?: string,
+): Promise<CoordinatorUser[]> {
+  const res = await api.get(`/events/${eventId}/coordinator-candidates`, {
+    params: search ? { search } : undefined,
+  });
+  return res.data;
+}
+
+export async function addCoordinator(eventId: string, userId: string): Promise<Coordinator[]> {
+  const res = await api.post(`/events/${eventId}/coordinators`, { userId });
+  return res.data;
+}
+
+export async function removeCoordinator(eventId: string, userId: string): Promise<Coordinator[]> {
+  const res = await api.delete(`/events/${eventId}/coordinators/${userId}`);
+  return res.data;
+}
+
 // ============ Templates ============
 
-export type TemplateId = "NKF_FULL_2026" | "NKF_INDIVIDUAL_2026" | "NKF_TEAM_2026" | "WKF_2024";
+export type TemplateId = "GK_SMALL_NO_WEIGHTS" | "NKF_FULL_2026" | "NKF_INDIVIDUAL_2026" | "NKF_TEAM_2026" | "WKF_2024";
 
 export interface TemplateMeta {
   id: TemplateId;

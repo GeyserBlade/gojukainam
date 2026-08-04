@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { AuthService } from "../services/auth.service.js";
+import { coordinatedEventIds } from "../utils/event-scope.js";
 
 export const router = Router();
 
@@ -91,7 +92,16 @@ router.get("/me", async (req, res) => {
     return res.status(401).json({ user: null });
   }
 
-  res.json({ user: payload });
+  // Coordinator grants are resolved live rather than carried in the JWT: a
+  // token minted before an appointment would not know about it, and — worse —
+  // one minted before a revocation would still assert it until it expired.
+  // Admins manage every event, so they need no list and pay no query.
+  const coordinatorEventIds =
+    payload.role === "SUPERADMIN" || payload.role === "ADMIN"
+      ? []
+      : await coordinatedEventIds(payload.id);
+
+  res.json({ user: { ...payload, coordinatorEventIds } });
 });
 
 // Password reset flow

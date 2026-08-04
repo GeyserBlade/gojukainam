@@ -331,9 +331,23 @@ export const AthletePoolQuery = z.object({
   clubId: z.string().optional(),
 });
 
+// ---------------- Event Coordinators ----------------
+export const AddCoordinator = z.object({
+  userId: z.string().min(1),
+});
+
+export const CoordinatorParams = z.object({
+  id: z.string().min(1),
+  userId: z.string().min(1),
+});
+
+export const CoordinatorCandidatesQuery = z.object({
+  search: z.string().max(120).optional(),
+});
+
 // ---------------- Event Templates ----------------
 export const ApplyTemplate = z.object({
-  template: z.enum(["NKF_FULL_2026", "NKF_INDIVIDUAL_2026", "NKF_TEAM_2026", "WKF_2024"]),
+  template: z.enum(["GK_SMALL_NO_WEIGHTS", "NKF_FULL_2026", "NKF_INDIVIDUAL_2026", "NKF_TEAM_2026", "WKF_2024"]),
 });
 
 // ---------------------------------------------------------------------------

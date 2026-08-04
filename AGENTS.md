@@ -106,9 +106,22 @@ cd backend && npx prisma migrate deploy && npm run prisma:seed && npm run create
 ```
 
 Then run backend (port 4000) and frontend (5173); `frontend/.env.development.local`
-must point `VITE_API_BASE` at the backend's port. `npx tsx scripts/test-draws.ts`
-with `ALLOW_DEV_AUTH=true` runs the draw-engine suite against the local database —
-it is the only real test suite in the repo and it needs Postgres.
+must point `VITE_API_BASE` at the backend's port. Two suites run against the
+local database and are the only real tests in the repo; both need Postgres:
+
+```bash
+npx tsx scripts/test-draws.ts            # draw engine (no server needed)
+npx tsx scripts/test-event-scope.ts      # coordinator authorization, over HTTP
+```
+
+`test-event-scope.ts` drives a **running** backend, so start it with
+`ALLOW_DEV_AUTH=true` first; `test-draws.ts` talks to the database directly.
+
+Note the local `gojukainam` role lacks `CREATEDB`, so `prisma migrate dev`
+fails on its shadow database. Generate migrations with
+`prisma migrate diff --from-schema-datasource ... --to-schema-datamodel ...`,
+write the SQL into `prisma/migrations/<timestamp>_<name>/migration.sql`, then
+`prisma migrate deploy`.
 
 ## Ground rules for agents
 
@@ -124,6 +137,16 @@ it is the only real test suite in the repo and it needs Postgres.
    gets `requireRoles(...)`, and any route that reads or writes club-scoped data
    must also check `req.user.clubId` for non-admin roles. See
    `backend/src/routes/clubs.ts` for the reference shape.
+
+   **Event-scoped routes use `requireEventManager(...)`** from
+   `utils/event-scope.ts` instead — it allows admins plus that event's
+   coordinator. It takes an explicit `EventSource` saying where the event id
+   lives, and **that must name whatever the handler itself uses**. Several
+   routes (`POST /events/:id/divisions`, `POST /events/:id/weights`) ignore the
+   path param and act on `body.eventId`; guarding the path there would let a
+   coordinator put their own event in the URL and another in the body.
+   `scripts/test-event-scope.ts` covers that case — run it after touching any
+   of this.
 5. **Validate input with Zod** from `backend/src/utils/validators.ts`; extend
    that file rather than inlining schemas in routes.
 6. **Don't run dev servers in the background and leave them.** Use one dev
@@ -152,6 +175,12 @@ it is the only real test suite in the repo and it needs Postgres.
 - **Document** — an uploaded file attached to an athlete, event, or club.
 - **Roles** — `SUPERADMIN`, `ADMIN`, `CLUB_MANAGER`, `COACH`, `ATHLETE`.
   Admin roles see everything; the rest see only their own club.
+- **Coordinator** — a per-event delegation (`EventCoordinator`), **not** a
+  role. Grants one `CLUB_MANAGER`/`COACH` admin-equivalent power over *one*
+  event so the host dojo can run the tournament: entries, divisions, event
+  config, draws, run-day. Excluded: billing, user/club management, deleting the
+  event, appointing further coordinators. Their global role and club scoping
+  are untouched everywhere else.
 
 ## Known rough edges
 

@@ -1,12 +1,14 @@
 import { Router } from "express";
 import { prisma } from "../lib/prisma.js";
-import { requireRoles } from "../utils/auth.js";
+import { requireEventManager } from "../utils/event-scope.js";
 import { BulkUpdateEntryStatus } from "../utils/validators.js";
 
 export const router = Router();
 
-// bulk status update (admin only)
-router.post("/bulk-status", requireRoles("SUPERADMIN", "ADMIN"), async (req, res, next) => {
+// bulk status update (admins, or this event's coordinator)
+// Every route here carries eventId in the body/query and every write is scoped
+// by it, so the guard and the query agree on which event is being touched.
+router.post("/bulk-status", requireEventManager({ in: "body", key: "eventId" }), async (req, res, next) => {
   try {
     const { eventId, ids, status, reason } = BulkUpdateEntryStatus.parse(req.body);
     const userId = req.user?.id;
@@ -48,8 +50,8 @@ router.post("/bulk-status", requireRoles("SUPERADMIN", "ADMIN"), async (req, res
 });
 
 
-// queue: entries submitted for an event
-router.get("/", requireRoles("SUPERADMIN","ADMIN"), async (req, res) => {
+// queue: entries submitted for an event (admins, or this event's coordinator)
+router.get("/", requireEventManager({ in: "query", key: "eventId" }), async (req, res) => {
   const { eventId } = req.query as { eventId?: string };
   if (!eventId) return res.status(400).json({ error: "eventId required" });
   const rows = await prisma.entry.findMany({
@@ -60,8 +62,8 @@ router.get("/", requireRoles("SUPERADMIN","ADMIN"), async (req, res) => {
   res.json(rows);
 });
 
-// bulk approve/return
-router.post("/bulk", requireRoles("SUPERADMIN","ADMIN"), async (req, res, next) => {
+// bulk approve/return (admins, or this event's coordinator)
+router.post("/bulk", requireEventManager({ in: "body", key: "eventId" }), async (req, res, next) => {
   try {
     const { eventId, ids, status, reason } = BulkUpdateEntryStatus.parse(req.body);
     const result = await prisma.$transaction(async (tx) => {

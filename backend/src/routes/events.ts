@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { requireRoles } from "../utils/auth.js";
+import { requireEventManager } from "../utils/event-scope.js";
 import { EventService } from "../services/event.service.js";
 import { validate, validateMultiple } from "../middleware/validate.js";
 import { getParam } from "../utils/params.js";
@@ -18,6 +19,9 @@ import {
   AthletePoolQuery,
   ApplyTemplate,
   SetPublicAccess,
+  AddCoordinator,
+  CoordinatorParams,
+  CoordinatorCandidatesQuery,
 } from "../utils/validators.js";
 
 export const router = Router();
@@ -72,8 +76,8 @@ router.post("/", requireRoles("SUPERADMIN", "ADMIN"), validate(CreateEvent), asy
   }
 });
 
-// update event (admin only)
-router.put("/:id", requireRoles("SUPERADMIN", "ADMIN"), validateMultiple({ params: IdParam, body: UpdateEvent }), async (req, res, next) => {
+// update event (admins, or this event's coordinator)
+router.put("/:id", requireEventManager({ in: "params", key: "id" }), validateMultiple({ params: IdParam, body: UpdateEvent }), async (req, res, next) => {
   try {
     const event = await EventService.update(getParam(req.params.id), req.body);
     res.json(event);
@@ -82,8 +86,9 @@ router.put("/:id", requireRoles("SUPERADMIN", "ADMIN"), validateMultiple({ param
   }
 });
 
-// update event status (admin only)
-router.patch("/:id/status", requireRoles("SUPERADMIN", "ADMIN"), validateMultiple({ params: IdParam, body: UpdateEventStatus }), async (req, res, next) => {
+// update event status (admins, or this event's coordinator — they close
+// registration and archive on the day)
+router.patch("/:id/status", requireEventManager({ in: "params", key: "id" }), validateMultiple({ params: IdParam, body: UpdateEventStatus }), async (req, res, next) => {
   try {
     const event = await EventService.updateStatus(getParam(req.params.id), req.body.status);
     res.json(event);
@@ -92,8 +97,9 @@ router.patch("/:id/status", requireRoles("SUPERADMIN", "ADMIN"), validateMultipl
   }
 });
 
-// enable/disable (rotate) the read-only public board token (admin only)
-router.post("/:id/public-token", requireRoles("SUPERADMIN", "ADMIN"), validateMultiple({ params: IdParam, body: SetPublicAccess }), async (req, res, next) => {
+// enable/disable (rotate) the read-only public board token (admins, or this
+// event's coordinator — the spectator board is a run-day concern)
+router.post("/:id/public-token", requireEventManager({ in: "params", key: "id" }), validateMultiple({ params: IdParam, body: SetPublicAccess }), async (req, res, next) => {
   try {
     const event = await EventService.setPublicAccess(getParam(req.params.id), req.body.enabled);
     res.json(event);
@@ -127,8 +133,11 @@ router.get("/:id/divisions", validate(IdParam, "params"), async (req, res, next)
   }
 });
 
-// create division (admin only)
-router.post("/:id/divisions", requireRoles("SUPERADMIN", "ADMIN"), validate(CreateDivision), async (req, res, next) => {
+// create division (admins, or this event's coordinator)
+// Guarded on body.eventId, NOT params.id: the handler passes req.body straight
+// to the service and ignores the path param, so guarding the path would let a
+// coordinator put their own event in the URL and someone else's in the body.
+router.post("/:id/divisions", requireEventManager({ in: "body", key: "eventId" }), validate(CreateDivision), async (req, res, next) => {
   try {
     const division = await EventService.createDivision(req.body);
     res.status(201).json(division);
@@ -137,8 +146,8 @@ router.post("/:id/divisions", requireRoles("SUPERADMIN", "ADMIN"), validate(Crea
   }
 });
 
-// update division (admin only)
-router.put("/divisions/:divisionId", requireRoles("SUPERADMIN", "ADMIN"), validateMultiple({ params: DivisionIdParam, body: UpdateDivision }), async (req, res, next) => {
+// update division (admins, or the coordinator of the division's event)
+router.put("/divisions/:divisionId", requireEventManager({ in: "lookup", key: "divisionId", via: "division" }), validateMultiple({ params: DivisionIdParam, body: UpdateDivision }), async (req, res, next) => {
   try {
     const division = await EventService.updateDivision(getParam(req.params.divisionId), req.body);
     res.json(division);
@@ -147,8 +156,8 @@ router.put("/divisions/:divisionId", requireRoles("SUPERADMIN", "ADMIN"), valida
   }
 });
 
-// delete division (admin only)
-router.delete("/divisions/:divisionId", requireRoles("SUPERADMIN", "ADMIN"), validate(DivisionIdParam, "params"), async (req, res, next) => {
+// delete division (admins, or the coordinator of the division's event)
+router.delete("/divisions/:divisionId", requireEventManager({ in: "lookup", key: "divisionId", via: "division" }), validate(DivisionIdParam, "params"), async (req, res, next) => {
   try {
     await EventService.deleteDivision(getParam(req.params.divisionId));
     res.status(204).send();
@@ -172,8 +181,9 @@ router.get("/:id/weights", validate(IdParam, "params"), async (req, res, next) =
   }
 });
 
-// create weight class (admin only)
-router.post("/:id/weights", requireRoles("SUPERADMIN", "ADMIN"), validate(CreateWeightClass), async (req, res, next) => {
+// create weight class (admins, or this event's coordinator)
+// Guarded on body.eventId for the same reason as create-division above.
+router.post("/:id/weights", requireEventManager({ in: "body", key: "eventId" }), validate(CreateWeightClass), async (req, res, next) => {
   try {
     const weightClass = await EventService.createWeightClass(req.body);
     res.status(201).json(weightClass);
@@ -182,8 +192,8 @@ router.post("/:id/weights", requireRoles("SUPERADMIN", "ADMIN"), validate(Create
   }
 });
 
-// update weight class (admin only)
-router.put("/weights/:weightClassId", requireRoles("SUPERADMIN", "ADMIN"), validateMultiple({ params: WeightClassIdParam, body: UpdateWeightClass }), async (req, res, next) => {
+// update weight class (admins, or the coordinator of the class's event)
+router.put("/weights/:weightClassId", requireEventManager({ in: "lookup", key: "weightClassId", via: "weightClass" }), validateMultiple({ params: WeightClassIdParam, body: UpdateWeightClass }), async (req, res, next) => {
   try {
     const weightClass = await EventService.updateWeightClass(getParam(req.params.weightClassId), req.body);
     res.json(weightClass);
@@ -192,8 +202,8 @@ router.put("/weights/:weightClassId", requireRoles("SUPERADMIN", "ADMIN"), valid
   }
 });
 
-// delete weight class (admin only)
-router.delete("/weights/:weightClassId", requireRoles("SUPERADMIN", "ADMIN"), validate(WeightClassIdParam, "params"), async (req, res, next) => {
+// delete weight class (admins, or the coordinator of the class's event)
+router.delete("/weights/:weightClassId", requireEventManager({ in: "lookup", key: "weightClassId", via: "weightClass" }), validate(WeightClassIdParam, "params"), async (req, res, next) => {
   try {
     await EventService.deleteWeightClass(getParam(req.params.weightClassId));
     res.status(204).send();
@@ -259,10 +269,62 @@ router.get("/:id/athlete-pool", requireRoles("SUPERADMIN", "ADMIN", "CLUB_MANAGE
   }
 });
 
+// ============ Coordinators ============
+//
+// Appointing and revoking stays requireRoles("SUPERADMIN", "ADMIN") — NOT
+// requireEventManager. A coordinator must not be able to appoint further
+// coordinators or revoke the admin who appointed them.
+
+// who coordinates this event (admins, or this event's coordinator — a
+// coordinator may see who else is running the day with them)
+router.get("/:id/coordinators", requireEventManager({ in: "params", key: "id" }), validate(IdParam, "params"), async (req, res, next) => {
+  try {
+    res.json(await EventService.listCoordinators(getParam(req.params.id)));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// users who could be appointed (admin only — it is the appointment picker)
+router.get("/:id/coordinator-candidates", requireRoles("SUPERADMIN", "ADMIN"), validateMultiple({ params: IdParam, query: CoordinatorCandidatesQuery }), async (req, res, next) => {
+  try {
+    const search = typeof req.query.search === "string" ? req.query.search : undefined;
+    res.json(await EventService.listCoordinatorCandidates(getParam(req.params.id), search));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// appoint a coordinator (admin only)
+router.post("/:id/coordinators", requireRoles("SUPERADMIN", "ADMIN"), validateMultiple({ params: IdParam, body: AddCoordinator }), async (req, res, next) => {
+  try {
+    const rows = await EventService.addCoordinator(getParam(req.params.id), req.body.userId, req.user?.id);
+    res.status(201).json(rows);
+  } catch (err: any) {
+    if (err.status && err.message) {
+      return res.status(err.status).json({ error: err.message });
+    }
+    next(err);
+  }
+});
+
+// revoke a coordinator (admin only)
+router.delete("/:id/coordinators/:userId", requireRoles("SUPERADMIN", "ADMIN"), validate(CoordinatorParams, "params"), async (req, res, next) => {
+  try {
+    const rows = await EventService.removeCoordinator(getParam(req.params.id), getParam(req.params.userId), req.user?.id);
+    res.json(rows);
+  } catch (err: any) {
+    if (err.status && err.message) {
+      return res.status(err.status).json({ error: err.message });
+    }
+    next(err);
+  }
+});
+
 // ============ Templates ============
 
-// apply a WKF division template to an event (admin only)
-router.post("/:id/apply-template", requireRoles("SUPERADMIN", "ADMIN"), validateMultiple({ params: IdParam, body: ApplyTemplate }), async (req, res, next) => {
+// apply a division template to an event (admins, or this event's coordinator)
+router.post("/:id/apply-template", requireEventManager({ in: "params", key: "id" }), validateMultiple({ params: IdParam, body: ApplyTemplate }), async (req, res, next) => {
   try {
     const result = await EventService.applyTemplate(getParam(req.params.id), req.body.template);
     res.json(result);
@@ -276,8 +338,8 @@ router.post("/:id/apply-template", requireRoles("SUPERADMIN", "ADMIN"), validate
 
 // ============ Config ============
 
-// update config snapshot (admins)
-router.put("/:id/config", requireRoles("SUPERADMIN", "ADMIN"), async (req, res, next) => {
+// update config snapshot (admins, or this event's coordinator)
+router.put("/:id/config", requireEventManager({ in: "params", key: "id" }), async (req, res, next) => {
   try {
     const event = await EventService.updateConfig(getParam(req.params.id), req.body);
     res.json(event);

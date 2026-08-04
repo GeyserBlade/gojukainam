@@ -11,6 +11,8 @@ export interface User {
   email?: string;
   role: Role;
   clubId?: string | null;
+  /** Events this user coordinates. Resolved live by /auth/me, never from the JWT. */
+  coordinatorEventIds?: string[];
 }
 
 interface AuthContextValue {
@@ -18,7 +20,14 @@ interface AuthContextValue {
   loading: boolean;
   role?: Role; // convenience accessors
   clubId?: string | null;
-  
+  /**
+   * May this user manage this event? True for admins on any event, and for a
+   * coordinator on the event they were given. Mirrors requireEventManager on
+   * the server — this only decides what to *show*; the server still decides
+   * what is allowed.
+   */
+  canManageEvent: (eventId?: string | null) => boolean;
+
   loginDev: (payload: { role: Role; clubId?: string }) => Promise<void>;
   login: (email:string, password:string) => Promise<void>;
   requestMagicLink: (email:string) => Promise<any>;
@@ -107,12 +116,20 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setUser(null);
   };
 
-  const value = useMemo(() => ({ 
-      user, 
-      role: user?.role, 
-      clubId: user?.clubId, 
-      loading, 
-      loginDev, login, requestMagicLink, verifyMagicLink, logout, checkAuth 
+  const canManageEvent = (eventId?: string | null) => {
+    if (!user) return false;
+    if (user.role === "SUPERADMIN" || user.role === "ADMIN") return true;
+    if (!eventId) return false;
+    return (user.coordinatorEventIds ?? []).includes(eventId);
+  };
+
+  const value = useMemo(() => ({
+      user,
+      role: user?.role,
+      clubId: user?.clubId,
+      loading,
+      canManageEvent,
+      loginDev, login, requestMagicLink, verifyMagicLink, logout, checkAuth
   }), [user, loading]);
   
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

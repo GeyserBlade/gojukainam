@@ -235,10 +235,39 @@ const NKF_FULL_2026_DIVISIONS: DivisionDef[] = [
 ];
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Goju Kai Small — no weight classes
+// ═══════════════════════════════════════════════════════════════════════════
+// Single-year age groups from 5 to 16, boys and girls, kata and kumite.
+// Age is the only fairness control: no weight classes are attached to the
+// kumite divisions, so entries are split by age and gender alone.
+// Generated rather than written out — 48 divisions of purely mechanical
+// variation would be error-prone by hand.
+
+const GK_SMALL_AGES = [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16] as const;
+
+const GK_SMALL_NO_WEIGHTS_DIVISIONS: DivisionDef[] = GK_SMALL_AGES.flatMap((age) =>
+  (["KATA", "KUMITE"] as const).flatMap((category) =>
+    ([
+      ["Male", "M", "Boys"],
+      ["Female", "F", "Girls"],
+    ] as const).map(([gender, genderKey, genderLabel]): DivisionDef => ({
+      key: `GK_SMALL_${genderKey}_${category}_${age}`,
+      name: `${genderLabel} ${category === "KATA" ? "Kata" : "Kumite"} (age ${age})`,
+      minAge: age,
+      maxAge: age,
+      gender,
+      category,
+      notes: "No weight classes — age and gender only",
+    })),
+  ),
+);
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Exports
 // ═══════════════════════════════════════════════════════════════════════════
 
 export const TEMPLATES = {
+  GK_SMALL_NO_WEIGHTS: GK_SMALL_NO_WEIGHTS_DIVISIONS,
   NKF_FULL_2026: NKF_FULL_2026_DIVISIONS,
   NKF_INDIVIDUAL_2026: NKF_INDIVIDUAL_DIVISIONS,
   NKF_TEAM_2026: NKF_TEAM_DIVISIONS,
@@ -259,6 +288,13 @@ const countWeights = (divs: readonly DivisionDef[]) =>
   divs.reduce((sum, d) => sum + (d.weightClasses?.length ?? 0), 0);
 
 export const TEMPLATE_META: TemplateMeta[] = [
+  {
+    id: "GK_SMALL_NO_WEIGHTS",
+    name: "Goju Kai Small No-weights",
+    description: "Single-year age groups from 5 to 16, boys & girls, kata & kumite — no weight classes",
+    divisionCount: GK_SMALL_NO_WEIGHTS_DIVISIONS.length,
+    weightClassCount: countWeights(GK_SMALL_NO_WEIGHTS_DIVISIONS),
+  },
   {
     id: "NKF_FULL_2026",
     name: "NKF Full Tournament 2026",

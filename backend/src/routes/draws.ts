@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { requireRoles } from "../utils/auth.js";
+import { requireEventManager } from "../utils/event-scope.js";
 import { DrawService } from "../services/draw.service.js";
 import { validate, validateMultiple } from "../middleware/validate.js";
 import {
@@ -19,7 +20,6 @@ import { getParam } from "../utils/params.js";
 export const router = Router();
 
 const VIEW_ROLES = ["CLUB_MANAGER", "COACH", "ATHLETE", "ADMIN", "SUPERADMIN"] as const;
-const MANAGE_ROLES = ["ADMIN", "SUPERADMIN"] as const;
 
 // Category overview for an event (entry counts + draw state per category)
 router.get("/", requireRoles(...VIEW_ROLES), validate(EventIdQuery, "query"), async (req, res, next) => {
@@ -32,7 +32,7 @@ router.get("/", requireRoles(...VIEW_ROLES), validate(EventIdQuery, "query"), as
 // Seeding for one category. Must be declared before "/:id" or the param route
 // swallows it. validate(..., "query") only checks and never writes back
 // (req.query is read-only in Express), so the raw values are read here.
-router.get("/seeds", requireRoles(...MANAGE_ROLES), validate(CategorySeedsQuery, "query"), async (req, res, next) => {
+router.get("/seeds", requireEventManager({ in: "query", key: "eventId" }), validate(CategorySeedsQuery, "query"), async (req, res, next) => {
   try {
     const { eventId, divisionId } = req.query as { eventId: string; divisionId: string };
     res.json(await DrawService.listCategorySeeds({
@@ -47,7 +47,7 @@ router.get("/seeds", requireRoles(...MANAGE_ROLES), validate(CategorySeedsQuery,
 });
 
 // Replace a category's seeding wholesale
-router.put("/seeds", requireRoles(...MANAGE_ROLES), validate(SetCategorySeeds), async (req, res, next) => {
+router.put("/seeds", requireEventManager({ in: "body", key: "eventId" }), validate(SetCategorySeeds), async (req, res, next) => {
   try {
     const { eventId, divisionId, weightClassId, seeds } = req.body;
     res.json(await DrawService.setCategorySeeds(
@@ -72,7 +72,7 @@ router.get("/:id", requireRoles(...VIEW_ROLES), validate(IdParam, "params"), asy
 });
 
 // Generate a draw for a category
-router.post("/", requireRoles(...MANAGE_ROLES), validate(CreateDraw), async (req, res, next) => {
+router.post("/", requireEventManager({ in: "body", key: "eventId" }), validate(CreateDraw), async (req, res, next) => {
   try {
     const row = await DrawService.create(req.body, { id: req.user!.id });
     res.status(201).json(row);
@@ -83,7 +83,7 @@ router.post("/", requireRoles(...MANAGE_ROLES), validate(CreateDraw), async (req
 });
 
 // Lock (publish) or unlock a draw
-router.put("/:id/lock", requireRoles(...MANAGE_ROLES), validateMultiple({ params: IdParam, body: SetDrawLock }), async (req, res, next) => {
+router.put("/:id/lock", requireEventManager({ in: "lookup", key: "id", via: "draw" }), validateMultiple({ params: IdParam, body: SetDrawLock }), async (req, res, next) => {
   try {
     const row = await DrawService.setLock(getParam(req.params.id), req.body.locked, { id: req.user!.id });
     res.json(row);
@@ -94,7 +94,7 @@ router.put("/:id/lock", requireRoles(...MANAGE_ROLES), validateMultiple({ params
 });
 
 // Redraw with current entries (force: true discards captured results)
-router.post("/:id/regenerate", requireRoles(...MANAGE_ROLES), validateMultiple({ params: IdParam, body: RegenerateDraw }), async (req, res, next) => {
+router.post("/:id/regenerate", requireEventManager({ in: "lookup", key: "id", via: "draw" }), validateMultiple({ params: IdParam, body: RegenerateDraw }), async (req, res, next) => {
   try {
     const row = await DrawService.regenerate(getParam(req.params.id), !!req.body.force, { id: req.user!.id });
     res.json(row);
@@ -105,7 +105,7 @@ router.post("/:id/regenerate", requireRoles(...MANAGE_ROLES), validateMultiple({
 });
 
 // Capture or clear a bout result
-router.put("/:id/bouts/:boutId", requireRoles(...MANAGE_ROLES), validateMultiple({ params: BoutParams, body: SetBoutWinner }), async (req, res, next) => {
+router.put("/:id/bouts/:boutId", requireEventManager({ in: "lookup", key: "id", via: "draw" }), validateMultiple({ params: BoutParams, body: SetBoutWinner }), async (req, res, next) => {
   try {
     const row = await DrawService.setBoutWinner(
       getParam(req.params.id),
@@ -121,7 +121,7 @@ router.put("/:id/bouts/:boutId", requireRoles(...MANAGE_ROLES), validateMultiple
 });
 
 // Capture a fully scored WKF kumite result (points, outcome, detail)
-router.put("/:id/bouts/:boutId/score", requireRoles(...MANAGE_ROLES), validateMultiple({ params: BoutParams, body: SetBoutScore }), async (req, res, next) => {
+router.put("/:id/bouts/:boutId/score", requireEventManager({ in: "lookup", key: "id", via: "draw" }), validateMultiple({ params: BoutParams, body: SetBoutScore }), async (req, res, next) => {
   try {
     const row = await DrawService.setBoutScore(
       getParam(req.params.id),
@@ -136,7 +136,7 @@ router.put("/:id/bouts/:boutId/score", requireRoles(...MANAGE_ROLES), validateMu
   }
 });
 
-router.delete("/:id", requireRoles(...MANAGE_ROLES), validate(IdParam, "params"), async (req, res, next) => {
+router.delete("/:id", requireEventManager({ in: "lookup", key: "id", via: "draw" }), validate(IdParam, "params"), async (req, res, next) => {
   try {
     await DrawService.delete(getParam(req.params.id), { id: req.user!.id });
     res.status(204).send();

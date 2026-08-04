@@ -320,6 +320,131 @@ export class EventService {
     });
   }
 
+  // ============ Coordinators ============
+  //
+  // A coordinator is delegated management of ONE event (see EventCoordinator in
+  // schema.prisma and requireEventManager in utils/event-scope.ts). Appointing
+  // and revoking is deliberately admin-only: a coordinator cannot widen their
+  // own circle.
+
+  /** Everyone currently coordinating this event. */
+  static async listCoordinators(eventId: string) {
+    return prisma.eventCoordinator.findMany({
+      where: { eventId },
+      orderBy: { createdAt: "asc" },
+      select: {
+        id: true,
+        createdAt: true,
+        user: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            role: true,
+            club: { select: { id: true, name: true } },
+          },
+        },
+        grantedBy: { select: { id: true, name: true, email: true } },
+      },
+    });
+  }
+
+  static async addCoordinator(eventId: string, userId: string, grantedById?: string) {
+    const [event, user] = await Promise.all([
+      prisma.event.findUnique({ where: { id: eventId }, select: { id: true } }),
+      prisma.user.findUnique({ where: { id: userId }, select: { id: true, role: true } }),
+    ]);
+    if (!event) throw { status: 404, message: "Event not found" };
+    if (!user) throw { status: 404, message: "User not found" };
+
+    // ATHLETE is the one role for which a coordinator grant makes no sense —
+    // it would hand event-wide management to a competitor.
+    if (user.role === "ATHLETE") {
+      throw { status: 400, message: "Athletes cannot be appointed as coordinators" };
+    }
+
+    // Admins already manage every event; a grant would be dead data implying
+    // a revocable permission that revoking would not actually remove.
+    if (user.role === "ADMIN" || user.role === "SUPERADMIN") {
+      throw { status: 400, message: "Admins already manage every event" };
+    }
+
+    const existing = await prisma.eventCoordinator.findUnique({
+      where: { eventId_userId: { eventId, userId } },
+      select: { id: true },
+    });
+    if (existing) throw { status: 409, message: "Already a coordinator for this event" };
+
+    await prisma.eventCoordinator.create({
+      data: { eventId, userId, grantedById: grantedById ?? null },
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        userId: grantedById ?? null,
+        entityType: "EventCoordinator",
+        entityId: eventId,
+        action: "GRANT",
+        diffJson: JSON.stringify({ eventId, userId }),
+      },
+    });
+
+    return this.listCoordinators(eventId);
+  }
+
+  static async removeCoordinator(eventId: string, userId: string, actorId?: string) {
+    const existing = await prisma.eventCoordinator.findUnique({
+      where: { eventId_userId: { eventId, userId } },
+      select: { id: true },
+    });
+    if (!existing) throw { status: 404, message: "Not a coordinator for this event" };
+
+    await prisma.eventCoordinator.delete({ where: { id: existing.id } });
+
+    await prisma.auditLog.create({
+      data: {
+        userId: actorId ?? null,
+        entityType: "EventCoordinator",
+        entityId: eventId,
+        action: "REVOKE",
+        diffJson: JSON.stringify({ eventId, userId }),
+      },
+    });
+
+    return this.listCoordinators(eventId);
+  }
+
+  /**
+   * Users who could be appointed: everyone who is not already a coordinator
+   * here, not an athlete, and not an admin (admins manage every event anyway).
+   */
+  static async listCoordinatorCandidates(eventId: string, search?: string) {
+    const term = search?.trim();
+    return prisma.user.findMany({
+      where: {
+        role: { in: ["CLUB_MANAGER", "COACH"] },
+        coordinatorFor: { none: { eventId } },
+        ...(term
+          ? {
+              OR: [
+                { name: { contains: term, mode: "insensitive" as const } },
+                { email: { contains: term, mode: "insensitive" as const } },
+              ],
+            }
+          : {}),
+      },
+      orderBy: [{ name: "asc" }, { email: "asc" }],
+      take: 20,
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        club: { select: { id: true, name: true } },
+      },
+    });
+  }
+
   // ============ Template ============
 
   static listTemplates() {

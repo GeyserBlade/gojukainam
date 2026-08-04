@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { requireRoles } from "../utils/auth.js";
+import { requireEventManager } from "../utils/event-scope.js";
 import { EntryService } from "../services/entry.service.js";
 import { validate, validateMultiple } from "../middleware/validate.js";
 import { CreateEntry, UpdateEntryStatus, EventEntriesQuery, IdParam, BulkSubmitEntries, SetEntrySeed } from "../utils/validators.js";
@@ -122,7 +123,7 @@ router.put("/:id/status", requireRoles("CLUB_MANAGER", "COACH", "ADMIN", "SUPERA
 });
 
 // set or clear one entry's seed (the whole-category equivalent is PUT /draws/seeds)
-router.put("/:id/seed", requireRoles("ADMIN", "SUPERADMIN"), validateMultiple({ params: IdParam, body: SetEntrySeed }), async (req, res, next) => {
+router.put("/:id/seed", requireEventManager({ in: "lookup", key: "id", via: "entry" }), validateMultiple({ params: IdParam, body: SetEntrySeed }), async (req, res, next) => {
   try {
     const row = await DrawService.setEntrySeed(getParam(req.params.id), req.body.seed, { id: req.user!.id });
     res.json(row);

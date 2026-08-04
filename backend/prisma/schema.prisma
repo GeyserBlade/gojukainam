@@ -102,6 +102,37 @@ model User {
   AuditLogs      AuditLog[]
   PasswordResets PasswordReset[]
   documents      Document[]
+
+  coordinatorFor    EventCoordinator[] @relation("CoordinatorUser")
+  coordinatorGrants EventCoordinator[] @relation("CoordinatorGrantedBy")
+}
+
+/// Per-event delegation: grants one user admin-equivalent powers over ONE event
+/// (entries, draws, run-day, divisions and event config) without changing their
+/// global Role. The host dojo's instructor keeps CLUB_MANAGER — and their club
+/// scoping everywhere else — while running the tournament they host.
+///
+/// Deliberately NOT a Role enum value: a coordinator is an addition to whatever
+/// the user already is, and the grant has to disappear when the event does.
+/// Excluded from the grant by design: billing/invoices, user and club
+/// management, deleting the event, and appointing further coordinators.
+model EventCoordinator {
+  id      String @id @default(cuid())
+  eventId String
+  event   Event  @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  userId  String
+  user    User   @relation("CoordinatorUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Who appointed them. Kept for accountability; null if the appointer's user
+  /// row is later removed.
+  grantedById String?
+  grantedBy   User?   @relation("CoordinatorGrantedBy", fields: [grantedById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  @@unique([eventId, userId])
+  @@index([userId])
+  @@index([eventId])
 }
 
 model MagicLink {
@@ -213,6 +244,7 @@ model Event {
   documents     Document[]
   draws         Draw[]
   mats          Mat[]
+  coordinators  EventCoordinator[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

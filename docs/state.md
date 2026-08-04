@@ -4,9 +4,12 @@ This file is the handoff between coding agents. It describes what is in flight
 right now, not the permanent architecture (that's
 [`architecture.md`](architecture.md)).
 
-**Last updated:** 2026-08-01 — by Claude Code: shared agent docs, 18 type-error
-fixes, merge of 10 upstream PRs, local Postgres + seed repair, the athlete-pool
-endpoint, and the Entry Management redesign port.
+**Last updated:** 2026-08-04 — by Claude Code: added the "Goju Kai Small
+No-weights" division template, and per-event tournament coordinators.
+
+Previously, 2026-08-01: shared agent docs, 18 type-error fixes, merge of 10
+upstream PRs, local Postgres + seed repair, the athlete-pool endpoint, and the
+Entry Management redesign port.
 
 ## Branch
 
@@ -18,8 +21,117 @@ against a database, but never run against production data.
 
 ## In flight (uncommitted)
 
-Nothing. The Entry Management redesign that used to sit here is committed and
-live — see "Entry Management redesign" below.
+**New division template: `GK_SMALL_NO_WEIGHTS` ("Goju Kai Small No-weights").**
+Single-year age groups 5→16, boys & girls, kata & kumite, **no weight classes** —
+48 divisions, 0 weight classes. Three files:
+
+- `backend/src/data/wkf-template.ts` — the definitions, plus `TEMPLATES` and
+  `TEMPLATE_META` entries. Unlike the other four templates the divisions are
+  *generated* from an age list rather than written out as literals; 48 rows of
+  purely mechanical variation are more reliable produced by a loop.
+- `backend/src/utils/validators.ts` — added to the `ApplyTemplate` Zod enum.
+  **Miss this and the route 400s** on the new id even though it lists fine.
+- `frontend/src/lib/events.ts` — added to the `TemplateId` union.
+
+Worth knowing for whoever adds the next template: templates are **compile-time
+constants, not database rows**. Nothing appears in production until this code is
+deployed; `POST /events/:id/apply-template` is what turns a template into
+`Division` rows on one event. The three files above must move together.
+
+**Tournament coordinators — per-event delegation.** An admin can hand one
+`CLUB_MANAGER`/`COACH` management of a single event, so the host dojo runs the
+day. Migration `20260804120000_add_event_coordinator`.
+
+Why it is not a sixth `Role`: the Swakop instructor already *is* a
+`CLUB_MANAGER` with a `clubId`. Changing their role would strip access to their
+own dojo's athletes. So the grant **stacks on** the existing role and is scoped
+to one event.
+
+The guard is the substance, not the table. `requireRoles` is global and never
+sees which event a request concerns, so `utils/event-scope.ts` adds
+`requireEventManager(source)`, where `source` names where the event id lives:
+a param, the body, the query, or a lookup through the row (`division`,
+`weightClass`, `draw`, `mat`, `entry`, `bout` — `bout` is the only one that has
+to hop, via its `Draw`). Admins short-circuit before any lookup, so the existing
+admin path is byte-for-byte unchanged and costs no extra query.
+
+**The trap, if you extend this:** the `source` must name whatever the *handler*
+reads. `POST /events/:id/divisions` and `POST /events/:id/weights` ignore
+`req.params.id` entirely and act on `req.body.eventId`. Guarding the path param
+there would let a coordinator put their own event in the URL and someone else's
+in the body. Both are guarded on the body; `scripts/test-event-scope.ts` asserts
+that exact attack and that nothing is written.
+
+Coordinator can: entries review/approve/return, divisions & weight classes,
+apply templates, event config/status/public-token, draws & seeds, mats,
+check-in, bout scoring. Coordinator cannot: delete the event, create events,
+appoint or revoke coordinators (those stay `requireRoles("SUPERADMIN","ADMIN")`
+by design — a coordinator must not widen their own circle), club billing, user
+or club management. Approving their **own** club's entries is deliberately
+allowed — decided by the product owner; every action is audit-logged.
+
+Grants are resolved **live** in `/auth/me`, never carried in the JWT: a token
+minted before a revocation would otherwise keep asserting it until expiry.
+Client-side, `useAuth().canManageEvent(eventId)` mirrors the server guard and
+only decides what to *show*.
+
+Files: `prisma/schema.prisma` + migration, `utils/event-scope.ts` (new),
+`routes/{events,review,draws,run,entries,auth}.ts`, `services/event.service.ts`,
+`utils/validators.ts`, `scripts/test-event-scope.ts` (new), and on the frontend
+`contexts/AuthContext.tsx`, `lib/events.ts`,
+`components/events/EventCoordinators.tsx` (new),
+`components/layout/EventHubLayout.tsx`, `pages/hub/Setup.tsx`.
+
+The Entry Management redesign that used to sit here is committed and live — see
+"Entry Management redesign" below.
+
+### Verification (run 2026-08-04)
+
+| Check | Result |
+|---|---|
+| `backend` / `frontend`: `npx tsc --noEmit` | ✅ both clean, exit 0 |
+| Template shape | ✅ 48 divisions, 0 weight classes, ages 5-16 all single-year, no duplicate `key:gender` |
+| `GET /api/events/templates` over HTTP | ✅ returns the new entry, `divisionCount: 48`, `weightClassCount: 0` |
+| `applyTemplate` against local Postgres | ✅ 48 `Division` rows, 0 `WeightClass` rows written |
+| Re-applying to the same event | ✅ dedupe skips all 48, no duplicates |
+
+Not verified: the "Apply division template" modal rendering the new row. The
+modal maps straight over the `/events/templates` response, which is confirmed
+correct — but nobody has looked at that specific rendered row.
+
+### Coordinator verification (run 2026-08-04)
+
+`scripts/test-event-scope.ts` — 25 checks, all passing, over real HTTP against
+the local database:
+
+| Group | Covered |
+|---|---|
+| No grant held | review, apply-template, config, create-mat all 403 |
+| Granted on event A | the same four succeed (200/201) |
+| **Cross-event** | grant on A gives 403 on every equivalent B route |
+| **body-vs-param** | URL=A + body=B → 403, and 0 rows written to B |
+| Excluded powers | delete event, create event, appoint/revoke coordinator, candidate picker, list users all 403; another club's billing not 200 |
+| Admin unchanged | admin still reaches every event and can delete |
+| Revocation | access gone on the next request, no stale claim |
+
+Also: `scripts/test-draws.ts` still passes (draws/run route guards were
+rewritten, so this was a real regression risk). Both projects `tsc --noEmit`
+clean and `npm run build` succeeds.
+
+In-browser, as ADMIN on `/hub/setup`: the Coordinators card renders its empty
+state, the picker lists only `CLUB_MANAGER`/`COACH` users (admins correctly
+absent), appointing "Swakop Manager" showed the confirmation toast and the
+roster row, the row landed in `EventCoordinator` with `grantedById` set, revoke
+prompted and removed it, and `GRANT`/`REVOKE` both hit the audit log. Console
+clean throughout.
+
+**Not verified in-browser: the coordinator's own view.** Confirming that a
+CLUB_MANAGER coordinator sees the Setup/Entries/Review tabs needs a real cookie
+session for that user — `/auth/me` is cookie-only by design and ignores the
+`x-role` dev header, and the dev-fallback path in `AuthContext` never populates
+`coordinatorEventIds`. The server-side half of that is fully covered by the
+suite above; the tab-visibility half is type-checked and reasoned, not seen.
+Worth a look on staging with a real coordinator login before you rely on it.
 
 Still carried as known gaps of that screen (from its README at the repo root):
 
