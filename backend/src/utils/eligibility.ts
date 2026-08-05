@@ -56,6 +56,26 @@ export async function assertNoDuplicateEntry(params: {
   }
 }
 
+// Weight classes attach either to one division (`divisionId` set — what every
+// template produces) or to the whole event by gender (`divisionId` null, the
+// shape the manual "add weight class" form can create). A kumite division with
+// neither is a no-weights category: the "Goju Kai Small No-weights" template
+// makes 48 of them, and their entries carry `weightClassId: null`.
+export async function findApplicableWeightClasses(
+  eventId: string,
+  divisionId: string,
+  gender: "Male" | "Female" | Gender
+) {
+  return prisma.weightClass.findMany({
+    where: {
+      eventId,
+      gender: gender as Gender,
+      OR: [{ divisionId }, { divisionId: null }],
+    },
+    orderBy: { minKg: "asc" },
+  });
+}
+
 // For Kumite individual, ensure weight class matches gender & division
 export async function validateWeightClass(
   weightClassId: string,
@@ -67,6 +87,12 @@ export async function validateWeightClass(
   if (!wc) throw { status: 404, message: "Weight class not found" };
 
   if (wc.eventId !== eventId) throw { status: 400, message: "Weight class does not belong to this event" };
+
+  // A null divisionId means the class is event-wide and applies to any division
+  // of that gender; a set one must match the division being entered.
+  if (wc.divisionId && wc.divisionId !== divisionId) {
+    throw { status: 400, message: "Weight class belongs to a different division" };
+  }
 
   if (wc.gender !== gender) {
     throw { status: 400, message: `Weight class gender (${wc.gender}) does not match athlete (${gender})` };

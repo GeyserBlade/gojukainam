@@ -1,6 +1,6 @@
 import { prisma } from "../lib/prisma.js";
 import { CreateEntry, UpdateEntryStatus } from "../utils/validators.js";
-import { assertNoDuplicateEntry, validateWeightClass, validateAthleteEligibility, validateAthleteWeight } from "../utils/eligibility.js";
+import { assertNoDuplicateEntry, validateWeightClass, validateAthleteEligibility, validateAthleteWeight, findApplicableWeightClasses } from "../utils/eligibility.js";
 import { assertRegistrationOpen } from "../utils/regWindow.js";
 
 export class EntryService {
@@ -95,12 +95,28 @@ export class EntryService {
       // Validate age and gender eligibility for division
       await validateAthleteEligibility(body.athleteId, body.divisionId, body.eventId);
 
-      // kumite needs weight class
+      // Kumite needs a weight class only where the division actually has them.
+      // No-weights kumite divisions are legitimate (the "Goju Kai Small
+      // No-weights" template is entirely made of them) and their entries draw
+      // as one pool with weightClassId null.
       if (body.entryType === "KUMITE") {
-        if (!body.weightClassId) throw { status: 400, message: "weightClassId required for Kumite" };
-        await validateWeightClass(body.weightClassId, body.eventId, body.divisionId, athlete.gender);
-        // Validate athlete's weight is within weight class range
-        await validateAthleteWeight(body.athleteId, body.weightClassId);
+        if (body.weightClassId) {
+          await validateWeightClass(body.weightClassId, body.eventId, body.divisionId, athlete.gender);
+          // Validate athlete's weight is within weight class range
+          await validateAthleteWeight(body.athleteId, body.weightClassId);
+        } else {
+          const applicable = await findApplicableWeightClasses(
+            body.eventId,
+            body.divisionId,
+            athlete.gender
+          );
+          if (applicable.length > 0) {
+            throw {
+              status: 400,
+              message: `This kumite division has ${applicable.length} weight class${applicable.length === 1 ? "" : "es"}; choose one for this athlete.`
+            };
+          }
+        }
       }
 
       await assertNoDuplicateEntry({

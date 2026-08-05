@@ -4,8 +4,11 @@ This file is the handoff between coding agents. It describes what is in flight
 right now, not the permanent architecture (that's
 [`architecture.md`](architecture.md)).
 
-**Last updated:** 2026-08-04 — by Claude Code: added the "Goju Kai Small
-No-weights" division template, and per-event tournament coordinators.
+**Last updated:** 2026-08-05 — by Claude Code: kumite entries no longer require
+a weight class on divisions that have none.
+
+Previously, 2026-08-04: added the "Goju Kai Small No-weights" division template,
+and per-event tournament coordinators.
 
 Previously, 2026-08-01: shared agent docs, 18 type-error fixes, merge of 10
 upstream PRs, local Postgres + seed repair, the athlete-pool endpoint, and the
@@ -15,11 +18,69 @@ Entry Management redesign port.
 
 `main`. Pushing to `main` deploys to Railway, so it is a release, not a save.
 
-**Local `main` is ahead of `origin/main` by several commits that have not been
-pushed** — the pool endpoint and the redesign port among them. Verified locally
-against a database, but never run against production data.
+Local `main` is in sync with `origin/main` as of 2026-08-05. (This section
+previously claimed several unpushed commits — the pool endpoint and the redesign
+port; those have since been pushed.) Everything here is verified locally against
+a database, never against production data.
 
-## In flight (uncommitted)
+## Recently shipped
+
+**Kumite entries on no-weights divisions (fixed 2026-08-05).** Enrolling an
+athlete into any kumite division from the event hub failed — the popup reported
+"Created 0 entries · 1 failed" and drag-drop showed
+"weightClassId required for Kumite". `EntryService.create` demanded a weight
+class for *every* individual kumite entry, but the frontend has never had a
+weight-class picker and sends none, and the `GK_SMALL_NO_WEIGHTS` template
+creates 48 divisions that have no weight classes to pick from. Both symptoms
+were the one 400.
+
+The requirement is now conditional on the division actually having weight
+classes. `findApplicableWeightClasses` in `utils/eligibility.ts` is the rule:
+a class applies if its `divisionId` is that division, or is null and the gender
+matches (event-wide classes, which the manual "add weight class" form can
+create — every template sets `divisionId`). None applicable → the entry is
+created with `weightClassId: null` and draws as one pool, which
+`draw.service.ts` already handles. Some applicable and none supplied → still a
+400, but one that says how many to choose from.
+
+Also filled in a check that was stubbed: `validateWeightClass` took a
+`divisionId` and never used it, so a supplied class only had to match the event
+and gender — a U8 entry could carry the senior -75kg class. It now rejects a
+class belonging to a different division.
+
+**Still open, and now the only thing blocking weighted kumite from the hub:**
+nothing in the UI lets you pick a weight class, so weighted divisions fail with
+the new (clearer) 400. Auto-assigning from `Athlete.weightKg` is the obvious
+next move — it needs a decision on what to do when the athlete has no weight
+recorded or sits on a boundary, which is why it wasn't done here.
+
+Files: `backend/src/utils/eligibility.ts`, `backend/src/services/entry.service.ts`.
+
+### Verification (run 2026-08-05)
+
+| Check | Result |
+|---|---|
+| `backend` / `frontend`: `npx tsc --noEmit` | ✅ both clean, exit 0 |
+| Kumite entry on a no-weights division, no `weightClassId` | ✅ created, stored `weightClassId: null` |
+| Kata on the same division | ✅ unaffected |
+| Weighted division, no `weightClassId` | ✅ still 400, new message |
+| Weighted division, valid class | ✅ created |
+| Class belonging to another division | ✅ 400 "different division" |
+| `scripts/test-draws.ts` | ✅ passes |
+| `scripts/test-event-scope.ts` | ✅ 25/25 (needs the backend started with `ALLOW_DEV_AUTH=true` — without it all 25 fail on dev-auth, not on the guards) |
+
+In-browser on `/hub/entries` against a `GK_SMALL_NO_WEIGHTS` event, as
+SUPERADMIN: clicking a kumite chip in the athlete's eligible-divisions popup
+returned `201` with `weightClassId: null`; bulk-enrolling 3 athletes into Kumite
+toasted "Created 3 entries" (three `201`s) where it previously said
+"Created 0 entries · 1 failed", and the stat tiles moved to 3 athletes /
+3 entries. Console clean apart from the pre-login `/auth/me` 401s.
+
+**Not verified: a real pointer drag-and-drop.** dnd-kit's keyboard sensor did
+fire a genuine `handleDragEnd` in testing (the client-side "not eligible" toast
+proved the drop wiring), but a synthetic drag onto a specific board could not be
+aimed reliably. `handleDragEnd` calls the same `handleAddEntry` the chip click
+does, and that is covered above.
 
 **New division template: `GK_SMALL_NO_WEIGHTS` ("Goju Kai Small No-weights").**
 Single-year age groups 5→16, boys & girls, kata & kumite, **no weight classes** —

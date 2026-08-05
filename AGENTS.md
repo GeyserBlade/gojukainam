@@ -190,5 +190,7 @@ write the SQL into `prisma/migrations/<timestamp>_<name>/migration.sql`, then
 - `README.md` at the repo root is a UTF-16 stub with no content.
 - `filestructure.txt` (3.6 MB) is a stale generated dump — don't read it, and
   don't regenerate it into a diff.
-- Weight classes are not auto-assigned on individual kumite entries; it's a
-  known follow-up.
+- Weight classes are not auto-assigned on individual kumite entries, and the
+  entry UI has no weight-class picker, so kumite divisions that *do* define
+  weight classes still can't be enrolled from the event hub. Divisions with no
+  weight classes work (fixed 2026-08-05); see `docs/state.md`.
