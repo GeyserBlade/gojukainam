@@ -44,7 +44,6 @@ export interface DivisionBoardProps {
   eligibility: { kind: EligibilityKind; count: number; total: number }
   hasFocus: boolean
   hoveredAthleteId: string | null
-  setHoveredAthleteId: (id: string | null) => void
   onRemoveEntry: (athleteId: string, divisionId: string) => void
   density: "compact" | "comfortable"
   showFees: boolean
@@ -59,7 +58,6 @@ export const DivisionBoard: React.FC<DivisionBoardProps> = ({
   eligibility,
   hasFocus,
   hoveredAthleteId,
-  setHoveredAthleteId,
   onRemoveEntry,
   density,
   showFees,
@@ -69,9 +67,10 @@ export const DivisionBoard: React.FC<DivisionBoardProps> = ({
   const cat = division.category
   const compact = density === "compact"
 
-  const ineligible = hasFocus && eligibility.kind === "ineligible" && ghostingEnabled
-  const litGlow = hasFocus && eligibility.kind === "eligible" && ghostingEnabled
-  const partial = hasFocus && eligibility.kind === "partial" && ghostingEnabled
+  const showGhostCaption = hasFocus && ghostingEnabled
+  const ineligible = showGhostCaption && eligibility.kind === "ineligible"
+  const litGlow = showGhostCaption && eligibility.kind === "eligible"
+  const partial = showGhostCaption && eligibility.kind === "partial"
 
   const totalFee = useMemo(
     () => entries.reduce((sum, e) => sum + feeForEntry(e, config), 0),
@@ -169,7 +168,6 @@ export const DivisionBoard: React.FC<DivisionBoardProps> = ({
                   division={division}
                   onRemove={() => onRemoveEntry(a.id, division.id)}
                   isHovered={hoveredAthleteId === a.id}
-                  onHover={(b) => setHoveredAthleteId(b ? a.id : null)}
                   compact={compact}
                 />
               )
@@ -177,19 +175,23 @@ export const DivisionBoard: React.FC<DivisionBoardProps> = ({
           </ul>
         )}
 
-        {/* Footer */}
+        {/* Footer. The eligibility caption appears and disappears with hover
+            focus, so the row always reserves one line — the non-breaking space
+            is load-bearing. Without it the row collapsed to 0px when idle and
+            every board grew 15px the moment the pointer touched an athlete,
+            reflowing the whole grid out from under the cursor. */}
         <div className="flex items-center justify-between mt-2 text-[10px] text-muted-foreground tabular-nums">
           <span>
-            {hasFocus && ghostingEnabled && eligibility.kind === "partial" && (
+            {showGhostCaption && eligibility.kind === "partial" ? (
               <span className="text-belt-orange">
                 {eligibility.count}/{eligibility.total} eligible
               </span>
-            )}
-            {hasFocus && ghostingEnabled && eligibility.kind === "eligible" && (
+            ) : showGhostCaption && eligibility.kind === "eligible" ? (
               <span className="text-belt-green">all eligible</span>
-            )}
-            {hasFocus && ghostingEnabled && eligibility.kind === "ineligible" && (
+            ) : showGhostCaption && eligibility.kind === "ineligible" ? (
               <span>none eligible</span>
+            ) : (
+              " "
             )}
           </span>
           {showFees && entries.length > 0 && (
@@ -203,13 +205,16 @@ export const DivisionBoard: React.FC<DivisionBoardProps> = ({
   )
 }
 
+// Note: the chip deliberately does *not* set the hovered athlete. Pointing at
+// an entry that is already placed re-ghosted all 48 boards for no benefit, and
+// the churn made the remove button hard to hit. Hover highlighting still flows
+// the other way — pointing at a pool row lights up that athlete's chips.
 function EnteredChip({
   entry,
   athlete,
   division,
   onRemove,
   isHovered,
-  onHover,
   compact,
 }: {
   entry: Entry
@@ -217,13 +222,10 @@ function EnteredChip({
   division: Division
   onRemove: () => void
   isHovered: boolean
-  onHover: (b: boolean) => void
   compact: boolean
 }) {
   return (
     <li
-      onMouseEnter={() => onHover(true)}
-      onMouseLeave={() => onHover(false)}
       className={cn(
         "group flex items-center gap-2 rounded-md border px-2 py-1.5 transition-colors",
         isHovered ? "border-primary/60 bg-primary/5" : "border-border bg-card",
@@ -254,10 +256,13 @@ function EnteredChip({
       >
         {STATUS_LABEL[entry.status]}
       </Badge>
+      {/* Always rendered at low contrast rather than opacity-0 until hover:
+          a control you can only see while hovering is a control you have to
+          keep hovering to aim at. */}
       <button
         type="button"
         onClick={onRemove}
-        className="opacity-0 group-hover:opacity-100 transition-opacity size-6 rounded-md text-muted-foreground hover:bg-accent hover:text-flag-red flex items-center justify-center"
+        className="shrink-0 opacity-50 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity size-6 rounded-md text-muted-foreground hover:bg-accent hover:text-flag-red focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring flex items-center justify-center"
         aria-label={`Remove ${athlete.firstName} ${athlete.lastName} from ${division.name}`}
       >
         <X className="size-3.5" />

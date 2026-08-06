@@ -674,7 +674,6 @@ const EventManagement = () => {
                                 eligibility={eligibilityForDivision(d)}
                                 hasFocus={focusAthleteIds.length > 0}
                                 hoveredAthleteId={hoveredAthleteId}
-                                setHoveredAthleteId={setHoveredAthleteId}
                                 onRemoveEntry={handleRemoveEntry}
                                 density={density}
                                 showFees={showFees}

@@ -4,8 +4,11 @@ This file is the handoff between coding agents. It describes what is in flight
 right now, not the permanent architecture (that's
 [`architecture.md`](architecture.md)).
 
-**Last updated:** 2026-08-05 — by Claude Code: kumite entries no longer require
-a weight class on divisions that have none.
+**Last updated:** 2026-08-06 — by Claude Code: stopped the entries board
+reflowing under the pointer, which made the remove-entry "×" unclickable.
+
+Previously, 2026-08-05: kumite entries no longer require a weight class on
+divisions that have none.
 
 Previously, 2026-08-04: added the "Goju Kai Small No-weights" division template,
 and per-event tournament coordinators.
@@ -24,6 +27,59 @@ port; those have since been pushed.) Everything here is verified locally against
 a database, never against production data.
 
 ## Recently shipped
+
+Nothing is currently in flight — the working tree is clean and `main` matches
+`origin/main`.
+
+**The entries board reflowed under the pointer (fixed 2026-08-06).** On
+`/hub/entries` the remove-entry "×" was effectively unclickable: pointing at a
+chip made the whole grid jump.
+
+Measured cause, not a guess. The board footer holds the ghosting caption
+("none eligible" / "all eligible"), and that caption only exists while
+something has hover focus. Idle, the footer row collapsed to **0px**; on hover
+it became **15px**, taking each board from 182.5px to 197.5px. All 48 boards do
+this at once, so in the 2-column grid the shift accumulates ~15px per row down
+the page. A chip three rows down moved **30px** the instant you pointed at it —
+out from under the cursor, which killed the hover, which collapsed the footers,
+which moved it back. A loop, and the "×" was `opacity-0 group-hover:opacity-100`
+so it blinked in and out of visibility through all of it.
+
+Three changes, all in `DivisionBoard.tsx`:
+
+1. **The footer always reserves one line.** The caption falls back to a
+   non-breaking space rather than rendering nothing. No magic pixel value —
+   the line box is always there. This alone removes the reflow.
+2. **An entered chip no longer sets the hovered athlete.** Pointing at an entry
+   that is *already placed* re-ghosted all 48 boards for no benefit, and the
+   churn is what made the "×" hard to reach. Highlighting still flows the other
+   way: hovering a pool row lights up that athlete's chips (`isHovered` stays).
+   `setHoveredAthleteId` is no longer a `DivisionBoard` prop.
+3. **The "×" is always visible** at `opacity-50`, going full on hover/focus,
+   plus a `focus-visible` ring. A control you can only see while hovering is a
+   control you have to keep hovering to aim at.
+
+### Verification (run 2026-08-06, in-browser against local Postgres)
+
+| Check | Before | After |
+|---|---|---|
+| Board height, idle vs hovered | 182.5 → 197.5 | 197.5 → 197.5 |
+| Footer row height, idle | 0px | 15px (reserved) |
+| All 48 board heights during hover | — | uniform 198 |
+| Entry chip Y position when pointed at | 450 → 480 | 450 → 450 |
+| "×" opacity when not hovering | 0 | 0.5 |
+| Clicking "×" | — | `DELETE /api/entries/… → 204` |
+| Pool-row hover still highlights the chip | — | ✅ (`border-primary`) |
+| Pool-row hover still lights eligible boards | — | ✅ 2 boards `border-belt-green` |
+
+`frontend`: `tsc --noEmit` clean, `npm run build` succeeds, 48 boards render
+with no error boundary.
+
+Not done: `DivisionBoard` is still not memoised, so every board re-renders on
+each pool-row hover. With 48 boards that is wasted work, though no longer
+*visible* work now that nothing moves. Memoising needs `eligibilityForDivision`
+to stop returning a fresh object per render — worth doing if the board count
+grows.
 
 **Kumite entries on no-weights divisions (fixed 2026-08-05).** Enrolling an
 athlete into any kumite division from the event hub failed — the popup reported
