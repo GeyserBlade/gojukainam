@@ -133,6 +133,24 @@ export class EntryService {
     return res.data;
   }
 
+  // Withdraw a single entry regardless of its current status (APPROVED
+  // included) — /review/bulk only touches SUBMITTED entries, so this goes
+  // through /review/bulk-status instead. A single-element `ids` array is the
+  // same pattern bulkReview already uses for one-row actions.
+  static async withdraw(
+    eventId: string,
+    id: string,
+    reason?: string,
+  ): Promise<{ updatedCount: number }> {
+    const res = await api.post("/review/bulk-status", {
+      eventId,
+      ids: [id],
+      status: "RETURNED",
+      reason,
+    });
+    return res.data;
+  }
+
   // Seed one entry. 409s when another entry in the same category holds it,
   // with the holder named in the error message.
   static async setSeed(id: string, seed: number | null): Promise<{ entryId: string; seed: number | null }> {

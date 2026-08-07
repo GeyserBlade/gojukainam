@@ -4,9 +4,13 @@ This file is the handoff between coding agents. It describes what is in flight
 right now, not the permanent architecture (that's
 [`architecture.md`](architecture.md)).
 
-**Last updated:** 2026-08-07 — by Claude Code: a club-manager coordinator
-couldn't see Approve or Draws controls — two frontend pages checked `role`
-only and never the coordinator grant (see "In flight" below).
+**Last updated:** 2026-08-07 — by Claude Code: added a Withdraw action so a
+coordinator can pull an already-approved entry out of a bracket (see
+"In flight" below).
+
+Previously, same day: a club-manager coordinator couldn't see Approve or
+Draws controls — two frontend pages checked `role` only and never the
+coordinator grant.
 
 Previously, same day: fixed the Railway build failing `tsc` with
 `TS2591: Cannot find name 'crypto'/'process'`.
@@ -40,6 +44,105 @@ port; those have since been pushed.) Everything here is verified locally against
 a database, never against production data.
 
 ## In flight (uncommitted)
+
+**Withdraw an approved entry (2026-08-07).** Follows directly from a codebase
+audit of "how do you fix an athlete entered in the wrong division after
+approval" (wrong DOB, withdrawal, illness — same underlying gap either way):
+`EntryService.delete` only ever allowed DRAFT, there was no APPROVED->DRAFT
+transition, and no division-edit endpoint exists at all. So an approved entry
+could never be removed through the app — the frontend's remove control even
+pretended it could (a confirm dialog for non-DRAFT entries claiming "removing
+it will also clear that state"), when the backend has always hard-rejected
+it with a 409.
+
+The fix is additive, not a deletion path: `POST /review/bulk-status`
+(`backend/src/routes/review.ts`) already existed and was already correctly
+permissioned (`requireEventManager` — admin or this event's coordinator), and
+already allowed any current status -> APPROVED/RETURNED with no "must be
+SUBMITTED" restriction (unlike `/review/bulk`, which is SUBMITTED-only and
+backs the normal Approve/Return buttons). It just had zero UI callers, and one
+real bug: `statusReason` was accepted into the audit log but never written to
+`Entry.statusReason`, so a reason given through this route would never
+actually reach the club. Fixed that, and normalized its response to
+`{ updatedCount }` to match every sibling bulk route (`/review/bulk`,
+`/entries/bulk-submit`) — it previously returned Prisma's raw `{ count }`,
+harmless while nothing consumed it, not once `EntryService.withdraw`
+(`frontend/src/lib/entries.ts`) became the first real caller.
+
+**UI, `EntriesView.tsx` (`/hub/review`):** a "Withdraw" button next to
+Approve/Return, shown only on `APPROVED` entries for `canReviewEvent` (admin
+or coordinator of the selected event) — SUBMITTED still uses the existing
+Return flow, DRAFT still uses delete, RETURNED already means withdrawn so
+gets nothing further. Opens a dialog with an *optional* reason (deliberately
+not required like Return's — "please fix and resubmit" doesn't fit "the
+athlete is sick," a reason here is context, not an instruction). Does not
+delete the entry; flips it to RETURNED, which is exactly what already meant
+"out of the draw-eligible pool" (`ELIGIBLE_STATUSES = ["APPROVED"]` in
+`draw.service.ts`) and keeps the audit trail.
+
+**The regenerate handoff, and why it's a link rather than inlined:** the
+dialog fetches `listDrawCategories(eventId)` (the same query `Draws.tsx`
+already uses, so its cache is warm if the coordinator follows the link) to
+tell whether a draw already exists for the entry's division/weight-class. If
+one does, it warns that withdrawing alone does not touch the bracket and
+links straight to `/hub/draws`. Chose *link over inline regenerate*
+deliberately: regenerate has its own state machine — locked-check,
+force-confirm when bouts already have results, minimum-2-remaining-entries —
+that already lives correctly in `Draws.tsx`/`DrawService`, and re-implementing
+or importing a chunk of it into the review page would couple two screens that
+don't otherwise share logic, for a save of one navigation click. The
+post-withdraw success toast repeats the reminder either way, so the coordinator
+isn't left to guess after the dialog closes.
+
+**Also fixed, not just wired around:** `EventManagement.tsx`'s `handleRemoveEntry`
+had the misleading non-DRAFT confirm dialog described above. Removed the
+control at the source instead — `DivisionBoard.tsx`'s remove "×" now only
+renders for `DRAFT` entries — so there's nothing left to click that the
+backend was always going to refuse. Withdrawing a submitted/approved entry is
+the Review page's job now, which is also the more correct home for it (that's
+where Approve/Return/seed already live, all under the same
+`canReviewEvent` gate).
+
+Files: `backend/src/routes/review.ts`, `frontend/src/lib/entries.ts`,
+`frontend/src/pages/EntriesView.tsx`, `frontend/src/pages/EventManagement.tsx`,
+`frontend/src/pages/event-management/DivisionBoard.tsx`,
+`backend/scripts/test-event-scope.ts`.
+
+### Verification (run 2026-08-07)
+
+`backend` / `frontend`: `npx tsc --noEmit` both clean. Extended
+`scripts/test-event-scope.ts` with a coordinator-withdraws-and-regenerates
+section, run over real HTTP against local Postgres on an isolated instance
+(port 4099): 3 approved entries in one division, coordinator withdraws one via
+`/review/bulk-status`, regenerates the draw, asserts the withdrawn athlete is
+gone from the new bracket and the other two remain — 6 new checks, 31/31
+total passing. Confirmed the new checks are real regression coverage, not
+just green by construction: reverted `review.ts` alone (`git stash push --
+backend/src/routes/review.ts`), reran against a freshly-restarted isolated
+instance — `withdraw reason recorded on the entry` failed with
+`statusReason: null`, exactly the bug being fixed — then restored and reran
+clean. `scripts/test-draws.ts` still passes, unaffected.
+
+**Not verified in-browser.** The dialog, the conditional draw-exists warning,
+and the DivisionBoard "×" now hiding past DRAFT are all new UI surface with no
+in-browser pass yet. Worth clicking through as a coordinator before trusting
+the copy and the `hasDrawFor` lookup render correctly, and worth confirming
+the "Go to Draws" link and toast reminder actually read well in context.
+
+**Answered alongside this, no code change:** *can an athlete still be added to
+a division whose draws are not yet complete/generated?* Yes, unconditionally.
+`EntryService.create` never queries `Draw` at all — it only checks the
+registration window, athlete age/gender eligibility, weight class, and
+duplicate-entry — so a fresh entry can be added regardless of whether a draw
+exists, is unlocked, or already has results. This holds in both sub-cases:
+*no draw yet* (create is obviously unaffected) and *draw exists but unlocked
+with no results* (still unaffected — draw *locking* only blocks
+regenerate/delete of the draw itself in `draw.service.ts`, never blocks
+creating new entries in that division). Adding the entry does not update an
+existing draw automatically; `DrawService.list`'s `sync` computation
+(`added`/`removed`/`seedsChanged`) is how the Draws page surfaces that the
+bracket is now stale, and regenerate is the only way to fold the change in —
+same mechanism the withdraw feature above now also depends on.
 
 **Coordinator grant didn't reach Approve or Draws (2026-08-07).** Reported
 from production: the Windhoek club manager was appointed tournament

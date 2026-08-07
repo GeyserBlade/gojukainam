@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect } from "react"
+import { useNavigate } from "react-router-dom"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   AlertTriangle,
@@ -7,6 +8,7 @@ import {
   Search,
   Send,
   Undo2,
+  UserMinus,
   Users as UsersIcon,
   Weight as WeightIcon,
   User as UserIcon,
@@ -60,6 +62,7 @@ import {
 } from "@/lib/entries"
 import { getDivisions, registrationState, type Division } from "@/lib/events"
 import { listClubs } from "@/lib/clubs"
+import { listDrawCategories } from "@/lib/draws"
 
 type StatusKey = "DRAFT" | "SUBMITTED" | "APPROVED" | "RETURNED"
 
@@ -152,6 +155,7 @@ const EntryRow = ({
   onSubmit,
   onApprove,
   onReturn,
+  onWithdraw,
   onSetSeed,
   canReviewEvent,
   isClub,
@@ -165,6 +169,7 @@ const EntryRow = ({
   onSubmit: () => void
   onApprove: () => void
   onReturn: () => void
+  onWithdraw: () => void
   onSetSeed: (seed: number | null) => void
   /** Admin, or coordinator of the event this entry belongs to. */
   canReviewEvent: boolean
@@ -176,6 +181,9 @@ const EntryRow = ({
   const cat = entry.division.category
   const canSubmit = isClub && (entry.status === "DRAFT" || entry.status === "RETURNED")
   const canReview = canReviewEvent && entry.status === "SUBMITTED"
+  // Once approved, an entry can be in a bracket. Approve/Return only make
+  // sense pre-approval; past that, the only lever is Withdraw (-> RETURNED).
+  const canWithdraw = canReviewEvent && entry.status === "APPROVED"
 
   return (
     <Card className={cn(selected && "border-primary/50 ring-1 ring-primary/30")}>
@@ -265,6 +273,12 @@ const EntryRow = ({
                 </Button>
               </div>
             )}
+            {canWithdraw && (
+              <Button size="xs" variant="outline" onClick={onWithdraw} disabled={busy}>
+                <UserMinus />
+                Withdraw
+              </Button>
+            )}
           </div>
         </div>
         {entry.status === "RETURNED" && entry.statusReason && (
@@ -291,6 +305,7 @@ const EntryRow = ({
 
 const EntriesView = () => {
   const { role, clubId, canManageEvent } = useAuth()
+  const navigate = useNavigate()
   const queryClient = useQueryClient()
   const toast = useToast()
   const showApiError = useApiErrorToast()
@@ -322,6 +337,12 @@ const EntriesView = () => {
   const [returnReason, setReturnReason] = useState("")
   const [acting, setActing] = useState(false)
 
+  // Withdraw dialog — single entry, separate from the (multi-select,
+  // SUBMITTED-only) return dialog above because it targets APPROVED entries
+  // through a different endpoint and the reason is optional, not required.
+  const [withdrawTarget, setWithdrawTarget] = useState<Entry | null>(null)
+  const [withdrawReason, setWithdrawReason] = useState("")
+
   const { data: clubs = [] } = useQuery({
     queryKey: ["clubs"],
     queryFn: listClubs,
@@ -333,6 +354,19 @@ const EntriesView = () => {
     queryFn: () => getDivisions(selectedEventId),
     enabled: !!selectedEventId,
   })
+
+  // Only reviewers need this, and only to tell the withdraw dialog whether a
+  // draw already exists for the entry's category — same query Draws.tsx uses,
+  // so the cache is warm if they follow the "Go to Draws" link.
+  const { data: drawCategories = [] } = useQuery({
+    queryKey: ["draw-categories", selectedEventId],
+    queryFn: () => listDrawCategories(selectedEventId),
+    enabled: !!selectedEventId && canReviewEvent,
+  })
+  const hasDrawFor = (divisionId: string, weightClassId: string | null) =>
+    drawCategories.some(
+      (c) => c.divisionId === divisionId && c.weightClassId === weightClassId && c.draw !== null,
+    )
 
   const filters: EntryFilters = {
     eventId: selectedEventId,
@@ -476,6 +510,46 @@ const EntriesView = () => {
     const ids = returnTarget
     setReturnTarget(null)
     await runReturn(ids, returnReason.trim())
+  }
+
+  // Withdraw: APPROVED -> RETURNED via /review/bulk-status (not /review/bulk,
+  // which only touches SUBMITTED). Does not delete the entry — RETURNED
+  // already means "out of the draw-eligible pool" and keeps the audit trail.
+  // If a draw already exists for the category, this does NOT touch it; the
+  // dialog warns the caller to regenerate separately (see openWithdrawDialog).
+  const runWithdraw = async (entry: Entry, reason: string) => {
+    const hadDraw = hasDrawFor(entry.divisionId, entry.weightClassId ?? null)
+    setActing(true)
+    try {
+      const { updatedCount } = await EntryService.withdraw(selectedEventId, entry.id, reason)
+      invalidate()
+      queryClient.invalidateQueries({ queryKey: ["draw-categories"] })
+      if (updatedCount > 0) {
+        toast.success(
+          hadDraw
+            ? "Entry withdrawn — regenerate the draw on the Draws page for it to take effect"
+            : "Entry withdrawn",
+        )
+      } else {
+        toast.error("Nothing to withdraw — already returned")
+      }
+    } catch (e) {
+      showApiError(e, "Failed to withdraw entry")
+    } finally {
+      setActing(false)
+    }
+  }
+
+  const openWithdrawDialog = (entry: Entry) => {
+    setWithdrawTarget(entry)
+    setWithdrawReason("")
+  }
+
+  const confirmWithdraw = async () => {
+    if (!withdrawTarget) return
+    const entry = withdrawTarget
+    setWithdrawTarget(null)
+    await runWithdraw(entry, withdrawReason.trim())
   }
 
   const handleApproveAll = async () => {
@@ -866,6 +940,7 @@ const EntriesView = () => {
                               onSubmit={() => runSubmit([entry.id])}
                               onApprove={() => runApprove([entry.id])}
                               onReturn={() => openReturnDialog([entry.id])}
+                              onWithdraw={() => openWithdrawDialog(entry)}
                               onSetSeed={(seed) => runSetSeed(entry.id, seed)}
                               canReviewEvent={canReviewEvent}
                               isClub={isClub}
@@ -915,6 +990,7 @@ const EntriesView = () => {
                     const canSubmit =
                       isClub && (entry.status === "DRAFT" || entry.status === "RETURNED")
                     const canReview = canReviewEvent && entry.status === "SUBMITTED"
+                    const canWithdraw = canReviewEvent && entry.status === "APPROVED"
                     return (
                       <TableRow
                         key={entry.id}
@@ -1016,6 +1092,17 @@ const EntriesView = () => {
                                 </Button>
                               </>
                             )}
+                            {canWithdraw && (
+                              <Button
+                                size="icon-sm"
+                                variant="outline"
+                                onClick={() => openWithdrawDialog(entry)}
+                                disabled={acting}
+                                aria-label="Withdraw"
+                              >
+                                <UserMinus />
+                              </Button>
+                            )}
                           </div>
                         </TableCell>
                       </TableRow>
@@ -1113,6 +1200,66 @@ const EntriesView = () => {
             <Button onClick={confirmReturn} disabled={acting || !returnReason.trim()}>
               <Undo2 />
               Return
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Withdraw dialog — approved entries only. Real-world trigger: athlete
+          withdraws or falls sick after their entry was already approved. */}
+      <Dialog open={withdrawTarget !== null} onOpenChange={(o) => !o && setWithdrawTarget(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Withdraw this entry?</DialogTitle>
+            <DialogDescription>
+              The entry is marked Returned and removed from the draw-eligible pool.
+              It stays on record rather than being deleted.
+            </DialogDescription>
+          </DialogHeader>
+
+          {withdrawTarget && hasDrawFor(withdrawTarget.divisionId, withdrawTarget.weightClassId ?? null) && (
+            <div className="flex items-start gap-2 rounded-md border border-belt-orange/30 bg-belt-orange/10 px-3 py-2.5 text-sm">
+              <AlertTriangle className="mt-0.5 size-4 shrink-0 text-belt-orange" />
+              <div>
+                <span className="font-medium">A draw already exists for this division.</span>{" "}
+                <span className="text-muted-foreground">
+                  Withdrawing does not change the bracket by itself — the draw must be
+                  regenerated afterward for this athlete to actually drop out of it.
+                </span>{" "}
+                <button
+                  type="button"
+                  className="font-medium text-primary underline underline-offset-2 hover:no-underline"
+                  onClick={() => {
+                    setWithdrawTarget(null)
+                    navigate("/hub/draws")
+                  }}
+                >
+                  Open Draws
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div>
+            <Label htmlFor="withdraw-reason" className="mb-1.5">
+              Reason <span className="text-muted-foreground font-normal">(optional)</span>
+            </Label>
+            <Textarea
+              id="withdraw-reason"
+              value={withdrawReason}
+              onChange={(e) => setWithdrawReason(e.target.value)}
+              placeholder="e.g. Athlete injured, withdrew before check-in…"
+              rows={3}
+              autoFocus
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setWithdrawTarget(null)} disabled={acting}>
+              Cancel
+            </Button>
+            <Button onClick={confirmWithdraw} disabled={acting}>
+              <UserMinus />
+              Withdraw
             </Button>
           </DialogFooter>
         </DialogContent>

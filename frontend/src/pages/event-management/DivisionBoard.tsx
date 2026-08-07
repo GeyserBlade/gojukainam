@@ -311,17 +311,24 @@ function EnteredChip({
       >
         {STATUS_LABEL[entry.status]}
       </Badge>
-      {/* Always rendered at low contrast rather than opacity-0 until hover:
-          a control you can only see while hovering is a control you have to
-          keep hovering to aim at. */}
-      <button
-        type="button"
-        onClick={onRemove}
-        className="shrink-0 opacity-50 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity size-6 rounded-md text-muted-foreground hover:bg-accent hover:text-flag-red focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring flex items-center justify-center"
-        aria-label={`Remove ${athlete.firstName} ${athlete.lastName} from ${division.name}`}
-      >
-        <X className="size-3.5" />
-      </button>
+      {/* Removal only ever works for DRAFT — the backend rejects anything
+          else outright, so the control simply isn't offered past that point
+          rather than showing a confirm dialog that then fails. Once
+          submitted, withdrawing an entry is the Review page's job
+          (EntriesView), which keeps the RETURNED record instead of trying to
+          delete it. Always rendered at low contrast rather than opacity-0
+          until hover: a control you can only see while hovering is a control
+          you have to keep hovering to aim at. */}
+      {entry.status === "DRAFT" && (
+        <button
+          type="button"
+          onClick={onRemove}
+          className="shrink-0 opacity-50 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity size-6 rounded-md text-muted-foreground hover:bg-accent hover:text-flag-red focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring flex items-center justify-center"
+          aria-label={`Remove ${athlete.firstName} ${athlete.lastName} from ${division.name}`}
+        >
+          <X className="size-3.5" />
+        </button>
+      )}
     </li>
   )
 }

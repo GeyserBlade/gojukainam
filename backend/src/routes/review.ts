@@ -5,9 +5,12 @@ import { BulkUpdateEntryStatus } from "../utils/validators.js";
 
 export const router = Router();
 
-// bulk status update (admins, or this event's coordinator)
-// Every route here carries eventId in the body/query and every write is scoped
-// by it, so the guard and the query agree on which event is being touched.
+// Unrestricted status update (admins, or this event's coordinator) — unlike
+// /bulk below, this does not require the entry to currently be SUBMITTED, so
+// it is what the withdraw flow uses to move an already-APPROVED entry to
+// RETURNED. `ids` is a bulk shape but works fine as a one-element array for a
+// single-entry action (the same pattern EntriesView already uses for
+// approve/return via /bulk).
 router.post("/bulk-status", requireEventManager({ in: "body", key: "eventId" }), async (req, res, next) => {
   try {
     const { eventId, ids, status, reason } = BulkUpdateEntryStatus.parse(req.body);
@@ -21,14 +24,15 @@ router.post("/bulk-status", requireEventManager({ in: "body", key: "eventId" }),
           id: { in: ids },
           status: { not: status }, // skip if already set
         },
-        data: { status },
+        // Record the reason on RETURNED entries so clubs see it; clear on APPROVE.
+        data: { status, statusReason: status === "RETURNED" ? (reason ?? null) : null },
       });
 
       // 2. create audit logs for each?
       // For bulk, creating N logs is expensive. We might create one summary log or just log simple lines.
       // To keep it simple, we'll create individual logs for correct history tracking.
       // We need to fetch the IDs that were actually updated if we want precise logs,
-      // but updateMany doesn't return IDs. 
+      // but updateMany doesn't return IDs.
       // Compromise: Log "Bulk status update" for the list.
       if (updated.count > 0) {
         await tx.auditLog.create({
@@ -45,7 +49,7 @@ router.post("/bulk-status", requireEventManager({ in: "body", key: "eventId" }),
       return updated;
     });
 
-    res.json(result);
+    res.json({ updatedCount: result.count });
   } catch (err) { next(err); }
 });
 

@@ -136,6 +136,15 @@ async function main() {
         dob: new Date("2000-01-01"), gender: "Male", nationality: "NA", beltId: belt.id,
       },
     });
+    // A third entry, same club as B — purely so that after B is withdrawn,
+    // 2 approved entries (A and C) still remain for the draw to regenerate
+    // with (DrawService requires >= 2). Not part of the cross-club check.
+    const athleteC = await prisma.athlete.create({
+      data: {
+        clubId: clubB.id, firstName: "Athlete", lastName: "C",
+        dob: new Date("2000-01-01"), gender: "Male", nationality: "NA", beltId: belt.id,
+      },
+    });
     const entryA = await prisma.entry.create({
       data: {
         eventId: granted.id, clubId: clubA.id, athleteId: athleteA.id,
@@ -145,6 +154,12 @@ async function main() {
     const entryB = await prisma.entry.create({
       data: {
         eventId: granted.id, clubId: clubB.id, athleteId: athleteB.id,
+        divisionId: division.id, entryType: "KATA", status: "SUBMITTED",
+      },
+    });
+    const entryC = await prisma.entry.create({
+      data: {
+        eventId: granted.id, clubId: clubB.id, athleteId: athleteC.id,
         divisionId: division.id, entryType: "KATA", status: "SUBMITTED",
       },
     });
@@ -164,20 +179,61 @@ async function main() {
 
     const approveStatus = await call("POST", "/review/bulk", asCoordinatorOfA, {
       eventId: granted.id,
-      ids: [entryA.id, entryB.id],
+      ids: [entryA.id, entryB.id, entryC.id],
       status: "APPROVED",
     });
     check("approve both clubs' entries -> 200", approveStatus === 200, { approveStatus });
     const approvedCount = await prisma.entry.count({
-      where: { id: { in: [entryA.id, entryB.id] }, status: "APPROVED" },
+      where: { id: { in: [entryA.id, entryB.id, entryC.id] }, status: "APPROVED" },
     });
-    check("both entries now APPROVED -> 2", approvedCount === 2, { approvedCount });
+    check("all three entries now APPROVED -> 3", approvedCount === 3, { approvedCount });
 
-    const drawStatus = await call("POST", "/draws", asCoordinatorOfA, {
-      eventId: granted.id,
-      divisionId: division.id,
+    const drawRes = await fetch(`${BASE}/draws`, {
+      method: "POST",
+      headers: asCoordinatorOfA,
+      body: JSON.stringify({ eventId: granted.id, divisionId: division.id }),
     });
-    check("create draw for the division -> 201", drawStatus === 201, { drawStatus });
+    const drawBody = drawRes.ok ? ((await drawRes.json()) as { id: string }) : null;
+    check("create draw for the division -> 201", drawRes.status === 201, { status: drawRes.status });
+
+    // ── Withdraw (regression coverage for the "coordinator can't pull an
+    // approved athlete from the bracket" feature): a coordinator moves an
+    // APPROVED entry to RETURNED via /review/bulk-status (not /review/bulk,
+    // which only touches SUBMITTED), and regenerating the draw afterward
+    // actually drops them from the bracket rather than leaving a ghost slot.
+    console.log("\nCoordinator can withdraw an approved entry:");
+    const withdrawStatus = await call("POST", "/review/bulk-status", asCoordinatorOfA, {
+      eventId: granted.id,
+      ids: [entryB.id],
+      status: "RETURNED",
+      reason: "Withdrew — injured",
+    });
+    check("withdraw entryB -> 200", withdrawStatus === 200, { withdrawStatus });
+    const withdrawn = await prisma.entry.findUnique({
+      where: { id: entryB.id },
+      select: { status: true, statusReason: true },
+    });
+    check("entryB is now RETURNED", withdrawn?.status === "RETURNED", withdrawn);
+    check("withdraw reason recorded on the entry", withdrawn?.statusReason === "Withdrew — injured", withdrawn);
+
+    if (drawBody) {
+      const regenRes = await fetch(`${BASE}/draws/${drawBody.id}/regenerate`, {
+        method: "POST",
+        headers: asCoordinatorOfA,
+        body: JSON.stringify({ force: true }),
+      });
+      const regenBody = regenRes.ok
+        ? ((await regenRes.json()) as { slots: Array<{ entry: { entryId: string } }> })
+        : null;
+      check("regenerate after withdrawal -> 200", regenRes.status === 200, { status: regenRes.status });
+      const slotEntryIds = new Set((regenBody?.slots ?? []).map((s) => s.entry.entryId));
+      check("withdrawn athlete dropped from the redrawn bracket", !slotEntryIds.has(entryB.id), {
+        slotEntryIds: [...slotEntryIds],
+      });
+      check("the other, still-approved athlete stays in the bracket", slotEntryIds.has(entryA.id), {
+        slotEntryIds: [...slotEntryIds],
+      });
+    }
 
     // ── 1. Cross-event: the same grant must not open event B ────────────────
     console.log("\nCross-event (grant is on A, request targets B):");

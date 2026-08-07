@@ -329,28 +329,23 @@ const EventManagement = () => {
     createEntryMutation.mutate({ athleteId, divisionId })
   }
 
-  // Stable across renders so it does not defeat DivisionBoard's memo. `confirm`
-  // is a useCallback from ConfirmProvider and `mutate` is stable in TanStack
-  // Query, so this only changes when the entries themselves do.
+  // Stable across renders so it does not defeat DivisionBoard's memo. `mutate`
+  // is stable in TanStack Query, so this only changes when entries do.
+  //
+  // DRAFT-only: DivisionBoard no longer offers the remove control past DRAFT
+  // (the backend has always rejected it — this used to show a confirm dialog
+  // then fail). Withdrawing a submitted/approved entry is EntriesView's job
+  // now, which keeps the RETURNED record instead of trying to delete it.
   const removeEntryMutate = deleteEntryMutation.mutate
   const handleRemoveEntry = useCallback(
-    async (athleteId: string, divisionId: string) => {
+    (athleteId: string, divisionId: string) => {
       const entry = entries.find(
         (e) => e.athleteId === athleteId && e.divisionId === divisionId,
       )
-      if (!entry) return
-      if (entry.status !== "DRAFT") {
-        const ok = await confirm({
-          title: `Remove this entry?`,
-          description: `Status is "${entry.status}". Removing it will also clear that state.`,
-          confirmText: "Remove",
-          destructive: true,
-        })
-        if (!ok) return
-      }
+      if (!entry || entry.status !== "DRAFT") return
       removeEntryMutate(entry.id)
     },
-    [entries, confirm, removeEntryMutate],
+    [entries, removeEntryMutate],
   )
 
   const handleBulkAdd = async (category: "KATA" | "KUMITE" | "BOTH") => {
