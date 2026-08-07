@@ -175,23 +175,30 @@ console.log("\n— deriveKumiteBoutBreakdown —");
 }
 
 {
-  // A category with an existing draw uses the real (repechage-inclusive)
-  // bout count, not entries - 1 — this is the whole reason "pull from the
-  // actual bracket if a draw exists" matters: entries-1 undercounts once
-  // WKF double-repechage bronze bouts exist.
+  // A category with an existing draw uses the DRAW's entry count, not
+  // today's live entryCount — this is the whole reason "pull from the actual
+  // bracket if a draw exists" matters: an entry withdrawn (or added) after
+  // the draw was made means the two numbers can genuinely differ, and the
+  // bracket that will actually run is the correct one to schedule around.
+  // (It is NOT about repechage: this app's bracket engine only knows
+  // repechage bronze-bout pairings once the main draw is mostly played, so
+  // v1 leaves repechage out of the count entirely, uniformly — see
+  // lib/estimator.ts.)
   const divisions = [{ id: "kumite-1", name: "Kumite A", category: "KUMITE" as const }];
   const drawn = deriveKumiteBoutBreakdown(divisions, [
-    { divisionId: "kumite-1", entryCount: 8, drawBoutCount: 9 }, // 8 entries: 7 main + 2 repechage = 9
+    // Drawn with 7 real entries (6 bouts); one has since withdrawn, so
+    // today's live entryCount reads 8 — the draw's count should win.
+    { divisionId: "kumite-1", entryCount: 8, drawBoutCount: 6 },
   ]);
-  check("drawn category uses the real bout count, not entries - 1", drawn[0]?.bouts === 9, drawn);
+  check("drawn category uses the draw's entry count, not today's entryCount", drawn[0]?.bouts === 6, drawn);
   check("drawn source is 'draw'", drawn[0]?.source === "draw", drawn);
 
   // Same division, but one of its two weight classes hasn't been drawn yet.
   const mixed = deriveKumiteBoutBreakdown(divisions, [
-    { divisionId: "kumite-1", entryCount: 8, drawBoutCount: 9 },
+    { divisionId: "kumite-1", entryCount: 8, drawBoutCount: 6 },
     { divisionId: "kumite-1", entryCount: 3, drawBoutCount: null },
   ]);
-  check("mixed division sums drawn + estimated", mixed[0]?.bouts === 9 + 2, mixed);
+  check("mixed division sums drawn + estimated", mixed[0]?.bouts === 6 + 2, mixed);
   check("mixed source is 'mixed'", mixed[0]?.source === "mixed", mixed);
 }
 

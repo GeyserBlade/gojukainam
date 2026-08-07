@@ -4,8 +4,10 @@ This file is the handoff between coding agents. It describes what is in flight
 right now, not the permanent architecture (that's
 [`architecture.md`](architecture.md)).
 
-**Last updated:** 2026-08-07 — by Claude Code: added a kumite tournament
-duration estimator (v1) to the event hub (see "In flight" below).
+**Last updated:** 2026-08-07 — by Claude Code: in-browser verification of the
+kumite duration estimator found and fixed a real undercounting bug in the
+"drawn" bout count — see "In flight" below, this supersedes the estimator
+entry beneath it.
 
 Previously, same day: added a Withdraw action so a coordinator can pull an
 already-approved entry out of a bracket.
@@ -148,13 +150,63 @@ cases, and the `deriveKumiteBoutBreakdown` cases above (KATA exclusion,
 multi-weight-class summing, drawn-vs-estimated-vs-mixed sourcing, an
 untouched division still appearing at 0 bouts).
 
-**Not verified in-browser at all.** No dev server was exercised for this
-feature — the form rendering, the segmented bar's proportions, the "Refining
-drawn brackets…" loading flicker while `getDraw` calls resolve, and the tab's
-actual visibility to a real coordinator session are all unverified beyond
-`tsc` and the pure-function tests. Worth a real click-through, and worth
-sanity-checking the segment bar visually once there's an event with a mix of
-drawn and undrawn kumite divisions to look at.
+### In-browser verification (run 2026-08-07) — found a real bug
+
+Isolated backend (port 4099, `ALLOW_DEV_AUTH=true`) + isolated frontend (port
+5174 — 5173 was the other session's; port had to be one of `server.ts`'s
+hardcoded dev CORS origins, `5190` 500'd on preflight) against local Postgres,
+so as not to disturb another session's dev servers.
+
+**The "drawn" bout count was wrong — badly undercounting the normal case.**
+Loaded a real event with 7 APPROVED entries and a freshly-generated,
+*unplayed* draw for one kumite division: the page showed **3 bouts**, not the
+correct **6** (7 entries − 1). Root cause: `drawBoutCounts` counted
+`bouts.filter(b => b.aka && b.ao).length` from `getDraw()` — but
+`computeDrawState` (`backend/src/services/draw.service.ts`) only populates a
+later round's `aka`/`ao` once the earlier round it depends on has an actual
+*stored result*. For a fresh, not-yet-run bracket only round 1 (plus any
+bye-cascades) is populated — this app's own dogfooded confirmation that a
+draw is normally generated and sits unplayed for a while before the tournament
+runs, which is exactly when this tool is meant to be used, so this was not an
+edge case, it was the common one. Repechage rows don't get computed *at all*
+until a finalist is determined, so the "drawn categories already include
+repechage" claim in the original write-up (below) was flatly wrong — checked
+directly: an unplayed draw's `bouts` array had zero repechage entries.
+
+Fixed by using `slots.length - 1` instead (`DrawDetail.slots` holds only real,
+bye-excluded entries, unaffected by how much has been played) — mathematically
+identical to `entries - 1`, correct regardless of play progress. This also
+honestly repositions what "pull from the actual bracket" is *for*: not
+repechage inclusion (not reliably knowable pre-tournament, left out
+uniformly for both drawn and undrawn categories now — the docs above and the
+UI copy both said otherwise; corrected), but **sync drift** — an entry
+withdrawn or added after the draw was made means the draw's real entry count
+and today's live `entryCount` can genuinely differ, and the drawn bracket is
+the one that will actually run. Updated: `lib/estimator.ts`'s doc comments,
+`Estimator.tsx`'s query + the breakdown badge tooltip + the caveat paragraph,
+and `scripts/test-estimator.ts`'s drawn/mixed fixtures (now `drawBoutCount: 6`
+motivated by drift, not a repechage-inclusive `9` that never reflected reality).
+
+Also verified live and correct: the worked-example math end-to-end against
+real data (8 total bouts → `1h 23min`, matching the formula shown), every
+input reacting correctly (mats 2→1 recomputed `1h 23min`→`1h 16min`; unchecking
+lunch removed its segment and dropped the bar's grey slice), the segment bar's
+proportions and legend, "Reset to defaults", the Estimator/Setup tabs
+correctly *absent* for a plain `CLUB_MANAGER` with no coordinator grant, and
+zero console errors throughout.
+
+**Still not verified: real coordinator tab visibility.** Blocked by a
+pre-existing, already-documented harness limitation, not anything wrong with
+this feature — `/auth/me` is cookie-only by design and the local dev-auth
+header shortcut never populates `coordinatorEventIds` (see "Tournament
+coordinators" below), so a granted `EventCoordinator` row has no way to show
+up in a locally-driven browser session. The tab's gating is `roles: ADMIN,
+coordinator: true`, byte-for-byte the same object shape as the already-shipped
+Setup tab (verified visible for admins, hidden for plain club managers here);
+that pattern was separately confirmed correct against a real coordinator
+session in production by the "Fix coordinator not seeing Approve/Draws" work
+earlier this same day. Confirming this specific tab needs a real cookie-based
+coordinator login (staging, or a minted session token), not this harness.
 
 **Withdraw an approved entry (2026-08-07).** Follows directly from a codebase
 audit of "how do you fix an athlete entered in the wrong division after

@@ -165,16 +165,26 @@ export default function Estimator() {
     [kumiteCategories],
   )
 
-  // Real bout count (main + WKF repechage, byes excluded) for every kumite
-  // category that already has a draw. Bounded by how many draws actually
-  // exist — often small/zero early in event planning, which is exactly when
-  // this tool is most useful.
+  // Main-bracket bout count (real entries in the draw, minus 1) for every
+  // kumite category that already has a draw. Bounded by how many draws
+  // actually exist — often small/zero early in event planning, which is
+  // exactly when this tool is most useful.
+  //
+  // Deliberately `slots.length - 1`, NOT counting bout rows that currently
+  // have both fighters filled in: for an unplayed draw only round 1 (plus
+  // any bye-cascades) is populated, so that count only reflects how much of
+  // the bracket has been *scored so far*, not how many bouts it will ever
+  // need — it would badly undercount the normal case of "draw generated,
+  // nothing played yet." slots.length is the bracket's real (bye-excluded)
+  // entry count regardless of how much has been played, and entries-1 off
+  // that is exact for the main bracket. See lib/estimator.ts for why
+  // repechage isn't counted here either.
   const { data: drawBoutCounts = {}, isFetching: loadingDrawBouts } = useQuery({
-    queryKey: ["estimator-draw-bouts", selectedEventId, kumiteDrawIds.join(",")],
+    queryKey: ["estimator-draw-slots", selectedEventId, kumiteDrawIds.join(",")],
     queryFn: async () => {
       const draws = await Promise.all(kumiteDrawIds.map((id) => getDraw(id)))
       const map: Record<string, number> = {}
-      for (const d of draws) map[d.id] = d.bouts.filter((b) => b.aka && b.ao).length
+      for (const d of draws) map[d.id] = Math.max(0, d.slots.length - 1)
       return map
     },
     enabled: !!selectedEventId,
@@ -429,7 +439,7 @@ export default function Estimator() {
                         )}
                         title={
                           d.source === "draw"
-                            ? "Exact — pulled from the generated bracket"
+                            ? "From the bracket's actual entries — accounts for changes since it was drawn"
                             : d.source === "mixed"
                             ? "Some weight classes drawn, others estimated"
                             : "Estimated from approved entries"
@@ -445,11 +455,13 @@ export default function Estimator() {
                 </div>
                 <p className="flex items-start gap-1.5 text-[11px] text-muted-foreground">
                   <Info className="mt-0.5 size-3 shrink-0" />
-                  "Estimated" divisions assume one bout per elimination (entries − 1). Once a
-                  draw exists, WKF double-repechage adds bronze bouts this estimate doesn't
-                  know about yet — "drawn" divisions already include those, so the total edges
-                  up as brackets are generated. Treat the estimated total as a floor, not a
-                  ceiling.
+                  Every division here assumes one bout per elimination (entries − 1) — "drawn"
+                  divisions use the bracket's actual entry count rather than re-estimating,
+                  which matters if entries changed since it was drawn (a withdrawal, say), but
+                  it's the same formula either way. Neither total counts WKF double-repechage
+                  bronze bouts — that count isn't known until a bracket is mostly played, so
+                  it's left out uniformly rather than guessed at. Treat the total as a floor,
+                  not a ceiling.
                 </p>
               </CardContent>
             </Card>

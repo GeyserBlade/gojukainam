@@ -15,10 +15,20 @@ export interface KumiteCategoryData {
   /** APPROVED entries currently in this division × weight-class pairing. */
   entryCount: number;
   /**
-   * Real (both-fighters-present) bout count from an already-generated draw
-   * for this category, or null if no draw exists yet. Real bout count means
-   * main-bracket matches *and* WKF double-repechage bronze bouts — byes are
-   * not bouts, nobody fights them.
+   * Main-bracket bout count (real entries in the draw minus 1) from an
+   * already-generated draw for this category, or null if no draw exists yet.
+   *
+   * This is mathematically identical to `entryCount - 1` *unless* entries
+   * have changed since the draw was made (an entry withdrawn or added
+   * without regenerating) — that drift is the entire reason to prefer this
+   * over re-deriving from current entries when a draw exists.
+   *
+   * Deliberately NOT sourced from counting the draw's bout rows that
+   * currently have both fighters filled in: for an unplayed draw, only round
+   * 1 (and any bye-cascades) are populated — later rounds, and repechage
+   * entirely, stay null until earlier rounds are actually scored. Counting
+   * that would *undercount* a freshly-generated, not-yet-run bracket, which
+   * is the normal state an estimator is used in. See the caveat below.
    */
   drawBoutCount: number | null;
 }
@@ -29,13 +39,16 @@ export interface DivisionBoutBreakdown {
   /** Summed across every weight class in this division. */
   bouts: number;
   /**
-   * "draw": every category in this division already has a generated draw, so
-   * `bouts` is exact (repechage included).
-   * "entries": every category is still estimated as `entries - 1`, which
-   * undercounts once a draw would add repechage bronze bouts (see the caveat
-   * surfaced in the UI).
-   * "mixed": some categories (weight classes) of this division have a draw,
-   * others don't.
+   * "draw": every category in this division already has a generated draw —
+   * `bouts` reflects the bracket's actual entry count, not necessarily
+   * today's live entry count if it has since drifted.
+   * "entries": every category is still estimated as `entries - 1`.
+   * "mixed": some weight classes of this division have a draw, others don't.
+   *
+   * Neither source counts WKF double-repechage bronze bouts — v1 has no
+   * reliable way to know that count before a bracket is mostly played (see
+   * the caveat surfaced in the UI). Both "draw" and "entries" totals are a
+   * floor, uniformly, not just "entries."
    */
   source: "draw" | "entries" | "mixed";
 }
