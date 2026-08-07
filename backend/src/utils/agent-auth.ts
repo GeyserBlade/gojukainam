@@ -49,6 +49,14 @@ export const AGENT_SCOPES = [
   "billing:read",
   "billing:write",
   "payments:write",
+  /**
+   * Tournament reads: the calendar, this club's entries, an athlete's record,
+   * and category podiums. Separate from `members:read` on purpose — a key that
+   * should only answer "who owes money" has no business reading who is entered
+   * in which weight class, and the split makes that a scope edit rather than an
+   * argument.
+   */
+  "competition:read",
 ] as const;
 export type AgentScope = (typeof AGENT_SCOPES)[number];
 
@@ -134,7 +142,7 @@ export async function verifyApiKey(raw: string): Promise<AgentIdentity | null> {
  * machine callers — keep the list short, and keep it a list of prefixes rather
  * than a wildcard, so widening it is always a visible diff.
  */
-const AGENT_ALLOWED_PREFIXES: readonly string[] = ["/api/billing"];
+const AGENT_ALLOWED_PREFIXES: readonly string[] = ["/api/billing", "/api/competition"];
 
 /**
  * Structural default-deny for agent callers, mounted immediately after

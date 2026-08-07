@@ -26,6 +26,7 @@ import { router as draws } from "./routes/draws.js";
 import { router as run } from "./routes/run.js";
 import { router as publicBoard } from "./routes/public.js";
 import { router as billing } from "./routes/billing.js";
+import { router as competition } from "./routes/competition.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const { version: BACKEND_VERSION } = JSON.parse(
@@ -151,6 +152,7 @@ app.use("/api/users", users);
 app.use("/api/belts", belts);
 app.use("/api/documents", documents);
 app.use("/api/billing", billing);
+app.use("/api/competition", competition);
 app.use("/api/draws", draws);
 app.use("/api/run", run);
 

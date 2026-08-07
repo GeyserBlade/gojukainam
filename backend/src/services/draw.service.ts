@@ -19,10 +19,10 @@ const ENTRY_INCLUDE = {
 } as const;
 
 type BoutKey = string; // `${phase}:${round}:${position}`
-const boutKey = (phase: string, round: number, position: number): BoutKey =>
+export const boutKey = (phase: string, round: number, position: number): BoutKey =>
   `${phase}:${round}:${position}`;
 
-interface ComputedBout {
+export interface ComputedBout {
   phase: "MAIN" | "REPECHAGE";
   round: number;
   position: number;
