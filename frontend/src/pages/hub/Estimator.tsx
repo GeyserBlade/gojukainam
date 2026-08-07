@@ -166,26 +166,24 @@ export default function Estimator() {
     [kumiteCategories],
   )
 
-  // Main-bracket bout count (real entries in the draw, minus 1) for every
-  // kumite category that already has a draw. Bounded by how many draws
-  // actually exist — often small/zero early in event planning, which is
-  // exactly when this tool is most useful.
+  // Real (bye-excluded) entry count for every kumite category that already
+  // has a draw. Bounded by how many draws actually exist — often small/zero
+  // early in event planning, which is exactly when this tool is most useful.
   //
-  // Deliberately `slots.length - 1`, NOT counting bout rows that currently
-  // have both fighters filled in: for an unplayed draw only round 1 (plus
-  // any bye-cascades) is populated, so that count only reflects how much of
-  // the bracket has been *scored so far*, not how many bouts it will ever
-  // need — it would badly undercount the normal case of "draw generated,
-  // nothing played yet." slots.length is the bracket's real (bye-excluded)
-  // entry count regardless of how much has been played, and entries-1 off
-  // that is exact for the main bracket. See lib/estimator.ts for why
-  // repechage isn't counted here either.
-  const { data: drawBoutCounts = {}, isFetching: loadingDrawBouts } = useQuery({
+  // Deliberately `slots.length`, NOT counting bout rows that currently have
+  // both fighters filled in: for an unplayed draw only round 1 (plus any
+  // bye-cascades) is populated, so that count only reflects how much of the
+  // bracket has been *scored so far*, not how many bouts it will ever need —
+  // it would badly undercount the normal case of "draw generated, nothing
+  // played yet." slots.length is the bracket's real entry count regardless
+  // of how much has been played; deriveKumiteBoutBreakdown turns that into
+  // main-bracket bouts (entries - 1, exact) and an expected repechage count.
+  const { data: drawEntryCounts = {}, isFetching: loadingDrawBouts } = useQuery({
     queryKey: ["estimator-draw-slots", selectedEventId, kumiteDrawIds.join(",")],
     queryFn: async () => {
       const draws = await Promise.all(kumiteDrawIds.map((id) => getDraw(id)))
       const map: Record<string, number> = {}
-      for (const d of draws) map[d.id] = Math.max(0, d.slots.length - 1)
+      for (const d of draws) map[d.id] = d.slots.length
       return map
     },
     enabled: !!selectedEventId,
@@ -196,9 +194,9 @@ export default function Estimator() {
       kumiteCategories.map((c) => ({
         divisionId: c.divisionId,
         entryCount: c.entryCount,
-        drawBoutCount: c.draw ? drawBoutCounts[c.draw.id] ?? null : null,
+        drawEntryCount: c.draw ? drawEntryCounts[c.draw.id] ?? null : null,
       })),
-    [kumiteCategories, drawBoutCounts],
+    [kumiteCategories, drawEntryCounts],
   )
 
   const breakdown = useMemo(
@@ -465,13 +463,14 @@ export default function Estimator() {
                 </div>
                 <p className="flex items-start gap-1.5 text-[11px] text-muted-foreground">
                   <Info className="mt-0.5 size-3 shrink-0" />
-                  Every division here assumes one bout per elimination (entries − 1) — "drawn"
-                  divisions use the bracket's actual entry count rather than re-estimating,
-                  which matters if entries changed since it was drawn (a withdrawal, say), but
-                  it's the same formula either way. Neither total counts WKF double-repechage
-                  bronze bouts — that count isn't known until a bracket is mostly played, so
-                  it's left out uniformly rather than guessed at. Treat the total as a floor,
-                  not a ceiling.
+                  Bouts = main-bracket matches (entries − 1, exact) plus an expected WKF
+                  double-repechage bronze-bout count computed from this bracket's actual bye
+                  structure. "Drawn" divisions use the bracket's real entry count rather than
+                  re-estimating, which matters if entries changed since it was drawn (a
+                  withdrawal, say). Repechage is a genuine expectation, not a guarantee — the
+                  exact count depends on who wins each match, which isn't knowable before the
+                  bracket is fought, so the real total may land a bout or two either side of
+                  this once played.
                 </p>
               </CardContent>
             </Card>

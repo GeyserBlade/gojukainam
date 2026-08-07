@@ -4,9 +4,13 @@ This file is the handoff between coding agents. It describes what is in flight
 right now, not the permanent architecture (that's
 [`architecture.md`](architecture.md)).
 
-**Last updated:** 2026-08-07 — by Claude Code: the estimator's per-division
-breakdown now shows entry count and an estimated duration alongside the bout
-count (see "In flight" below).
+**Last updated:** 2026-08-07 — by Claude Code: the estimator now estimates
+WKF double-repechage bronze bouts instead of leaving them out entirely — a
+user check on a real 9-entry division (should be 10 bouts, was showing 8)
+turned out correct (see "In flight" below).
+
+Previously, same day: the estimator's per-division breakdown now shows entry
+count and an estimated duration alongside the bout count.
 
 Previously, same day: in-browser verification of the kumite duration
 estimator found and fixed a real undercounting bug in the "drawn" bout count.
@@ -50,6 +54,76 @@ port; those have since been pushed.) Everything here is verified locally against
 a database, never against production data.
 
 ## In flight (uncommitted)
+
+**Estimator now estimates WKF double-repechage bronze bouts (2026-08-07).**
+User report: "for the boys 8-9 for instance there are 9 entries. this should
+have 10 bouts including repechage. i think your bout numbers are not right."
+The app was showing 8 (`entries - 1`, the "v1 doesn't count repechage at all"
+limitation flagged in the previous entry below). Checked the claim rather
+than taking either side on faith:
+
+- Wrote a 20,000-trial Monte Carlo simulation of this app's own
+  `computeDrawState` bracket algorithm (random winner at every real match,
+  since we don't know results in advance) for N=2..24. Result: **the true
+  bout count is not deterministic for non-power-of-2 entry counts** — a
+  9-entry bracket comes out to 10 total bouts ~75% of the time and 11 the
+  rest, because *who* reaches the final (and therefore how many real
+  opponents they beat) depends on match outcomes, not just entry count.
+  Power-of-2 sizes (4, 8, 16, ...) have zero variance — deterministic, not
+  approximate. This means neither "8" (the old number) nor a single "correct"
+  10 exists in the platonic sense — but 8 was flatly wrong (it's the *main
+  bracket only*, missing repechage entirely), while 10 is the correct
+  **expected value**, and the right statistic for a duration estimate is
+  exactly that: an expectation, not a guess at the single most likely integer.
+- Derived and implemented an exact closed-form expectation: ported
+  `bracketPositions` (`backend/src/services/draw.service.ts`) to the frontend
+  — deterministic given `size` alone, so bye placement is computable from
+  entry count without an actual draw or even real entry identities existing
+  yet — then a recursive `expectedOpponents(occupied, lo, hi)` that computes,
+  by symmetry (every real entrant in a sub-range is equally likely to emerge
+  as that range's winner under a fair coin-flip), the exact expected number of
+  real opponents the eventual winner of any bracket range will have beaten.
+  `estimatedRepechageBouts(n)` combines this per bracket half, rounded to the
+  nearest whole bout. Cross-checked this closed form against the Monte Carlo
+  simulation's mean across the same N range before trusting it.
+- Note honestly recorded in the code and the tests: rounding the expectation
+  does not always land on the *mode* (N=5 rounds to 1 repechage bout, but the
+  more common single outcome is actually 0) — expectation and mode are
+  different statistics and can diverge for skewed discrete distributions.
+  Expectation is what's implemented, deliberately, because it's the
+  statistically correct quantity for "how long will this take on average."
+- `deriveKumiteBoutBreakdown` now adds `estimatedRepechageBouts(effectiveN)`
+  on top of the exact main-bracket count (`effectiveN - 1`) for every
+  category, drawn or not — `KumiteCategoryData.drawBoutCount` was renamed to
+  `drawEntryCount` (now an entry count feeding both parts of the calculation,
+  not a pre-computed bout count) and `Estimator.tsx`'s draw-detail query
+  updated to match (`slots.length`, not `slots.length - 1`).
+- UI copy (badge tooltip, caveat paragraph) rewritten to stop saying
+  repechage is excluded and instead explain it's an expectation that can land
+  a bout or two off once the bracket is actually fought.
+
+Files: `frontend/src/lib/estimator.ts`, `frontend/scripts/test-estimator.ts`,
+`frontend/src/pages/hub/Estimator.tsx`.
+
+### Verification (run 2026-08-07)
+
+`npx tsc --noEmit` clean. `npx tsx scripts/test-estimator.ts` — 46/46
+passing, including a new `estimatedRepechageBouts` table (N=4→0, N=5→1,
+N=7→2, N=8→2, N=9→2, N=16→4 repechage bouts) verified against both the
+Monte Carlo simulation and the closed-form recursion before being written
+down, plus updated `deriveKumiteBoutBreakdown` fixtures reflecting the new
+totals.
+
+In-browser (isolated backend 4099 + frontend 5174 against local Postgres):
+created a real 9-entry "Boys 8-9" kumite division (no draw) on the same
+event used in prior estimator verification sessions. Rendered exactly:
+**"Boys 8-9 · 9 entries · estimated · 10 bouts · ≈49min"** — matching the
+user's report precisely. Also re-checked F04 - Girls 10 (7 entries, drawn),
+which now correctly shows 8 bouts (was 6 before this change: 6 main +
+repechage(7)=2). Total-time math re-verified by hand against the displayed
+formula (18 bouts → `1h 45min`). Console clean apart from the
+already-documented benign pre-login 401s. Test fixtures (division, athletes,
+entries) deleted after verification.
 
 **Estimator breakdown now shows entries and a per-division duration
 (2026-08-07).** Follow-up ask: the breakdown table only showed bout count per

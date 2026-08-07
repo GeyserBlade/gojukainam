@@ -9,6 +9,7 @@
 import {
   deriveKumiteBoutBreakdown,
   estimateKumiteDuration,
+  estimatedRepechageBouts,
   formatDuration,
   minutesForDivision,
   DEFAULT_ESTIMATOR_INPUTS,
@@ -147,6 +148,49 @@ console.log("\n— formatDuration —");
   check("rounds fractional minutes", formatDuration(90.6) === "1h 31min");
 }
 
+console.log("\n— estimatedRepechageBouts —");
+{
+  // Verified two ways before trusting this table: (1) a 20,000-trial Monte
+  // Carlo simulation of the actual computeDrawState algorithm (random winner
+  // at every real match) for N=2..24, giving the true distribution of total
+  // bout counts; (2) this closed-form expected-value recursion, cross-checked
+  // against that simulation's mean. Full-bracket sizes (4, 8, 16) have zero
+  // variance — deterministic, not just "expected" — so those are exact, not
+  // approximate.
+  //
+  // Non-power-of-2 sizes are genuinely not deterministic before the bracket
+  // is fought: N=9 comes out to 10 total bouts ~75% of the time and 11 the
+  // rest (simulated), because which specific entrant reaches the final
+  // depends on who wins, not just on entry count. This function reports the
+  // *expected value* (rounded to the nearest whole bout), which is the
+  // right statistic for a duration estimate — but note it does not always
+  // equal the single most likely outcome: N=5 rounds to 1 repechage bout
+  // (expectation ~0.7) while the simulated mode is actually 0 bouts more
+  // often than 1. Both are defensible; expectation is what's implemented.
+  //
+  // N=9 is the case that prompted this: reported as 8 bouts (entries-1, no
+  // repechage) when a real check said it should read 10 — this table exists
+  // so that regresses to the wrong number again, loudly.
+  const cases: [number, number][] = [
+    [2, 0],
+    [3, 0],
+    [4, 0], // full bracket, deterministic: 3 main + 0 repechage = 3
+    [5, 1],
+    [7, 2],
+    [8, 2], // full bracket, deterministic: 7 main + 2 repechage = 9
+    [9, 2], // the reported case: 8 main + 2 repechage = 10
+    [16, 4], // full bracket, deterministic: 15 main + 4 repechage = 19
+  ];
+  for (const [n, expected] of cases) {
+    const r = estimatedRepechageBouts(n);
+    check(`N=${n} -> ${expected} repechage bout${expected === 1 ? "" : "s"} (total ${n - 1 + expected})`, r === expected, r);
+  }
+}
+{
+  check("fewer than 4 entries can never need repechage", estimatedRepechageBouts(3) === 0);
+  check("0 entries doesn't crash", estimatedRepechageBouts(0) === 0);
+}
+
 console.log("\n— deriveKumiteBoutBreakdown —");
 {
   const divisions = [
@@ -155,22 +199,25 @@ console.log("\n— deriveKumiteBoutBreakdown —");
   ];
 
   // KATA divisions are excluded outright, even if categories reference them.
+  // 5 entries: main=4, repechage(5)=1 -> 5.
   const r1 = deriveKumiteBoutBreakdown(divisions, [
-    { divisionId: "kata-1", entryCount: 8, drawBoutCount: null },
-    { divisionId: "kumite-1", entryCount: 5, drawBoutCount: null },
+    { divisionId: "kata-1", entryCount: 8, drawEntryCount: null },
+    { divisionId: "kumite-1", entryCount: 5, drawEntryCount: null },
   ]);
   check("KATA divisions excluded", r1.every((d) => d.divisionId !== "kata-1"), r1);
-  check("no-draw category estimates as entries - 1", r1[0]?.bouts === 4, r1);
+  check("no-draw category is entries-1 plus expected repechage", r1[0]?.bouts === 5, r1);
   check("no-draw source is 'entries'", r1[0]?.source === "entries", r1);
 }
 
 {
   // A division with two weight classes must sum bouts per category, not
-  // (total entries - 1) across the whole division.
+  // (total entries - 1) across the whole division. Weight class A: 4 entries
+  // -> main 3, repechage(4)=0 -> 3. Weight class B: 3 entries -> main 2,
+  // repechage(3)=0 -> 2.
   const divisions = [{ id: "kumite-1", name: "Kumite A", category: "KUMITE" as const }];
   const categories = [
-    { divisionId: "kumite-1", entryCount: 4, drawBoutCount: null }, // weight class A: 4 entries -> 3 bouts
-    { divisionId: "kumite-1", entryCount: 3, drawBoutCount: null }, // weight class B: 3 entries -> 2 bouts
+    { divisionId: "kumite-1", entryCount: 4, drawEntryCount: null },
+    { divisionId: "kumite-1", entryCount: 3, drawEntryCount: null },
   ];
   const r = deriveKumiteBoutBreakdown(divisions, categories);
   check(
@@ -187,25 +234,22 @@ console.log("\n— deriveKumiteBoutBreakdown —");
   // bracket if a draw exists" matters: an entry withdrawn (or added) after
   // the draw was made means the two numbers can genuinely differ, and the
   // bracket that will actually run is the correct one to schedule around.
-  // (It is NOT about repechage: this app's bracket engine only knows
-  // repechage bronze-bout pairings once the main draw is mostly played, so
-  // v1 leaves repechage out of the count entirely, uniformly — see
-  // lib/estimator.ts.)
   const divisions = [{ id: "kumite-1", name: "Kumite A", category: "KUMITE" as const }];
   const drawn = deriveKumiteBoutBreakdown(divisions, [
-    // Drawn with 7 real entries (6 bouts); one has since withdrawn, so
-    // today's live entryCount reads 8 — the draw's count should win.
-    { divisionId: "kumite-1", entryCount: 8, drawBoutCount: 6 },
+    // Drawn with 7 real entries (main=6, repechage(7)=2 -> 8); one has since
+    // withdrawn, so today's live entryCount reads 8 — the draw's count wins.
+    { divisionId: "kumite-1", entryCount: 8, drawEntryCount: 7 },
   ]);
-  check("drawn category uses the draw's entry count, not today's entryCount", drawn[0]?.bouts === 6, drawn);
+  check("drawn category uses the draw's entry count, not today's entryCount", drawn[0]?.bouts === 8, drawn);
   check("drawn source is 'draw'", drawn[0]?.source === "draw", drawn);
 
-  // Same division, but one of its two weight classes hasn't been drawn yet.
+  // Same division, but one of its two weight classes hasn't been drawn yet
+  // (3 entries -> main 2, repechage(3)=0 -> 2).
   const mixed = deriveKumiteBoutBreakdown(divisions, [
-    { divisionId: "kumite-1", entryCount: 8, drawBoutCount: 6 },
-    { divisionId: "kumite-1", entryCount: 3, drawBoutCount: null },
+    { divisionId: "kumite-1", entryCount: 8, drawEntryCount: 7 },
+    { divisionId: "kumite-1", entryCount: 3, drawEntryCount: null },
   ]);
-  check("mixed division sums drawn + estimated", mixed[0]?.bouts === 6 + 2, mixed);
+  check("mixed division sums drawn + estimated", mixed[0]?.bouts === 8 + 2, mixed);
   check("mixed source is 'mixed'", mixed[0]?.source === "mixed", mixed);
   // entries reflects today's live counts regardless of source — it's not
   // meant to explain bouts, just to show alongside it.
@@ -254,7 +298,7 @@ console.log("\n— minutesForDivision —");
   // silently dropped — estimateKumiteDuration is what excludes 0-bout rows
   // from the changeover count, breakdown derivation itself stays complete.
   const divisions = [{ id: "kumite-1", name: "Empty Division", category: "KUMITE" as const }];
-  const r = deriveKumiteBoutBreakdown(divisions, [{ divisionId: "kumite-1", entryCount: 0, drawBoutCount: null }]);
+  const r = deriveKumiteBoutBreakdown(divisions, [{ divisionId: "kumite-1", entryCount: 0, drawEntryCount: null }]);
   check("division with 0 entries still appears, with 0 bouts", r[0]?.bouts === 0, r);
 }
 

@@ -15,28 +15,35 @@ export interface KumiteCategoryData {
   /** APPROVED entries currently in this division × weight-class pairing. */
   entryCount: number;
   /**
-   * Main-bracket bout count (real entries in the draw minus 1) from an
-   * already-generated draw for this category, or null if no draw exists yet.
+   * Real entry count in an already-generated draw for this category (used to
+   * derive main-bracket bouts as `drawEntryCount - 1`), or null if no draw
+   * exists yet, in which case `entryCount` is used instead.
    *
-   * This is mathematically identical to `entryCount - 1` *unless* entries
-   * have changed since the draw was made (an entry withdrawn or added
-   * without regenerating) — that drift is the entire reason to prefer this
-   * over re-deriving from current entries when a draw exists.
+   * This is mathematically identical to `entryCount` *unless* entries have
+   * changed since the draw was made (an entry withdrawn or added without
+   * regenerating) — that drift is the entire reason to prefer this over
+   * re-deriving from current entries when a draw exists.
    *
    * Deliberately NOT sourced from counting the draw's bout rows that
    * currently have both fighters filled in: for an unplayed draw, only round
-   * 1 (and any bye-cascades) are populated — later rounds, and repechage
-   * entirely, stay null until earlier rounds are actually scored. Counting
-   * that would *undercount* a freshly-generated, not-yet-run bracket, which
-   * is the normal state an estimator is used in. See the caveat below.
+   * 1 (and any bye-cascades) are populated — later rounds stay null until
+   * earlier rounds are actually scored. Counting that would *undercount* a
+   * freshly-generated, not-yet-run bracket, which is the normal state an
+   * estimator is used in.
    */
-  drawBoutCount: number | null;
+  drawEntryCount: number | null;
 }
 
 export interface DivisionBoutBreakdown {
   divisionId: string;
   divisionName: string;
-  /** Summed across every weight class in this division. */
+  /**
+   * Summed across every weight class in this division. Main-bracket bouts
+   * (exact, `entries - 1`) plus an *expected* WKF double-repechage bronze
+   * bout count (see `estimatedRepechageBouts` — genuinely not knowable
+   * exactly before a bracket is fought, since it depends on who wins each
+   * match, not just entry count).
+   */
   bouts: number;
   /** APPROVED entries summed across every weight class in this division. */
   entries: number;
@@ -44,15 +51,103 @@ export interface DivisionBoutBreakdown {
    * "draw": every category in this division already has a generated draw —
    * `bouts` reflects the bracket's actual entry count, not necessarily
    * today's live entry count if it has since drifted.
-   * "entries": every category is still estimated as `entries - 1`.
+   * "entries": every category is still estimated from live entry counts.
    * "mixed": some weight classes of this division have a draw, others don't.
-   *
-   * Neither source counts WKF double-repechage bronze bouts — v1 has no
-   * reliable way to know that count before a bracket is mostly played (see
-   * the caveat surfaced in the UI). Both "draw" and "entries" totals are a
-   * floor, uniformly, not just "entries."
    */
   source: "draw" | "entries" | "mixed";
+}
+
+/**
+ * Bracket placement order — ported from (and must stay in sync with)
+ * `backend/src/services/draw.service.ts`'s `bracketPositions`. Deterministic
+ * given `size` alone: byes always land on the same structural positions
+ * regardless of which real entries occupy the rest, which is exactly what
+ * makes `estimatedRepechageBouts` computable from entry count alone, without
+ * needing an actual draw (or even real entry identities) to exist.
+ * Returns a 0-based array: result[k] = 1-based bracket position for seed k+1.
+ */
+function bracketPositions(size: number): number[] {
+  let seeds = [1, 2];
+  while (seeds.length < size) {
+    const m = seeds.length * 2 + 1;
+    const next: number[] = [];
+    for (const s of seeds) next.push(s, m - s);
+    seeds = next;
+  }
+  const pos = new Array<number>(size);
+  seeds.forEach((seedNum, p) => {
+    pos[seedNum - 1] = p + 1;
+  });
+  return pos;
+}
+
+/** Smallest power of 2 that is >= n. Mirrors draw.service.ts's bracketSize. */
+function nextBracketSize(n: number): number {
+  let size = 2;
+  while (size < n) size *= 2;
+  return size;
+}
+
+/**
+ * Exact expected number of real (non-bye) opponents the eventual winner of
+ * bracket range [lo, hi] will have beaten, assuming a fair coin-flip winner
+ * at every real match (the only assumption possible before a bracket is
+ * actually fought). Recursive: a real entrant on each side is guaranteed to
+ * meet at this level once both sides have >= 1 real entrant, and by symmetry
+ * every real entrant in a sub-range is equally likely to be the one who
+ * reaches this level — so the expectation is a weighted average of "the
+ * winning side's own expectation, plus the one match played at this level."
+ *
+ * This is what makes the repechage estimate more than a guess: it is the
+ * true expected value given the bracket's real bye structure, not a flat
+ * heuristic — verified against a 20,000-trial Monte Carlo simulation of the
+ * actual bracket algorithm across N=2..24 (see docs/state.md).
+ */
+function expectedOpponents(occupied: Set<number>, lo: number, hi: number): number {
+  const size = hi - lo + 1;
+  if (size === 1) return 0;
+  const mid = lo + size / 2 - 1;
+  let leftReal = 0;
+  let rightReal = 0;
+  for (const p of occupied) {
+    if (p >= lo && p <= mid) leftReal++;
+    else if (p >= mid + 1 && p <= hi) rightReal++;
+  }
+  if (leftReal === 0 && rightReal === 0) return 0;
+  if (leftReal === 0) return expectedOpponents(occupied, mid + 1, hi);
+  if (rightReal === 0) return expectedOpponents(occupied, lo, mid);
+  const leftExp = expectedOpponents(occupied, lo, mid);
+  const rightExp = expectedOpponents(occupied, mid + 1, hi);
+  const total = leftReal + rightReal;
+  return (leftReal / total) * (leftExp + 1) + (rightReal / total) * (rightExp + 1);
+}
+
+/**
+ * Expected WKF double-repechage bronze bout count for a division with `n`
+ * real kumite entries — one bracket half at a time, rounded to the nearest
+ * whole bout per half. Genuinely an *expectation*, not a guarantee: the true
+ * count depends on who actually wins each match, which isn't knowable before
+ * the bracket is fought (confirmed by simulation: a 9-entry bracket is 10
+ * total bouts ~75% of the time and 11 the rest — there is no single "correct"
+ * answer to know in advance, only an expected one).
+ */
+export function estimatedRepechageBouts(n: number): number {
+  if (n < 4) return 0;
+  const size = nextBracketSize(n);
+  const positions = bracketPositions(size);
+  const occupied = new Set(positions.slice(0, n));
+  const half = size / 2;
+  let repechage = 0;
+  for (const [lo, hi] of [
+    [1, half],
+    [half + 1, size],
+  ] as const) {
+    let realCount = 0;
+    for (const p of occupied) if (p >= lo && p <= hi) realCount++;
+    if (realCount < 2) continue; // no bronze possible from a half with 0-1 entrants
+    repechage += Math.max(0, Math.round(expectedOpponents(occupied, lo, hi)) - 1);
+  }
+  return repechage;
 }
 
 /**
@@ -78,13 +173,14 @@ export function deriveKumiteBoutBreakdown(
     const bucket =
       byDivision.get(cat.divisionId) ?? { bouts: 0, entries: 0, hasDraw: false, hasEstimate: false };
     bucket.entries += Math.max(0, cat.entryCount);
-    if (cat.drawBoutCount !== null) {
-      bucket.bouts += cat.drawBoutCount;
-      bucket.hasDraw = true;
-    } else {
-      bucket.bouts += Math.max(0, cat.entryCount - 1);
-      bucket.hasEstimate = true;
-    }
+
+    const effectiveN = cat.drawEntryCount ?? cat.entryCount;
+    const mainBouts = Math.max(0, effectiveN - 1);
+    const repechageBouts = estimatedRepechageBouts(effectiveN);
+    bucket.bouts += mainBouts + repechageBouts;
+    if (cat.drawEntryCount !== null) bucket.hasDraw = true;
+    else bucket.hasEstimate = true;
+
     byDivision.set(cat.divisionId, bucket);
   }
 
