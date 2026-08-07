@@ -4,8 +4,12 @@ This file is the handoff between coding agents. It describes what is in flight
 right now, not the permanent architecture (that's
 [`architecture.md`](architecture.md)).
 
-**Last updated:** 2026-08-07 — by Claude Code: fixed the production "submit
-drafts" failure (Railway `trust proxy` was never set, see "In flight" below).
+**Last updated:** 2026-08-07 — by Claude Code: fixed the Railway build failing
+`tsc` with `TS2591: Cannot find name 'crypto'/'process'` (see "In flight"
+below).
+
+Previously, same day: fixed the production "submit drafts" failure (Railway
+`trust proxy` was never set).
 
 Previously, same day: memoised DivisionBoard so the 48 boards stop
 re-rendering on every keystroke and hover.
@@ -33,6 +37,71 @@ port; those have since been pushed.) Everything here is verified locally against
 a database, never against production data.
 
 ## In flight (uncommitted)
+
+**Railway build broken: `tsc` failing with `TS2591` on Node globals
+(2026-08-07).** Reported from a Railway deploy: `backend/src/lib/storage.ts`
+failed `tsc` with `TS2591: Cannot find name 'crypto'` and `'process'`. Locally
+`npx tsc --noEmit` was clean, and `storage.ts` is not new — tracked since
+`5e7f67b`, always covered by `tsconfig.json`'s `include: ["src"]` — so this was
+an environment difference, not a scoping bug.
+
+Reproduced exactly (not guessed): copied `backend/` to a scratch dir, deleted
+`node_modules/@types/node`, ran `tsc --noEmit` — identical error codes, same
+message text, `storage.ts` first (matching what a truncated build log would
+show). Root cause confirmed by testing `npm ci --omit=dev`: `@types/node` (a
+devDependency) is stripped, but `tsc` itself survives only by accident — it's
+a transitive dependency of `@prisma/client`, a *production* dependency. That
+is the exact shape of the failure: the build reaches `tsc`, but every file
+touching a bare Node global (`process`, `crypto`, `Buffer`, `fs`, `path`,
+`url` — dozens of files, `storage.ts` is just the first alphabetically) fails.
+Re-running the same `--omit=dev` build after moving only `@types/node` still
+failed, on the *other* `@types/*` packages (`express`, `cors`, `jsonwebtoken`,
+etc.) for the identical reason — TS7016/TS7006 instead of TS2591.
+
+Whatever the exact Railway/Nixpacks setting driving the dev-omitting install
+(not visible from the repo — worth checking the service's `NODE_ENV` variable
+in the dashboard if this recurs), the fix that works regardless of that detail
+is: types needed to compile can't live somewhere a production-only install
+skips.
+
+Also found and fixed while reproducing, independent of the above:
+`backend/package-lock.json` was stale (missing several `esbuild`/`fsevents`
+optional-platform entries), which made plain `npm ci` — the install most
+deploy platforms use — fail outright with "Missing: X from lock file" on a
+clean checkout, regardless of `NODE_ENV`. And `typescript` itself was not a
+declared dependency anywhere; it only existed in `node_modules` because
+`@prisma/client`/`ts-node-dev` happen to depend on it.
+
+Changes, all in `backend/package.json` + regenerated `backend/package-lock.json`:
+
+- Moved every `@types/*` package and `typescript` from `devDependencies` to
+  `dependencies`, so they install under `npm ci --omit=dev` too.
+- Added `typescript` explicitly (was previously only present transitively).
+- `prisma`, `ts-node-dev`, `tsx` stay in `devDependencies` — confirmed `prisma`
+  (the CLI, needed by the start command's `npx prisma migrate deploy`) still
+  installs under `--omit=dev` via `@prisma/client`'s own dependency on it;
+  `ts-node-dev`/`tsx` are dev-only and correctly absent from that build.
+- Regenerated the lockfile (`npm install`), which also fixed the stale
+  `esbuild`/`fsevents` entries.
+
+### Verification (run 2026-08-07)
+
+All three from a scratch copy (`rsync --exclude node_modules`), not the
+working tree:
+
+| Scenario | Before | After |
+|---|---|---|
+| `npm ci` (plain) | fails: "Missing: ... from lock file" | succeeds |
+| `npm ci --omit=dev` then `npm run build` | `TS2591` on `crypto`/`process` in `storage.ts`, then `TS7016`/`TS7006` across `server.ts`, `routes/*`, `services/*` | clean, `dist/server.js` written, `node --check` passes |
+| `npm ci` (full) then `npm run build` | clean | clean |
+
+`backend`: `npx tsc --noEmit` in the actual working tree — clean.
+
+**Not verified: the actual Railway build.** This reproduces the reported error
+byte-for-byte from a devDependency-omitting install and fixes it, but the repo
+has no visibility into Railway's real install command or service-level env
+vars — if a *different* mechanism is stripping types on Railway, this won't
+be the whole story. Confirm on the next deploy.
 
 **Production bug: Windhoek's 28-draft submit failed for every role
 (2026-08-07).** Reported on Railway: club manager, tournament organizer *and*
