@@ -2,7 +2,7 @@
 // Header: category, gender, age range, entered count.
 // Body: entered athletes as compact rows, or an empty drop placeholder.
 
-import { useMemo } from "react"
+import { memo, useMemo } from "react"
 import { useDroppable } from "@dnd-kit/core"
 import { X } from "lucide-react"
 
@@ -37,13 +37,27 @@ const STATUS_LABEL = {
 
 export type EligibilityKind = "neutral" | "eligible" | "ineligible" | "partial"
 
+// Every prop here is either a primitive or a reference the parent keeps stable
+// across renders, so the React.memo below can do its job with a plain shallow
+// compare. Two of them used to be neither:
+//
+//   - eligibility was an object literal built per board per render. It is now
+//     three primitives, which also means a board only re-renders when its own
+//     ghost state changes — moving between two athletes with identical
+//     eligibility re-renders nothing.
+//   - hoveredAthleteId was the raw hovered id, handed to all 48 boards, so
+//     every board re-rendered on every hover even though at most one of them
+//     could show a highlight. It is now highlightAthleteId: the parent passes
+//     null unless that athlete actually has an entry on this board.
 export interface DivisionBoardProps {
   division: Division
   entries: Entry[]
   athletes: EnrichedAthlete[]
-  eligibility: { kind: EligibilityKind; count: number; total: number }
+  eligibilityKind: EligibilityKind
+  eligibleCount: number
+  eligibleTotal: number
   hasFocus: boolean
-  hoveredAthleteId: string | null
+  highlightAthleteId: string | null
   onRemoveEntry: (athleteId: string, divisionId: string) => void
   density: "compact" | "comfortable"
   showFees: boolean
@@ -51,31 +65,19 @@ export interface DivisionBoardProps {
   ghostingEnabled: boolean
 }
 
-export const DivisionBoard: React.FC<DivisionBoardProps> = ({
-  division,
-  entries,
-  athletes,
-  eligibility,
-  hasFocus,
-  hoveredAthleteId,
-  onRemoveEntry,
-  density,
-  showFees,
-  config,
-  ghostingEnabled,
-}) => {
-  const cat = division.category
-  const compact = density === "compact"
+// The droppable shell. useDroppable subscribes to dnd-kit's DndContext, and a
+// context update re-renders its consumers whatever React.memo says — measured:
+// with useDroppable here, six keystrokes in the pool search re-rendered all 48
+// boards; with it removed, zero. So the shell is kept deliberately thin (one
+// div and a cn() call) and everything expensive lives in the memoized
+// DivisionBoardBody below, which the context update cannot reach.
+const DivisionBoardImpl: React.FC<DivisionBoardProps> = (props) => {
+  const { division, hasFocus, ghostingEnabled, eligibilityKind } = props
 
   const showGhostCaption = hasFocus && ghostingEnabled
-  const ineligible = showGhostCaption && eligibility.kind === "ineligible"
-  const litGlow = showGhostCaption && eligibility.kind === "eligible"
-  const partial = showGhostCaption && eligibility.kind === "partial"
-
-  const totalFee = useMemo(
-    () => entries.reduce((sum, e) => sum + feeForEntry(e, config), 0),
-    [entries, config],
-  )
+  const ineligible = showGhostCaption && eligibilityKind === "ineligible"
+  const litGlow = showGhostCaption && eligibilityKind === "eligible"
+  const partial = showGhostCaption && eligibilityKind === "partial"
 
   const { setNodeRef, isOver } = useDroppable({
     id: `division:${division.id}`,
@@ -95,6 +97,48 @@ export const DivisionBoard: React.FC<DivisionBoardProps> = ({
         isOver && !ineligible && "ring-2 ring-belt-green/60 ring-offset-1 ring-offset-background",
       )}
     >
+      <DivisionBoardBody
+        {...props}
+        isOver={isOver}
+        litGlow={litGlow}
+        showGhostCaption={showGhostCaption}
+      />
+    </div>
+  )
+}
+
+interface DivisionBoardBodyProps extends DivisionBoardProps {
+  isOver: boolean
+  litGlow: boolean
+  showGhostCaption: boolean
+}
+
+const DivisionBoardBodyImpl: React.FC<DivisionBoardBodyProps> = ({
+  division,
+  entries,
+  athletes,
+  eligibilityKind,
+  eligibleCount,
+  eligibleTotal,
+  highlightAthleteId,
+  onRemoveEntry,
+  density,
+  showFees,
+  config,
+  isOver,
+  litGlow,
+  showGhostCaption,
+}) => {
+  const cat = division.category
+  const compact = density === "compact"
+
+  const totalFee = useMemo(
+    () => entries.reduce((sum, e) => sum + feeForEntry(e, config), 0),
+    [entries, config],
+  )
+
+  return (
+    <>
       {/* Category band */}
       <div
         aria-hidden
@@ -167,7 +211,7 @@ export const DivisionBoard: React.FC<DivisionBoardProps> = ({
                   athlete={a}
                   division={division}
                   onRemove={() => onRemoveEntry(a.id, division.id)}
-                  isHovered={hoveredAthleteId === a.id}
+                  isHovered={highlightAthleteId === a.id}
                   compact={compact}
                 />
               )
@@ -182,13 +226,13 @@ export const DivisionBoard: React.FC<DivisionBoardProps> = ({
             reflowing the whole grid out from under the cursor. */}
         <div className="flex items-center justify-between mt-2 text-[10px] text-muted-foreground tabular-nums">
           <span>
-            {showGhostCaption && eligibility.kind === "partial" ? (
+            {showGhostCaption && eligibilityKind === "partial" ? (
               <span className="text-belt-orange">
-                {eligibility.count}/{eligibility.total} eligible
+                {eligibleCount}/{eligibleTotal} eligible
               </span>
-            ) : showGhostCaption && eligibility.kind === "eligible" ? (
+            ) : showGhostCaption && eligibilityKind === "eligible" ? (
               <span className="text-belt-green">all eligible</span>
-            ) : showGhostCaption && eligibility.kind === "ineligible" ? (
+            ) : showGhostCaption && eligibilityKind === "ineligible" ? (
               <span>none eligible</span>
             ) : (
               " "
@@ -201,9 +245,20 @@ export const DivisionBoard: React.FC<DivisionBoardProps> = ({
           )}
         </div>
       </div>
-    </div>
+    </>
   )
 }
+
+// The memoised half. Every prop is a primitive or a reference the parent keeps
+// stable, so a plain shallow compare is enough.
+const DivisionBoardBody = memo(DivisionBoardBodyImpl)
+DivisionBoardBody.displayName = "DivisionBoardBody"
+
+// Memoised too, which spares the shell on parent renders that do not touch
+// dnd-kit's context at all.
+export const DivisionBoard = memo(DivisionBoardImpl)
+DivisionBoard.displayName = "DivisionBoard"
+DivisionBoard.displayName = "DivisionBoard"
 
 // Note: the chip deliberately does *not* set the hovered athlete. Pointing at
 // an entry that is already placed re-ghosted all 48 boards for no benefit, and

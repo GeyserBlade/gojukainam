@@ -4,8 +4,11 @@ This file is the handoff between coding agents. It describes what is in flight
 right now, not the permanent architecture (that's
 [`architecture.md`](architecture.md)).
 
-**Last updated:** 2026-08-06 — by Claude Code: stopped the entries board
-reflowing under the pointer, which made the remove-entry "×" unclickable.
+**Last updated:** 2026-08-07 — by Claude Code: memoised DivisionBoard so the 48
+boards stop re-rendering on every keystroke and hover.
+
+Previously, 2026-08-06: stopped the entries board reflowing under the pointer,
+which made the remove-entry "×" unclickable.
 
 Previously, 2026-08-05: kumite entries no longer require a weight class on
 divisions that have none.
@@ -26,10 +29,66 @@ previously claimed several unpushed commits — the pool endpoint and the redesi
 port; those have since been pushed.) Everything here is verified locally against
 a database, never against production data.
 
-## Recently shipped
+## In flight (uncommitted)
 
-Nothing is currently in flight — the working tree is clean and `main` matches
-`origin/main`.
+**DivisionBoard is memoised (2026-08-07).** Follow-up to the reflow fix below,
+which left every one of the 48 boards re-rendering on each keystroke, filter
+toggle and hover.
+
+Two things had to change before `React.memo` could do anything:
+
+- `eligibility` was an object literal built per board per render. It is now
+  three primitives (`eligibilityKind` / `eligibleCount` / `eligibleTotal`),
+  resolved once per focus change into `eligibilityByDivision`. Primitives mean
+  a board re-renders only when *its own* verdict changes.
+- `hoveredAthleteId` was handed raw to all 48 boards, so every board re-rendered
+  on every hover even though at most one could show a highlight. It is now
+  `highlightAthleteId`, null unless that athlete has an entry on that board.
+
+Plus the supporting stability work in the parent: `entriesByDivision` (a
+memoised Map, so no fresh `entries.filter(...)` per board), `handleRemoveEntry`
+wrapped in `useCallback`, and module-level `NO_ENTRIES` / `NEUTRAL_ELIGIBILITY`
+constants so empty boards share one reference.
+
+**The part worth knowing about, because it is not obvious:** `React.memo` alone
+achieved *nothing* here. `useDroppable` subscribes each board to dnd-kit's
+`DndContext`, and a context update re-renders consumers regardless of memo.
+Measured directly — six keystrokes in the pool search, with the memo already in
+place and the comparator confirming zero prop changes, still produced 48 board
+renders; deleting the `useDroppable` call dropped that to 0.
+
+So the board is split. `DivisionBoardImpl` is a thin droppable shell (one div,
+one `cn()`) that takes the unavoidable context re-render, and everything
+expensive lives in the memoised `DivisionBoardBody`, which the context update
+cannot reach. `isOver` crosses that boundary as a plain boolean prop.
+
+### Verification (run 2026-08-07)
+
+Render counts measured with temporary counters in both halves, **StrictMode
+disabled for the measurement** so the numbers are real renders rather than
+React's dev-mode double-invoke. Instrumentation and the StrictMode change are
+both reverted; `main.tsx` shows no diff.
+
+| Interaction | Shell renders | Body renders | Before |
+|---|---|---|---|
+| 6 keystrokes in pool search | 48 | **0** | 48 full board renders |
+| Hover an athlete (neutral → ghosted) | 48 | 48 | 48 — unavoidable, every board changes |
+| Hover a second athlete, same age + gender | 48 | **0** | 48 full board renders |
+
+Behaviour re-checked after the restructure: 48 boards render, uniform 198px (the
+reflow fix still holds), hovering lights 2 boards green and ghosts 46, the chip
+highlight still follows pool hover, enrolling via the eligible-divisions chip
+returns `201`, the remove "×" returns `204`, and a pointer-driven dnd-kit drag
+put the `isOver` ring on exactly one board — which is the specific thing the
+split could have broken. `tsc --noEmit` clean, `npm run build` succeeds,
+`scripts/test-draws.ts` passes, no error boundary after a hard reload.
+
+Not verified: a drag that completes onto a chosen board. Synthetic pointer
+drags are unreliable in this harness (they were in the previous session too);
+the `isOver` result above covers the droppable registration that the split put
+at risk, and the drop handler itself is unchanged.
+
+## Recently shipped
 
 **The entries board reflowed under the pointer (fixed 2026-08-06).** On
 `/hub/entries` the remove-entry "×" was effectively unclickable: pointing at a
@@ -75,11 +134,8 @@ Three changes, all in `DivisionBoard.tsx`:
 `frontend`: `tsc --noEmit` clean, `npm run build` succeeds, 48 boards render
 with no error boundary.
 
-Not done: `DivisionBoard` is still not memoised, so every board re-renders on
-each pool-row hover. With 48 boards that is wasted work, though no longer
-*visible* work now that nothing moves. Memoising needs `eligibilityForDivision`
-to stop returning a fresh object per render — worth doing if the board count
-grows.
+The memoisation this section originally listed as "not done" is now done — see
+"In flight" above.
 
 **Kumite entries on no-weights divisions (fixed 2026-08-05).** Enrolling an
 athlete into any kumite division from the event hub failed — the popup reported

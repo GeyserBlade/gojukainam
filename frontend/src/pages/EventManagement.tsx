@@ -10,7 +10,7 @@
 // Auth: SUPERADMIN / ADMIN can target any club; CLUB_MANAGER / COACH are scoped
 // to their own club, enforced server-side by the pool endpoint.
 
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   DndContext,
@@ -51,6 +51,11 @@ import {
   isEligible,
   parseEventConfig,
 } from "./event-management/eligibility"
+
+// Shared fallbacks for boards with nothing to show. Module-level constants so
+// every such board gets the *same* reference and DivisionBoard's memo holds.
+const NO_ENTRIES: Entry[] = []
+const NEUTRAL_ELIGIBILITY = { kind: "neutral" as const, count: 0, total: 0 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Top-level page
@@ -184,6 +189,19 @@ const EventManagement = () => {
     return groupBy === "age" ? groupDivisionsByAge(list) : groupDivisionsByCategory(list)
   }, [divisions, entries, categoryFilter, showEmptyBoards, groupBy])
 
+  // Entries bucketed by division, so each board gets a stable array reference
+  // instead of a fresh entries.filter(...) on every parent render. Boards with
+  // no entries all share one frozen empty array for the same reason.
+  const entriesByDivision = useMemo(() => {
+    const m = new Map<string, Entry[]>()
+    for (const e of entries) {
+      const bucket = m.get(e.divisionId)
+      if (bucket) bucket.push(e)
+      else m.set(e.divisionId, [e])
+    }
+    return m
+  }, [entries])
+
   // ── Eligibility focus (which athletes drive board ghosting) ────────────────
   const focusAthleteIds = useMemo(() => {
     if (selectedAthleteIds.size > 0) return Array.from(selectedAthleteIds)
@@ -209,6 +227,26 @@ const EventManagement = () => {
     }
     return { kind: "partial" as const, count: eligible.length, total: focused.length }
   }
+
+  // Resolved once per focus change rather than per board per render. The board
+  // takes the three fields as primitives, so a board only re-renders when its
+  // own verdict changes — hovering a second athlete with the same age and
+  // gender re-renders no boards at all.
+  const eligibilityByDivision = useMemo(() => {
+    const m = new Map<string, ReturnType<typeof eligibilityForDivision>>()
+    for (const d of divisions) m.set(d.id, eligibilityForDivision(d))
+    return m
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [divisions, focusAthleteIds, enrichedAthletes, eventDate])
+
+  // Which athlete, if any, this board should highlight. Passing the raw hovered
+  // id to all 48 boards made every one of them re-render on every hover; at
+  // most one board can actually show a highlight.
+  const highlightForDivision = (divisionId: string) =>
+    hoveredAthleteId &&
+    entriesByDivision.get(divisionId)?.some((e) => e.athleteId === hoveredAthleteId)
+      ? hoveredAthleteId
+      : null
 
   // ── Stats strip ────────────────────────────────────────────────────────────
   const stats = useMemo(() => {
@@ -291,22 +329,29 @@ const EventManagement = () => {
     createEntryMutation.mutate({ athleteId, divisionId })
   }
 
-  const handleRemoveEntry = async (athleteId: string, divisionId: string) => {
-    const entry = entries.find(
-      (e) => e.athleteId === athleteId && e.divisionId === divisionId,
-    )
-    if (!entry) return
-    if (entry.status !== "DRAFT") {
-      const ok = await confirm({
-        title: `Remove this entry?`,
-        description: `Status is "${entry.status}". Removing it will also clear that state.`,
-        confirmText: "Remove",
-        destructive: true,
-      })
-      if (!ok) return
-    }
-    deleteEntryMutation.mutate(entry.id)
-  }
+  // Stable across renders so it does not defeat DivisionBoard's memo. `confirm`
+  // is a useCallback from ConfirmProvider and `mutate` is stable in TanStack
+  // Query, so this only changes when the entries themselves do.
+  const removeEntryMutate = deleteEntryMutation.mutate
+  const handleRemoveEntry = useCallback(
+    async (athleteId: string, divisionId: string) => {
+      const entry = entries.find(
+        (e) => e.athleteId === athleteId && e.divisionId === divisionId,
+      )
+      if (!entry) return
+      if (entry.status !== "DRAFT") {
+        const ok = await confirm({
+          title: `Remove this entry?`,
+          description: `Status is "${entry.status}". Removing it will also clear that state.`,
+          confirmText: "Remove",
+          destructive: true,
+        })
+        if (!ok) return
+      }
+      removeEntryMutate(entry.id)
+    },
+    [entries, confirm, removeEntryMutate],
+  )
 
   const handleBulkAdd = async (category: "KATA" | "KUMITE" | "BOTH") => {
     if (addBlocked) return
@@ -665,22 +710,27 @@ const EventManagement = () => {
                             </span>
                           </div>
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                            {group.divisions.map((d) => (
-                              <DivisionBoard
-                                key={d.id}
-                                division={d}
-                                entries={entries.filter((e) => e.divisionId === d.id)}
-                                athletes={enrichedAthletes}
-                                eligibility={eligibilityForDivision(d)}
-                                hasFocus={focusAthleteIds.length > 0}
-                                hoveredAthleteId={hoveredAthleteId}
-                                onRemoveEntry={handleRemoveEntry}
-                                density={density}
-                                showFees={showFees}
-                                config={eventConfig}
-                                ghostingEnabled={ghostingEnabled}
-                              />
-                            ))}
+                            {group.divisions.map((d) => {
+                              const el = eligibilityByDivision.get(d.id) ?? NEUTRAL_ELIGIBILITY
+                              return (
+                                <DivisionBoard
+                                  key={d.id}
+                                  division={d}
+                                  entries={entriesByDivision.get(d.id) ?? NO_ENTRIES}
+                                  athletes={enrichedAthletes}
+                                  eligibilityKind={el.kind}
+                                  eligibleCount={el.count}
+                                  eligibleTotal={el.total}
+                                  hasFocus={focusAthleteIds.length > 0}
+                                  highlightAthleteId={highlightForDivision(d.id)}
+                                  onRemoveEntry={handleRemoveEntry}
+                                  density={density}
+                                  showFees={showFees}
+                                  config={eventConfig}
+                                  ghostingEnabled={ghostingEnabled}
+                                />
+                              )
+                            })}
                           </div>
                         </section>
                       )
