@@ -10,6 +10,7 @@ import {
   deriveKumiteBoutBreakdown,
   estimateKumiteDuration,
   formatDuration,
+  minutesForDivision,
   DEFAULT_ESTIMATOR_INPUTS,
   type DivisionBoutBreakdown,
   type EstimatorInputs,
@@ -29,10 +30,15 @@ const inputs = (overrides: Partial<EstimatorInputs> = {}): EstimatorInputs => ({
   ...overrides,
 });
 
-const division = (bouts: number, source: DivisionBoutBreakdown["source"] = "entries"): DivisionBoutBreakdown => ({
+const division = (
+  bouts: number,
+  source: DivisionBoutBreakdown["source"] = "entries",
+  entries: number = bouts > 0 ? bouts + 1 : 0, // realistic single-elim inverse, not load-bearing
+): DivisionBoutBreakdown => ({
   divisionId: `d-${Math.random()}`,
   divisionName: "Test Division",
   bouts,
+  entries,
   source,
 });
 
@@ -172,6 +178,7 @@ console.log("\n— deriveKumiteBoutBreakdown —");
     r[0]?.bouts === 5, // 3 + 2, not (4+3)-1=6
     r,
   );
+  check("entries sums across weight classes too", r[0]?.entries === 7, r); // 4 + 3
 }
 
 {
@@ -200,6 +207,46 @@ console.log("\n— deriveKumiteBoutBreakdown —");
   ]);
   check("mixed division sums drawn + estimated", mixed[0]?.bouts === 6 + 2, mixed);
   check("mixed source is 'mixed'", mixed[0]?.source === "mixed", mixed);
+  // entries reflects today's live counts regardless of source — it's not
+  // meant to explain bouts, just to show alongside it.
+  check("entries sums today's live entryCount, not the drawn count", mixed[0]?.entries === 8 + 3, mixed);
+}
+
+console.log("\n— minutesForDivision —");
+{
+  // 6 bouts, 4 min/bout, 10% buffer, 5 min changeover:
+  //   boutMinutes = 6*4*1.10 = 26.4, + 5 changeover = 31.4, ceil = 32
+  const r = minutesForDivision(6, inputs({ changeoverMinutes: 5 }));
+  check("bout time with buffer, plus one changeover, rounded up", r === 32, r);
+}
+{
+  check("0 bouts costs 0 minutes, not just a changeover", minutesForDivision(0, inputs()) === 0);
+  check("negative bouts treated as 0", minutesForDivision(-3, inputs()) === 0);
+}
+{
+  // Not divided across mats — a division's own duration doesn't change
+  // just because there happen to be more mats running other divisions.
+  const withOneMat = minutesForDivision(6, inputs({ mats: 1 }));
+  const withFourMats = minutesForDivision(6, inputs({ mats: 4 }));
+  check("mat count does not affect a single division's own duration", withOneMat === withFourMats, {
+    withOneMat,
+    withFourMats,
+  });
+}
+{
+  // Summing every division's minutesForDivision should be >= perMatBoutMinutes
+  // for a single mat (mats=1 means one division's changeover cost isn't
+  // shared, so the per-division sum legitimately runs ahead of the pooled
+  // total once more than one division is in play) — sanity-check they are at
+  // least in the right neighborhood, not wildly divergent.
+  const divs = [division(4), division(3), division(2)];
+  const total = estimateKumiteDuration(divs, inputs({ mats: 1 }));
+  const perDivisionSum = divs.reduce((sum, d) => sum + minutesForDivision(d.bouts, inputs({ mats: 1 })), 0);
+  check(
+    "per-division minutes roughly track the pooled bout+changeover total",
+    perDivisionSum >= total.perMatBoutMinutes,
+    { perDivisionSum, perMatBoutMinutes: total.perMatBoutMinutes },
+  );
 }
 
 {

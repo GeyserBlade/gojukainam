@@ -4,10 +4,12 @@ This file is the handoff between coding agents. It describes what is in flight
 right now, not the permanent architecture (that's
 [`architecture.md`](architecture.md)).
 
-**Last updated:** 2026-08-07 — by Claude Code: in-browser verification of the
-kumite duration estimator found and fixed a real undercounting bug in the
-"drawn" bout count — see "In flight" below, this supersedes the estimator
-entry beneath it.
+**Last updated:** 2026-08-07 — by Claude Code: the estimator's per-division
+breakdown now shows entry count and an estimated duration alongside the bout
+count (see "In flight" below).
+
+Previously, same day: in-browser verification of the kumite duration
+estimator found and fixed a real undercounting bug in the "drawn" bout count.
 
 Previously, same day: added a Withdraw action so a coordinator can pull an
 already-approved entry out of a bracket.
@@ -48,6 +50,47 @@ port; those have since been pushed.) Everything here is verified locally against
 a database, never against production data.
 
 ## In flight (uncommitted)
+
+**Estimator breakdown now shows entries and a per-division duration
+(2026-08-07).** Follow-up ask: the breakdown table only showed bout count per
+division; added entry count and an estimated duration alongside it.
+
+- `DivisionBoutBreakdown` (`frontend/src/lib/estimator.ts`) gained an
+  `entries` field — summed across weight classes the same way `bouts` already
+  is, in `deriveKumiteBoutBreakdown`. It reflects today's live entry count
+  regardless of `source` (drawn categories still report their real entry
+  count for `entries`, same as before for `bouts`).
+- New pure function `minutesForDivision(bouts, inputs)`: that division's own
+  bout time with the buffer applied, plus one changeover — deliberately
+  **not** divided across mats, since mat allocation is a shared, event-wide
+  resource (`estimateKumiteDuration`'s job), not a per-division one. Kept
+  separate from `estimateKumiteDuration` rather than folded into its return
+  value, so that function's existing signature/tests didn't need to change.
+- `Estimator.tsx`'s breakdown row now reads: division name → entries →
+  source badge → bouts → `≈ Xmin` (via `formatDuration(minutesForDivision(...))`),
+  with a tooltip on the duration explaining it isn't mat-divided.
+
+Files: `frontend/src/lib/estimator.ts`, `frontend/scripts/test-estimator.ts`,
+`frontend/src/pages/hub/Estimator.tsx`.
+
+### Verification (run 2026-08-07)
+
+`npx tsc --noEmit` clean. `npx tsx scripts/test-estimator.ts` — 6 new checks
+(`minutesForDivision`: buffer+changeover math, 0/negative bouts → 0, mat
+count doesn't affect a single division's duration, per-division minutes
+don't undershoot the pooled total; plus two `entries`-summation checks on the
+existing `deriveKumiteBoutBreakdown` fixtures), 40/40 total passing.
+
+In-browser: isolated backend (4099) + frontend (5174) against local
+Postgres, same real "Draw Engine Demo Event" data as the previous session's
+verification. F04 - Girls 10 (7 approved entries, a drawn bracket) rendered
+"7 entries · drawn · 6 bouts · ≈32min" — checked ≈32min by hand:
+`6 × 4 × 1.10 = 26.4`, `+ 5min changeover = 31.4`, `ceil = 32`. Matches
+exactly. Console clean apart from the already-documented benign pre-login
+`/auth/me` 401s. Did not re-verify the multi-row (drawn + estimated) layout
+in-browser this pass — the previous session's screenshot already confirmed
+that layout works, and this change only adds two columns to it, not new
+row-branching logic.
 
 **Kumite duration estimator, v1 (2026-08-07).** New "Estimator" tab in the
 event hub (`/hub/estimator`, admin or coordinator only — same `roles: ADMIN,

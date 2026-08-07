@@ -29,6 +29,7 @@ import {
   deriveKumiteBoutBreakdown,
   estimateKumiteDuration,
   formatDuration,
+  minutesForDivision,
   type EstimatorInputs,
   type KumiteCategoryData,
 } from "@/lib/estimator"
@@ -424,13 +425,16 @@ export default function Estimator() {
                   {visibleBreakdown.map((d) => (
                     <div
                       key={d.divisionId}
-                      className="flex items-center justify-between gap-3 rounded-md border px-3 py-2 text-sm"
+                      className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 rounded-md border px-3 py-2 text-sm"
                     >
                       <span className="min-w-0 flex-1 truncate">{d.divisionName}</span>
+                      <span className="w-20 shrink-0 text-right text-xs text-muted-foreground">
+                        {d.entries} entr{d.entries === 1 ? "y" : "ies"}
+                      </span>
                       <Badge
                         variant="outline"
                         className={cn(
-                          "font-normal text-[10px]",
+                          "shrink-0 font-normal text-[10px]",
                           d.source === "draw"
                             ? "border-belt-green/30 bg-belt-green/10 text-belt-green"
                             : d.source === "mixed"
@@ -447,8 +451,14 @@ export default function Estimator() {
                       >
                         {d.source === "draw" ? "drawn" : d.source === "mixed" ? "mixed" : "estimated"}
                       </Badge>
-                      <span className="w-16 text-right font-display tracking-wide">
+                      <span className="w-16 shrink-0 text-right font-display tracking-wide">
                         {d.bouts} bout{d.bouts === 1 ? "" : "s"}
+                      </span>
+                      <span
+                        className="w-20 shrink-0 text-right text-xs text-muted-foreground"
+                        title="This division's own bout time, buffer and one changeover included — not divided across mats"
+                      >
+                        ≈ {formatDuration(minutesForDivision(d.bouts, inputs))}
                       </span>
                     </div>
                   ))}

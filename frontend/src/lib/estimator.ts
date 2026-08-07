@@ -38,6 +38,8 @@ export interface DivisionBoutBreakdown {
   divisionName: string;
   /** Summed across every weight class in this division. */
   bouts: number;
+  /** APPROVED entries summed across every weight class in this division. */
+  entries: number;
   /**
    * "draw": every category in this division already has a generated draw —
    * `bouts` reflects the bracket's actual entry count, not necessarily
@@ -67,10 +69,15 @@ export function deriveKumiteBoutBreakdown(
     divisions.filter((d) => d.category === "KUMITE").map((d) => d.id),
   );
 
-  const byDivision = new Map<string, { bouts: number; hasDraw: boolean; hasEstimate: boolean }>();
+  const byDivision = new Map<
+    string,
+    { bouts: number; entries: number; hasDraw: boolean; hasEstimate: boolean }
+  >();
   for (const cat of categories) {
     if (!kumiteDivisionIds.has(cat.divisionId)) continue;
-    const bucket = byDivision.get(cat.divisionId) ?? { bouts: 0, hasDraw: false, hasEstimate: false };
+    const bucket =
+      byDivision.get(cat.divisionId) ?? { bouts: 0, entries: 0, hasDraw: false, hasEstimate: false };
+    bucket.entries += Math.max(0, cat.entryCount);
     if (cat.drawBoutCount !== null) {
       bucket.bouts += cat.drawBoutCount;
       bucket.hasDraw = true;
@@ -89,6 +96,7 @@ export function deriveKumiteBoutBreakdown(
         divisionId: d.id,
         divisionName: d.name,
         bouts: b.bouts,
+        entries: b.entries,
         source: (b.hasDraw && b.hasEstimate ? "mixed" : b.hasDraw ? "draw" : "entries") as
           | "draw"
           | "entries"
@@ -224,6 +232,21 @@ export function estimateKumiteDuration(
     totalMinutes,
     segments,
   };
+}
+
+/**
+ * How long one division's own bouts take, standalone — its bout time with the
+ * buffer applied, plus one changeover (whichever mat runs it pays that cost
+ * once). Deliberately NOT divided across mats: mat assignment is a shared,
+ * event-wide resource (estimateKumiteDuration's job), not a per-division one,
+ * so "this division takes 24 minutes" means 24 minutes of *someone's* mat
+ * time, not a wall-clock prediction for that division in isolation.
+ */
+export function minutesForDivision(bouts: number, inputs: EstimatorInputs): number {
+  if (bouts <= 0) return 0;
+  const boutMinutes =
+    bouts * Math.max(0, inputs.minutesPerBout) * (1 + Math.max(0, inputs.bufferPct) / 100);
+  return Math.ceil(boutMinutes + Math.max(0, inputs.changeoverMinutes));
 }
 
 export function formatDuration(totalMinutes: number): string {
