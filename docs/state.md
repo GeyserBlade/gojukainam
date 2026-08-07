@@ -4,9 +4,11 @@ This file is the handoff between coding agents. It describes what is in flight
 right now, not the permanent architecture (that's
 [`architecture.md`](architecture.md)).
 
-**Last updated:** 2026-08-07 — by Claude Code: added a Withdraw action so a
-coordinator can pull an already-approved entry out of a bracket (see
-"In flight" below).
+**Last updated:** 2026-08-07 — by Claude Code: added a kumite tournament
+duration estimator (v1) to the event hub (see "In flight" below).
+
+Previously, same day: added a Withdraw action so a coordinator can pull an
+already-approved entry out of a bracket.
 
 Previously, same day: a club-manager coordinator couldn't see Approve or
 Draws controls — two frontend pages checked `role` only and never the
@@ -44,6 +46,115 @@ port; those have since been pushed.) Everything here is verified locally against
 a database, never against production data.
 
 ## In flight (uncommitted)
+
+**Kumite duration estimator, v1 (2026-08-07).** New "Estimator" tab in the
+event hub (`/hub/estimator`, admin or coordinator only — same `roles: ADMIN,
+coordinator: true` gate as Setup). Gives one tuneable total-time number for a
+kumite day: user adjusts mats, minutes/bout, buffer%, changeover, lunch,
+ceremonies; bout counts are auto-derived from the event's real entries and
+draws. Not a timetable/running order — that's the natural v2 once this shape
+has been used for real. Kata is out of scope for v1 entirely.
+
+**Split into two pure functions on purpose** (`frontend/src/lib/estimator.ts`),
+both unit-tested (`frontend/scripts/test-estimator.ts`, `npx tsx
+scripts/test-estimator.ts` — no test framework on the frontend, this mirrors
+the backend's `scripts/test-*.ts` convention exactly, since none existed
+here either):
+
+- `deriveKumiteBoutBreakdown(divisions, categories)` — raw division/category
+  data in, a bout count per division out. Pure, no network calls, so it can be
+  tested with plain fixture objects instead of faking an event.
+- `estimateKumiteDuration(breakdown, inputs)` — the actual time math, named
+  explicitly in the request. Also pure, also fixture-tested.
+
+The page component (`frontend/src/pages/hub/Estimator.tsx`) is just data
+fetching (via the *existing* `getDivisions`/`listDrawCategories`/`getDraw`
+calls — no new backend endpoint) plus the form; it does none of the
+calculation itself.
+
+**The bout-count decision that mattered most: multi-weight-class divisions
+and repechage.** The brief's formula (`entries - 1` when no draw exists yet)
+is correct per-*category* (division × weight class), not per-*division* — a
+division with two weight classes runs as two independent brackets, so bouts
+must be summed per (division, weightClass) pair or a multi-weight-class
+division under- or over-counts. `deriveKumiteBoutBreakdown` does this
+grouping (matching exactly how `DrawService.list` already groups things
+server-side) and only aggregates up to the division level for display.
+
+Second, more consequential finding from actually verifying against
+`DrawService` as asked: **`entries - 1` undercounts once a draw exists**,
+because this app's `computeDrawState` (`backend/src/services/draw.service.ts`)
+generates a WKF double-repechage ladder for two bronze medals — real,
+fightable bouts among people already eliminated from the main bracket, not
+captured by the "every real bout eliminates one entrant" argument that makes
+`entries - 1` exact for the main bracket alone. Concretely: an 8-entry
+division has 7 main-bracket bouts but 9 total real bouts once its two
+repechage bronze-bouts are counted. There's no clean closed-form for the
+no-draw case without bye-aware bracket simulation (repechage bout count
+depends on *where* byes land, not just entry count), so v1 does the
+honest, low-risk thing instead of guessing: **use the real bout count
+(main + repechage, byes excluded — `bouts.filter(b => b.aka && b.ao).length`)
+for any category that already has a draw**, via a fan-out `getDraw` fetch
+over exactly the kumite categories with an existing draw (bounded by how many
+draws actually exist, often zero early in planning — no bulk endpoint
+needed). Categories without a draw still use `entries - 1`, now clearly
+labeled "estimated" (vs. "drawn"/"mixed") in the UI with a caveat that it's a
+floor, not a ceiling. This is disclosed, not silently absorbed — flagged
+here and directly in the breakdown table's caption.
+
+**One input added beyond the brief, off by default:** athlete check-in /
+warm-up buffer before the first bout. Real tournaments budget for it and the
+brief's list didn't include it — added as a toggle defaulting to *off* so it
+never silently inflates anyone's estimate; per the "flag it clearly" ask,
+it's labeled in the UI as an addition, not presented as if it were always
+part of the spec.
+
+**Other v1 decisions:**
+
+- "Divisions per mat" (for the changeover addition) counts *divisions*, not
+  weight-class categories, matching the brief's literal wording — only
+  divisions that actually produce a bout (excludes 0/1-entry divisions,
+  which have nothing to run).
+- The segmented bar's "bouts" and "buffer" slices are an exact integer
+  partition of `perMatBoutMinutes` (not two independently-rounded numbers),
+  so segments always sum to exactly `totalMinutes` — asserted directly in the
+  unit tests across several mat/buffer combinations, not just eyeballed.
+- Inputs are `useState`, not persisted — exactly as scoped. Reset-to-defaults
+  button included since there's nothing else to fall back on mid-session.
+- Answered the "no backend endpoint" constraint by reusing three already-
+  fetched query shapes rather than inventing a bundled summary route:
+  `["divisions", eventId]`, `["draw-categories", eventId]` (cache-shared with
+  `Draws.tsx`/`EntriesView.tsx`), and a small local
+  `["estimator-draw-bouts", eventId, drawIds]` query for the real-bout-count
+  fan-out.
+
+Files: `frontend/src/lib/estimator.ts` (new),
+`frontend/scripts/test-estimator.ts` (new),
+`frontend/src/pages/hub/Estimator.tsx` (new), `frontend/src/App.tsx`,
+`frontend/src/components/layout/EventHubLayout.tsx`.
+
+### Verification (run 2026-08-07)
+
+`backend` / `frontend`: `npx tsc --noEmit` both clean (the test script itself
+also checked in isolation with the same compiler flags, since `scripts/` sits
+outside both projects' `tsconfig.json` `include` — same as backend's
+`scripts/test-*.ts`). `npx tsx scripts/test-estimator.ts` — 34 checks, all
+passing: the worked example from the brief (10 bouts / 4min / 10% buffer / 2
+mats / 3 divisions → 92min, `1h 32min`), segment-sum-equals-total across six
+mat/buffer/toggle combinations, buffer=0% produces no buffer segment,
+mats ≤ 0 clamps to 1 rather than dividing by zero, ceiling actually rounds up,
+0-bout divisions excluded from the changeover count, `formatDuration` edge
+cases, and the `deriveKumiteBoutBreakdown` cases above (KATA exclusion,
+multi-weight-class summing, drawn-vs-estimated-vs-mixed sourcing, an
+untouched division still appearing at 0 bouts).
+
+**Not verified in-browser at all.** No dev server was exercised for this
+feature — the form rendering, the segmented bar's proportions, the "Refining
+drawn brackets…" loading flicker while `getDraw` calls resolve, and the tab's
+actual visibility to a real coordinator session are all unverified beyond
+`tsc` and the pure-function tests. Worth a real click-through, and worth
+sanity-checking the segment bar visually once there's an event with a mix of
+drawn and undrawn kumite divisions to look at.
 
 **Withdraw an approved entry (2026-08-07).** Follows directly from a codebase
 audit of "how do you fix an athlete entered in the wrong division after
