@@ -66,12 +66,19 @@ export async function deleteMat(matId: string): Promise<void> {
   await api.delete(`/run/mats/${matId}`)
 }
 
+// Assign a category's draw to a mat. Omit matOrder to append it to the end of
+// that mat's running order (the backend works out the next free slot).
 export async function assignDrawMat(
   drawId: string,
   matId: string | null,
   matOrder?: number | null,
 ): Promise<void> {
   await api.patch(`/run/draws/${drawId}/mat`, { matId, matOrder })
+}
+
+// Persist the running order of the categories on a mat (drawIds in order).
+export async function reorderMatCategories(matId: string, drawIds: string[]): Promise<void> {
+  await api.put(`/run/mats/${matId}/category-order`, { drawIds })
 }
 
 export async function setBoutMat(boutId: string, matId: string | null): Promise<void> {

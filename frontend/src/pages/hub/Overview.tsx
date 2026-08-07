@@ -40,8 +40,10 @@ const Stat = ({
 
 export default function Overview() {
   const { eventId, event } = useSelectedEvent()
-  const { role } = useAuth()
-  const isAdmin = role === "SUPERADMIN" || role === "ADMIN"
+  const { canManageEvent } = useAuth()
+  // Admin, or coordinator of this event — the public-board token route is
+  // requireEventManager, so a coordinator may turn their own board on and off.
+  const canManage = canManageEvent(eventId)
 
   const { data: r, isLoading } = useQuery({
     queryKey: ["event-readiness", eventId],
@@ -135,7 +137,7 @@ export default function Overview() {
         {r.divisions} division{r.divisions === 1 ? "" : "s"} configured.
       </p>
 
-      {isAdmin && event && <PublicBoardShare event={event} />}
+      {canManage && event && <PublicBoardShare event={event} />}
     </div>
   )
 }

@@ -4,10 +4,13 @@ This file is the handoff between coding agents. It describes what is in flight
 right now, not the permanent architecture (that's
 [`architecture.md`](architecture.md)).
 
-**Last updated:** 2026-08-07 — by Claude Code: the estimator now estimates
-WKF double-repechage bronze bouts instead of leaving them out entirely — a
-user check on a real 9-entry division (should be 10 bouts, was showing 8)
-turned out correct (see "In flight" below).
+**Last updated:** 2026-08-07 — by Claude Code: fixed the Run → Plan tab, where
+assigning categories to mats produced only order 0/1 and the mats showed
+nothing (see "In flight" below).
+
+Previously, same day: the estimator now estimates WKF double-repechage bronze
+bouts instead of leaving them out entirely — a user check on a real 9-entry
+division (should be 10 bouts, was showing 8) turned out correct.
 
 Previously, same day: the estimator's per-division breakdown now shows entry
 count and an estimated duration alongside the bout count.
@@ -54,6 +57,95 @@ port; those have since been pushed.) Everything here is verified locally against
 a database, never against production data.
 
 ## In flight (uncommitted)
+
+**Run → Plan tab: mat assignment actually works now (2026-08-07).**
+User report: "as i add categories to mats or floors, it shows either 1 or 0 as
+the order, and nothing shows under the specific mat." Both halves were real,
+and independent:
+
+- *Order was always 0.* `PlanTab` sent `matOrder: row.draw.matOrder ?? 0` on
+  assign, and `assignDrawMat` stored `data.matOrder ?? 0` — so every category
+  newly put on a mat landed on order 0 and nothing was ordered relative to
+  anything. The only way to change it was a `type="number"` input that fired a
+  mutation on **every keystroke** while being controlled off server state, so
+  the refetch clobbered the field mid-typing and you could never get past a
+  single digit. `assignDrawMat` now appends to the end of the mat
+  (`max(matOrder)+1`, self excluded, `nulls: "last"`), keeps the slot a draw
+  already has on that mat, and the number input is gone.
+- *Nothing showed under the mat.* The mats column rendered only the mat name
+  and its up/down/delete buttons — the assigned categories were never rendered
+  anywhere. Each mat card now lists its categories in running order (numbered,
+  with entry count and a lock marker) and they reorder by drag, matching the
+  dnd-kit pattern the Run tab already uses for bouts.
+
+New backend endpoint `PUT /api/run/mats/:matId/category-order` with
+`{ drawIds }` (`RunService.reorderMatDraws`) writes `matOrder = index`
+transactionally, mirroring the existing `reorderMatQueue` for bouts.
+
+Also fixed while in there: `createMat` picked `order = count(mats)`, so
+deleting a mat from the middle handed the next new mat an order that already
+existed, and the up/down swap between the two colliding mats did nothing. It
+now uses `max(order)+1`.
+
+Verified in the browser against the local DB with three seeded categories
+across two mats: assigning gave orders 0/1/2 (not 0/0/0), re-assigning to the
+same mat kept the slot, moving to another mat started at 0 there, and a drag
+reorder persisted through the new endpoint. Both projects `tsc --noEmit`
+clean. The seeded fixtures were deleted afterwards.
+
+**Run page honours the coordinator grant (2026-08-07).** The third and fourth
+pages with the `role`-only check that `state.md` records being fixed on
+Entries and Draws — `RunPage` and `ScoreboardPage` both computed
+`canManage = role === "ADMIN" || "SUPERADMIN"`, so a club-manager coordinator
+got a read-only Run/Check-in/Plan tab and "Only admins can operate the
+scoreboard", even though every mutating route behind them
+(`/api/run/*`, `/api/draws/:id/bouts/*`) already uses `requireEventManager`
+and would have accepted them. Both now use `canManageEvent(eventId)`.
+
+`ScoreboardPage` is reached by `drawId`, not through the hub's event
+selection, so it scores the grant against `draw.eventId` — which means the
+permission guard now has to wait for the draw query. Its guard order changed
+to loading → permission → bout-not-found, otherwise a coordinator got a flash
+of the denial screen on first render while `draw` was still undefined.
+
+Verified in the browser with a throwaway CLUB_MANAGER + `EventCoordinator`
+grant: on the granted event the Score/AKA/AO/Kiken/Move controls, the mat
+editor and the scoreboard console all appear, and a mat assignment PATCH came
+back 200. On an event without the grant the Plan tab stays read-only. Fixtures
+deleted afterwards.
+
+**Swept the rest of the frontend for the same bug (2026-08-07).** One more
+found and fixed: `hub/Overview.tsx` hid `PublicBoardShare` behind an `isAdmin`
+check, but `POST /events/:id/public-token` is `requireEventManager` — so a
+coordinator could not turn on the spectator board for their own event. Now
+`canManageEvent(eventId)`; verified 200 on the granted event and 403 on
+another, matching the new gate exactly.
+
+The remaining `role ===` checks were each checked against the route they
+front, and are **correct as they stand — do not "fix" them**:
+
+- `hub/Setup.tsx` `canAppoint` — coordinator appointment
+  (`POST/DELETE /events/:id/coordinators`) is deliberately
+  `requireRoles("SUPERADMIN","ADMIN")`; a coordinator appointing coordinators
+  would be an escalation. `GET /:id/coordinators` is `requireEventManager`, so
+  they correctly see the roster read-only.
+- `EventManagement.tsx` (entries board) — the entry routes are club-scoped,
+  not event-scoped: `POST/DELETE /entries` and `EntryService.updateStatus`
+  check `req.user.clubId`, and `assertRegistrationOpen` bypasses only for
+  ADMIN/SUPERADMIN. So `addBlocked = !isAdmin && !reg.open` and the admin-only
+  club switcher both mirror the server. Giving coordinators cross-club entry
+  creation is a **backend authorization decision**, not a frontend fix.
+- `Belts`, `Clubs`, `Users`, `Athlete*`, `Dashboard`, `Events` — global or
+  club-scoped, never event-scoped. Role is the right question there.
+
+Known rough edge, **not** a permission bug and left alone: in
+`EntriesView.tsx` a coordinator correctly receives every club's entries
+(`GET /entries` has an explicit coordinator branch) but the club filter is
+`isAdmin`-only, so they cannot narrow the list. Fixing it needs a backend
+change too — `GET /clubs` is `requireRoles("SUPERADMIN","ADMIN")`, so a
+coordinator cannot even fetch the club list.
+
+Previously, same day:
 
 **Estimator now estimates WKF double-repechage bronze bouts (2026-08-07).**
 User report: "for the boys 8-9 for instance there are 9 entries. this should
