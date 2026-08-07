@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, type Request } from "express";
 import { requireRoles } from "../utils/auth.js";
 import { requireEventManager } from "../utils/event-scope.js";
 import { EntryService } from "../services/entry.service.js";
@@ -8,6 +8,16 @@ import { getParam } from "../utils/params.js";
 import { DrawService } from "../services/draw.service.js";
 
 export const router = Router();
+
+// Handlers below catch expected {status, message} errors and respond directly
+// rather than calling next(err), so errorHandler's console.error never sees
+// them — Railway logs stayed empty for every 403/409/400 on this router.
+// Log here instead, at the point that has the request context.
+function logExpectedError(action: string, req: Request, err: { status: number; message: string }) {
+  console.warn(
+    `[entries:${action}] ${err.status} ${err.message} — user=${req.user?.id ?? "?"} role=${req.user?.role ?? "?"} clubId=${req.user?.clubId ?? "?"}`,
+  );
+}
 
 // list entries by event (club-scoped unless admin)
 router.get("/", requireRoles("CLUB_MANAGER", "COACH", "ADMIN", "SUPERADMIN"), validate(EventEntriesQuery, 'query'), async (req, res, next) => {
@@ -58,6 +68,7 @@ router.post("/", requireRoles("CLUB_MANAGER", "ADMIN", "SUPERADMIN"), validate(C
     res.status(201).json(row);
   } catch (err: any) {
     if (err.status && err.message) {
+      logExpectedError("create", req, err);
       return res.status(err.status).json({ error: err.message });
     }
     next(err);
@@ -77,6 +88,7 @@ router.post("/bulk-submit", requireRoles("CLUB_MANAGER", "COACH", "ADMIN", "SUPE
     res.json(result);
   } catch (err: any) {
     if (err.status && err.message) {
+      logExpectedError("bulk-submit", req, err);
       return res.status(err.status).json({ error: err.message });
     }
     next(err);
@@ -96,6 +108,7 @@ router.delete("/:id", requireRoles("CLUB_MANAGER", "ADMIN", "SUPERADMIN"), valid
     res.status(204).send();
   } catch (err: any) {
     if (err.status && err.message) {
+      logExpectedError("delete", req, err);
       return res.status(err.status).json({ error: err.message });
     }
     next(err);
@@ -116,6 +129,7 @@ router.put("/:id/status", requireRoles("CLUB_MANAGER", "COACH", "ADMIN", "SUPERA
     res.json(updated);
   } catch (err: any) {
     if (err.status && err.message) {
+      logExpectedError("update-status", req, err);
       return res.status(err.status).json({ error: err.message });
     }
     next(err);
@@ -129,6 +143,7 @@ router.put("/:id/seed", requireEventManager({ in: "lookup", key: "id", via: "ent
     res.json(row);
   } catch (err: any) {
     if (err.status && err.message) {
+      logExpectedError("set-seed", req, err);
       return res.status(err.status).json({ error: err.message });
     }
     next(err);

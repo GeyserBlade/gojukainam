@@ -408,13 +408,23 @@ const EventManagement = () => {
       confirmText: "Submit all",
     })
     if (!ok) return
-    const results = await Promise.allSettled(
-      drafts.map((e) => EntryService.updateStatus(e.id, "SUBMITTED")),
-    )
-    const failed = results.filter((r) => r.status === "rejected").length
-    queryClient.invalidateQueries({ queryKey: ["entries"] })
-    if (failed > 0) toast.error(`Submitted ${drafts.length - failed} · ${failed} failed`)
-    else toast.success(`Submitted ${drafts.length} entries`)
+    // One batched call instead of one request per draft: it's what the
+    // backend already exposes for this (`entry.service.ts` bulkSubmit, a
+    // single updateMany), and firing up to dozens of individual PUTs in
+    // parallel needlessly multiplied how many requests a large club's submit
+    // could throw at the API rate limiter in one burst.
+    try {
+      const { updatedCount } = await EntryService.bulkSubmit(
+        selectedEventId,
+        drafts.map((e) => e.id),
+      )
+      queryClient.invalidateQueries({ queryKey: ["entries"] })
+      const failed = drafts.length - updatedCount
+      if (failed > 0) toast.error(`Submitted ${updatedCount} · ${failed} failed`)
+      else toast.success(`Submitted ${updatedCount} entries`)
+    } catch (err) {
+      showApiError(err)
+    }
   }
 
   // Reset event-scoped state when event changes

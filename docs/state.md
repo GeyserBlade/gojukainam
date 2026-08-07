@@ -4,8 +4,11 @@ This file is the handoff between coding agents. It describes what is in flight
 right now, not the permanent architecture (that's
 [`architecture.md`](architecture.md)).
 
-**Last updated:** 2026-08-07 — by Claude Code: memoised DivisionBoard so the 48
-boards stop re-rendering on every keystroke and hover.
+**Last updated:** 2026-08-07 — by Claude Code: fixed the production "submit
+drafts" failure (Railway `trust proxy` was never set, see "In flight" below).
+
+Previously, same day: memoised DivisionBoard so the 48 boards stop
+re-rendering on every keystroke and hover.
 
 Previously, 2026-08-06: stopped the entries board reflowing under the pointer,
 which made the remove-entry "×" unclickable.
@@ -30,6 +33,67 @@ port; those have since been pushed.) Everything here is verified locally against
 a database, never against production data.
 
 ## In flight (uncommitted)
+
+**Production bug: Windhoek's 28-draft submit failed for every role
+(2026-08-07).** Reported on Railway: club manager, tournament organizer *and*
+the superadmin all got "Submitted 0 · 28 failed" trying to submit Windhoek's
+drafts on `/hub/entries`, while Khomasdal's club manager (fewer drafts)
+succeeded. All three roles failing ruled out a permissions bug — the admin
+path in `EntryService.updateStatus` skips every club/registration check.
+
+Root cause: `backend/src/server.ts` never called `app.set("trust proxy", ...)`.
+Railway terminates the connection and proxies to this process, so without that
+setting Express's `req.ip` is the proxy's own address for *every* request the
+app receives — not the real client. The two `express-rate-limit` limiters key
+on `req.ip` by default, so the 300-req/min `apiLimiter` was one shared budget
+for the entire app's traffic (every club, every role), not 300/min per client.
+Confirmed by reading the installed `express-rate-limit` v8 source directly
+(`node_modules/express-rate-limit/dist/index.cjs`): it also silently
+`console.error`s an `ERR_ERL_UNEXPECTED_X_FORWARDED_FOR` warning on *every*
+request in this state, without failing the request — worth searching Railway's
+existing logs for that string to confirm this was already happening in prod.
+
+Two compounding factors made Windhoek trip it and Khomasdal not: (1) the
+`/hub/entries` "submit all drafts" button fired one `PUT /:id/status` per
+draft via `Promise.allSettled` — 28 parallel requests for Windhoek instead of
+one — rather than using the `POST /entries/bulk-submit` route that already
+existed (and that the older `EntriesView.tsx` screen already used); (2) the
+budget being shared app-wide means unrelated concurrent traffic (75 athletes
+had just been entered) could exhaust it too.
+
+Four changes:
+
+1. `backend/src/server.ts` — `app.set("trust proxy", 1)` in production, so
+   `req.ip` reflects the real client via Railway's `X-Forwarded-For`.
+2. `backend/src/server.ts` — `apiLimiter` now has an explicit `handler` that
+   `console.warn`s the path/IP on a 429. Previously a rate-limit rejection left
+   *no* log line at all.
+3. `backend/src/routes/entries.ts` — the five handlers that catch
+   `{status, message}` errors and respond directly (never reaching
+   `errorHandler`'s `console.error`) now log via `logExpectedError` first.
+   Every expected 400/403/409 on this router was previously invisible in
+   Railway's logs, which is why there was nothing to look at after the
+   incident.
+4. `frontend/src/pages/EventManagement.tsx` — `handleSubmitAllDrafts` now
+   calls `EntryService.bulkSubmit(eventId, ids)` (one `updateMany`
+   transaction) instead of one `PUT /:id/status` per draft.
+
+### Verification (run 2026-08-07, against local Postgres)
+
+`backend` / `frontend`: `npx tsc --noEmit` both clean. Exercised the real
+`POST /entries/bulk-submit` route over HTTP against the seeded event's 11
+actual DRAFT entries (not synthetic ids) as SUPERADMIN: `{"updatedCount":11}`,
+matching. Reverted those 11 rows back to `DRAFT` afterward (direct `UPDATE`,
+since `PUT /:id/status` needs `id` in the body too — tripped on that revert
+before writing straight SQL) so the seed is unchanged.
+
+**Not verified against production or under real concurrent load** — the
+`trust proxy` fix only changes behavior when `NODE_ENV=production`, which
+local dev never sets, so the fix's actual effect (correct `req.ip`, no more
+shared rate-limit bucket) cannot be observed locally. What *is* verified
+locally is that neither change broke the endpoints. If the bug recurs after
+this deploys, the new logging (`[rate-limit] 429 ...` or `[entries:action]
+...` in Railway's logs) should say why in one line.
 
 **DivisionBoard is memoised (2026-08-07).** Follow-up to the reflow fix below,
 which left every one of the 48 boards re-rendering on each keystroke, filter

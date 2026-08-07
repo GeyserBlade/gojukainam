@@ -34,6 +34,16 @@ const { version: BACKEND_VERSION } = JSON.parse(
 
 const app = express();
 
+const IS_PRODUCTION = process.env.NODE_ENV === "production";
+
+// Railway sits in front of this process as a reverse proxy, so Express only
+// ever sees Railway's edge as the TCP peer, not the real client. Without this,
+// `req.ip` is the same for every request the whole app receives — the
+// rate limiters below then key on that one "IP", pooling every user's traffic
+// (all clubs, all roles) into a single shared budget instead of one per client.
+// `1` trusts exactly the first hop (Railway's proxy), not the whole chain.
+if (IS_PRODUCTION) app.set("trust proxy", 1);
+
 // Security headers
 app.use(helmet());
 
@@ -50,6 +60,12 @@ const apiLimiter = rateLimit({
   message: { error: "Too many requests, please slow down" },
   // The public spectator board has its own (more generous) limiter below.
   skip: (req) => req.path.startsWith("/public/"),
+  // The default handler just sends the 429 — nothing lands in the server
+  // logs, so a burst that trips this limiter is invisible after the fact.
+  handler: (req, res) => {
+    console.warn(`[rate-limit] 429 ip=${req.ip} ${req.method} ${req.path}`);
+    res.status(429).json({ error: "Too many requests, please slow down" });
+  },
 });
 app.use("/api", apiLimiter);
 
@@ -81,7 +97,6 @@ app.use("/api/public", publicLimiter);
 // Allow multiple origins for development (Vite dev server and serve)
 // In production (Railway), FRONTEND_URL will be set to the single production domain
 // In development, allow both dev server (5173) and production build (3000)
-const IS_PRODUCTION = process.env.NODE_ENV === "production";
 const ALLOWED_ORIGINS = IS_PRODUCTION && process.env.FRONTEND_URL
   ? [process.env.FRONTEND_URL]
   : ["http://localhost:5173", "http://localhost:5174", "http://localhost:3000"];
