@@ -534,3 +534,46 @@ export const RosterGapsQuery = z.object({
   clubId: z.string().min(1),
   asOf: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
 });
+
+// --- Competition reads (M8) ------------------------------------------------
+//
+// clubId is required on the entry-shaped queries and absent from the
+// result-shaped ones. That asymmetry is the scope rule made structural: a
+// caller cannot ask for another club's entries because there is nowhere to put
+// the club, and cannot accidentally club-scope a podium for the same reason.
+
+export const CompetitionEventsQuery = z.object({
+  clubId: z.string().min(1),
+  when: z.enum(["past", "upcoming", "all"]).optional(),
+  limit: z.coerce.number().int().min(1).max(50).optional(),
+  asOf: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+});
+
+export const CompetitionEventQuery = z.object({
+  clubId: z.string().min(1),
+  asOf: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+});
+
+export const CompetitionEntriesQuery = z.object({
+  clubId: z.string().min(1),
+  eventId: z.string().min(1).optional(),
+  athleteId: z.string().min(1).optional(),
+  status: z.enum(["DRAFT", "SUBMITTED", "APPROVED", "RETURNED"]).optional(),
+  limit: z.coerce.number().int().min(1).max(200).optional(),
+});
+
+export const CompetitionAthleteRecordQuery = z.object({
+  clubId: z.string().min(1),
+  athleteId: z.string().min(1),
+  eventId: z.string().min(1).optional(),
+  asOf: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+});
+
+export const CompetitionResultsQuery = z.object({
+  eventId: z.string().min(1),
+  /** Free text matched against the composed category label, all words must hit. */
+  q: z.string().trim().min(1).max(80).optional(),
+  type: z.enum(["KATA", "KUMITE"]).optional(),
+  gender: z.enum(["Male", "Female"]).optional(),
+  limit: z.coerce.number().int().min(1).max(80).optional(),
+});
