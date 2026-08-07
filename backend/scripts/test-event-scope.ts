@@ -93,6 +93,92 @@ async function main() {
     check("update config on A    -> 200", (await call("PUT", `/events/${granted.id}/config`, asCoordinator, { fees: {} })) === 200);
     check("create mat on A       -> 201", (await call("POST", `/run/mats`, asCoordinator, { eventId: granted.id, name: "Mat 1" })) === 201);
 
+    // ── A coordinator (still just CLUB_MANAGER at the base role) sees and
+    // acts on the whole event, not only their own club ─────────────────────
+    // Regression coverage for a real bug: a CLUB_MANAGER who is also this
+    // event's coordinator saw no Approve control and no Draws control in the
+    // UI, and the entries list endpoint independently forced clubId to the
+    // caller's own club regardless of the grant. Base role is unchanged here
+    // (still CLUB_MANAGER) — only the EventCoordinator row makes the
+    // difference, which is the shape this whole file is meant to guard.
+    console.log("\nCoordinator (role stays CLUB_MANAGER) can act event-wide:");
+    const belt = await prisma.belt.upsert({
+      where: { id: "__SCOPE_TEST_BELT__" },
+      update: {},
+      create: { id: "__SCOPE_TEST_BELT__", name: "White", order: 1 },
+    });
+    const clubA = await prisma.club.create({
+      data: { name: "__SCOPE_TEST_CLUB_A__", contactName: "n/a", email: "a@example.test" },
+    });
+    const clubB = await prisma.club.create({
+      data: { name: "__SCOPE_TEST_CLUB_B__", contactName: "n/a", email: "b@example.test" },
+    });
+    const division = await prisma.division.create({
+      data: {
+        eventId: granted.id,
+        key: "SCOPE_TEST_DIV",
+        name: "Scope Test Division",
+        minAge: 18,
+        maxAge: 99,
+        gender: "Male",
+        category: "KATA",
+      },
+    });
+    const athleteA = await prisma.athlete.create({
+      data: {
+        clubId: clubA.id, firstName: "Athlete", lastName: "A",
+        dob: new Date("2000-01-01"), gender: "Male", nationality: "NA", beltId: belt.id,
+      },
+    });
+    const athleteB = await prisma.athlete.create({
+      data: {
+        clubId: clubB.id, firstName: "Athlete", lastName: "B",
+        dob: new Date("2000-01-01"), gender: "Male", nationality: "NA", beltId: belt.id,
+      },
+    });
+    const entryA = await prisma.entry.create({
+      data: {
+        eventId: granted.id, clubId: clubA.id, athleteId: athleteA.id,
+        divisionId: division.id, entryType: "KATA", status: "SUBMITTED",
+      },
+    });
+    const entryB = await prisma.entry.create({
+      data: {
+        eventId: granted.id, clubId: clubB.id, athleteId: athleteB.id,
+        divisionId: division.id, entryType: "KATA", status: "SUBMITTED",
+      },
+    });
+
+    // The coordinator's dev-auth identity carries clubA — the bug this
+    // guards against is exactly "still scoped to own club despite the grant".
+    const asCoordinatorOfA = { ...asCoordinator, "x-club-id": clubA.id };
+
+    const entriesRes = await fetch(`${BASE}/entries?eventId=${granted.id}`, { headers: asCoordinatorOfA });
+    const entriesBody = entriesRes.ok ? ((await entriesRes.json()) as Array<{ id: string }>) : [];
+    const seenIds = new Set(entriesBody.map((e) => e.id));
+    check(
+      "entries list sees both clubs -> both present",
+      seenIds.has(entryA.id) && seenIds.has(entryB.id),
+      { status: entriesRes.status, seenIds: [...seenIds] },
+    );
+
+    const approveStatus = await call("POST", "/review/bulk", asCoordinatorOfA, {
+      eventId: granted.id,
+      ids: [entryA.id, entryB.id],
+      status: "APPROVED",
+    });
+    check("approve both clubs' entries -> 200", approveStatus === 200, { approveStatus });
+    const approvedCount = await prisma.entry.count({
+      where: { id: { in: [entryA.id, entryB.id] }, status: "APPROVED" },
+    });
+    check("both entries now APPROVED -> 2", approvedCount === 2, { approvedCount });
+
+    const drawStatus = await call("POST", "/draws", asCoordinatorOfA, {
+      eventId: granted.id,
+      divisionId: division.id,
+    });
+    check("create draw for the division -> 201", drawStatus === 201, { drawStatus });
+
     // ── 1. Cross-event: the same grant must not open event B ────────────────
     console.log("\nCross-event (grant is on A, request targets B):");
     check("review queue on B     -> 403", (await call("GET", `/review?eventId=${other.id}`, asCoordinator)) === 403);
@@ -152,6 +238,14 @@ async function main() {
     console.log("\nAfter revocation:");
     check("review queue on A     -> 403", (await call("GET", `/review?eventId=${granted.id}`, asCoordinator)) === 403);
   } finally {
+    // Entries have no cascade from Division/Club, so they must go before the
+    // division/event cleanup below or those deletes hit a live FK reference.
+    await prisma.entry.deleteMany({
+      where: { club: { name: { startsWith: "__SCOPE_TEST_CLUB_" } } },
+    });
+    await prisma.athlete.deleteMany({ where: { club: { name: { startsWith: "__SCOPE_TEST_CLUB_" } } } });
+    await prisma.club.deleteMany({ where: { name: { startsWith: "__SCOPE_TEST_CLUB_" } } });
+
     for (const id of [granted.id, other.id]) {
       await prisma.eventCoordinator.deleteMany({ where: { eventId: id } });
       await prisma.mat.deleteMany({ where: { eventId: id } });

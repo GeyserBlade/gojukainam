@@ -4,9 +4,12 @@ This file is the handoff between coding agents. It describes what is in flight
 right now, not the permanent architecture (that's
 [`architecture.md`](architecture.md)).
 
-**Last updated:** 2026-08-07 — by Claude Code: fixed the Railway build failing
-`tsc` with `TS2591: Cannot find name 'crypto'/'process'` (see "In flight"
-below).
+**Last updated:** 2026-08-07 — by Claude Code: a club-manager coordinator
+couldn't see Approve or Draws controls — two frontend pages checked `role`
+only and never the coordinator grant (see "In flight" below).
+
+Previously, same day: fixed the Railway build failing `tsc` with
+`TS2591: Cannot find name 'crypto'/'process'`.
 
 Previously, same day: fixed the production "submit drafts" failure (Railway
 `trust proxy` was never set).
@@ -37,6 +40,92 @@ port; those have since been pushed.) Everything here is verified locally against
 a database, never against production data.
 
 ## In flight (uncommitted)
+
+**Coordinator grant didn't reach Approve or Draws (2026-08-07).** Reported
+from production: the Windhoek club manager was appointed tournament
+coordinator for the event, but the UI showed no Approve control on `/hub/review`
+and no draw-management controls on `/hub/draws`. Correct as a plain club
+manager (that's the point of the grant model); wrong once the coordinator row
+existed.
+
+Checked the data first, since the fix branches completely differently
+depending on the answer: roles are **not** an array. `User.role` is a single
+`Role` enum column (`prisma/schema.prisma`), and a coordinator grant is a
+separate `EventCoordinator` row (`eventId`, `userId`) — it stacks on top of the
+base role rather than replacing anything. Confirmed `EventService.addCoordinator`
+/ `removeCoordinator` (`backend/src/services/event.service.ts`) only ever touch
+that join table, never `user.role` — so there was no bad data to repair and no
+one-off script needed. Once this fix deploys, the existing grant (assuming the
+"Coordinators" panel on `/hub/setup` shows the row — worth a quick look) takes
+effect immediately: `canManageEvent` is resolved live from `/auth/me` on every
+load, not cached in a JWT.
+
+The actual bug: the backend already had the right shape.
+`utils/event-scope.ts`'s `requireEventManager` (admin role OR coordinator grant
+on *this* event) already guarded every draw-mutating route and the
+`/review/bulk` approve/return route correctly — a coordinator could already do
+both by calling the API directly. Two places checked the wrong thing:
+
+- `frontend/src/pages/EntriesView.tsx` (`/hub/review`) computed
+  `isAdmin = role === "SUPERADMIN" || role === "ADMIN"` and gated Approve,
+  Return, the seed control, and entry selection on that — never on
+  `useAuth().canManageEvent(eventId)`, which already exists and already mirrors
+  the server guard (built for this exact purpose in the original coordinator
+  feature, see "Tournament coordinators" below — just not wired into this page).
+- `frontend/src/pages/Draws.tsx` had the identical pattern:
+  `canManage = role === "ADMIN" || role === "SUPERADMIN"`.
+- One real backend gap, not just a frontend one: `GET /api/entries`
+  (`backend/src/routes/entries.ts`) forced `clubId` to the caller's own club
+  for anyone who wasn't `isAdmin` by role, with no coordinator check at all —
+  so even after fixing the frontend, a coordinator's review queue would have
+  silently shown only their own club's entries instead of the whole event's.
+  This one wasn't behind `requireEventManager` (a 404-vs-403 guard is overkill
+  for a list endpoint's row-scoping), so it got its own inline
+  `isEventCoordinator` check.
+
+Fix: added `canReviewEvent = canManageEvent(selectedEventId)` in
+`EntriesView.tsx` (this already covers admins too — `canManageEvent` returns
+true for them regardless of event) and replaced every `isAdmin` that meant
+"can review" with it — Approve/Return buttons, the seed control, entry
+selectability, the one-click "Approve all", the bulk-action bar, the intro
+copy. Left `isAdmin` alone on the two things that are genuinely admin-only:
+the club-filter dropdown and its `listClubs()` query, because `GET /clubs` is
+itself `requireRoles("SUPERADMIN", "ADMIN")` — widening that is a separate
+authorization decision this bug didn't ask for. A coordinator instead always
+sees every club's entries with no filter UI (`filters.clubId` is `undefined`
+for them, not forced to their own club) — correct, since coordinating *is*
+seeing the whole event. Same `canManage = canManageEvent(eventId)` swap in
+`Draws.tsx`. Backend: `GET /entries` now only forces `effectiveClubId` to the
+caller's own club when they are neither admin nor a coordinator of the
+requested `eventId`.
+
+**Regression test, not just a manual check:** extended
+`scripts/test-event-scope.ts` (real HTTP against local Postgres) with a
+section that creates two clubs, one division, one entry per club on the
+already-granted test event, then as the coordinator (still base role
+`CLUB_MANAGER`, `x-club-id` set to only one of the two clubs): asserts
+`GET /entries` returns both clubs' entries, `POST /review/bulk` approves both,
+and `POST /draws` creates a draw from them. Verified this actually catches the
+bug, not just passes trivially: reverted `entries.ts` alone (`git stash push --
+src/routes/entries.ts`), re-ran against an isolated local instance —
+`entries list sees both clubs` failed with `seenIds` containing only one id —
+then restored the fix and re-ran clean.
+
+### Verification (run 2026-08-07)
+
+`backend` / `frontend`: `npx tsc --noEmit` both clean. Ran both integration
+scripts over real HTTP against local Postgres on an isolated instance (port
+4099, so as not to disturb another session's dev server on 4000):
+`scripts/test-event-scope.ts` — 29 checks, all passing (25 pre-existing + 4
+new); `scripts/test-draws.ts` — all passing, unaffected. Confirmed the new
+checks are a real regression test (see above), not just green by construction.
+
+**Not verified in-browser.** The fix is small and the same
+`canManageEvent`/`role` values are already exercised in-browser for the Entry
+Management page and `EventHubLayout`'s tab visibility (see "Tournament
+coordinators" below) — but nobody has clicked Approve or Generate Draw as a
+real coordinator session in a browser. Worth a look on staging with the
+Windhoek account, or any coordinator login, before fully trusting this.
 
 **Railway build broken: `tsc` failing with `TS2591` on Node globals
 (2026-08-07).** Reported from a Railway deploy: `backend/src/lib/storage.ts`

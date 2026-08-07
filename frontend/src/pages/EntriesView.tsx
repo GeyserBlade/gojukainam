@@ -153,7 +153,7 @@ const EntryRow = ({
   onApprove,
   onReturn,
   onSetSeed,
-  isAdmin,
+  canReviewEvent,
   isClub,
   busy,
   submitDisabled,
@@ -166,7 +166,8 @@ const EntryRow = ({
   onApprove: () => void
   onReturn: () => void
   onSetSeed: (seed: number | null) => void
-  isAdmin: boolean
+  /** Admin, or coordinator of the event this entry belongs to. */
+  canReviewEvent: boolean
   isClub: boolean
   busy: boolean
   submitDisabled?: boolean
@@ -174,7 +175,7 @@ const EntryRow = ({
   const isTeam = entry.entryType === "TEAM_KATA" || entry.entryType === "TEAM_KUMITE"
   const cat = entry.division.category
   const canSubmit = isClub && (entry.status === "DRAFT" || entry.status === "RETURNED")
-  const canReview = isAdmin && entry.status === "SUBMITTED"
+  const canReview = canReviewEvent && entry.status === "SUBMITTED"
 
   return (
     <Card className={cn(selected && "border-primary/50 ring-1 ring-primary/30")}>
@@ -237,7 +238,7 @@ const EntryRow = ({
           </div>
           <div className="flex flex-col items-end gap-2">
             <StatusBadge status={entry.status} />
-            {isAdmin && entry.status !== "RETURNED" && (
+            {canReviewEvent && entry.status !== "RETURNED" && (
               <SeedSelect entry={entry} disabled={busy} onChange={onSetSeed} />
             )}
             {canSubmit && (
@@ -289,7 +290,7 @@ const EntryRow = ({
 }
 
 const EntriesView = () => {
-  const { role, clubId } = useAuth()
+  const { role, clubId, canManageEvent } = useAuth()
   const queryClient = useQueryClient()
   const toast = useToast()
   const showApiError = useApiErrorToast()
@@ -298,6 +299,11 @@ const EntriesView = () => {
   const isClub = role === "CLUB_MANAGER" || role === "COACH"
 
   const { eventId: selectedEventId, event: selectedEvent } = useSelectedEvent()
+
+  // Review/approve/return/seed is an admin power, or a coordinator's for the
+  // event they were granted — canManageEvent already covers admins too, this
+  // separate name is just for readability at each call site below.
+  const canReviewEvent = canManageEvent(selectedEventId)
 
   // Clubs can only submit while registration is open; admins bypass it.
   const reg = registrationState(selectedEvent)
@@ -330,7 +336,10 @@ const EntriesView = () => {
 
   const filters: EntryFilters = {
     eventId: selectedEventId,
-    clubId: isAdmin ? filterClubId || undefined : clubId || undefined,
+    // Admins get the club-filter dropdown below; a coordinator has no such
+    // control but must still see every club's entries for the event they
+    // coordinate, not just their own — so "no filter" rather than own-club.
+    clubId: isAdmin ? filterClubId || undefined : canReviewEvent ? undefined : clubId || undefined,
     divisionId: filterDivisionId || undefined,
     status: filterStatus !== "ALL" ? (filterStatus as EntryFilters["status"]) : undefined,
     entryType:
@@ -345,17 +354,16 @@ const EntriesView = () => {
   })
 
   // Whether the current user can act on an entry (and therefore select it).
+  // Not mutually exclusive: a club-manager coordinator can both submit their
+  // own club's drafts and review everyone's submitted entries.
   const canSelect = (entry: Entry) =>
-    isClub
-      ? entry.status === "DRAFT" || entry.status === "RETURNED"
-      : isAdmin
-      ? entry.status === "SUBMITTED"
-      : false
+    (isClub && (entry.status === "DRAFT" || entry.status === "RETURNED")) ||
+    (canReviewEvent && entry.status === "SUBMITTED")
 
   const selectableIds = useMemo(
     () => entries.filter(canSelect).map((e) => e.id),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [entries, isAdmin, isClub],
+    [entries, canReviewEvent, isClub],
   )
 
   // Clear selection whenever the working set changes.
@@ -573,7 +581,7 @@ const EntriesView = () => {
       <div className="mb-4">
         <h2 className="font-display text-xl tracking-wide sm:text-2xl">Review entries</h2>
         <p className="text-sm text-muted-foreground mt-1">
-          {isAdmin
+          {canReviewEvent
             ? "Review, approve or return entries across all clubs."
             : "Review and submit your club's entries for approval."}
         </p>
@@ -627,7 +635,7 @@ const EntriesView = () => {
           </div>
 
           {/* One-click shortcuts */}
-          {(isClub && submittableCount > 0) || (isAdmin && pendingCount > 0) ? (
+          {(isClub && submittableCount > 0) || (canReviewEvent && pendingCount > 0) ? (
             <div className="mb-4 flex flex-wrap gap-2">
               {isClub && submittableCount > 0 && (
                 <Button
@@ -646,7 +654,7 @@ const EntriesView = () => {
                   Submit all drafts ({submittableCount})
                 </Button>
               )}
-              {isAdmin && pendingCount > 0 && (
+              {canReviewEvent && pendingCount > 0 && (
                 <Button size="sm" onClick={handleApproveAll} disabled={acting}>
                   <Check />
                   Approve all pending ({pendingCount})
@@ -859,7 +867,7 @@ const EntriesView = () => {
                               onApprove={() => runApprove([entry.id])}
                               onReturn={() => openReturnDialog([entry.id])}
                               onSetSeed={(seed) => runSetSeed(entry.id, seed)}
-                              isAdmin={isAdmin}
+                              canReviewEvent={canReviewEvent}
                               isClub={isClub}
                               busy={acting}
                               submitDisabled={submitBlocked}
@@ -894,7 +902,7 @@ const EntriesView = () => {
                     <TableHead>Category</TableHead>
                     <TableHead className="hidden lg:table-cell">Type</TableHead>
                     <TableHead className="hidden xl:table-cell">Weight</TableHead>
-                    {isAdmin && <TableHead className="hidden lg:table-cell">Seed</TableHead>}
+                    {canReviewEvent && <TableHead className="hidden lg:table-cell">Seed</TableHead>}
                     <TableHead>Status</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
@@ -906,7 +914,7 @@ const EntriesView = () => {
                     const selectable = canSelect(entry)
                     const canSubmit =
                       isClub && (entry.status === "DRAFT" || entry.status === "RETURNED")
-                    const canReview = isAdmin && entry.status === "SUBMITTED"
+                    const canReview = canReviewEvent && entry.status === "SUBMITTED"
                     return (
                       <TableRow
                         key={entry.id}
@@ -956,7 +964,7 @@ const EntriesView = () => {
                         <TableCell className="hidden xl:table-cell text-muted-foreground">
                           {entry.weightClass?.name || "—"}
                         </TableCell>
-                        {isAdmin && (
+                        {canReviewEvent && (
                           <TableCell className="hidden lg:table-cell">
                             {entry.status === "RETURNED" ? (
                               <span className="text-muted-foreground">—</span>
@@ -1048,7 +1056,7 @@ const EntriesView = () => {
                   Submit selected
                 </Button>
               )}
-              {isAdmin && (
+              {canReviewEvent && (
                 <>
                   <Button
                     size="sm"

@@ -1,6 +1,6 @@
 import { Router, type Request } from "express";
 import { requireRoles } from "../utils/auth.js";
-import { requireEventManager } from "../utils/event-scope.js";
+import { requireEventManager, isEventCoordinator } from "../utils/event-scope.js";
 import { EntryService } from "../services/entry.service.js";
 import { validate, validateMultiple } from "../middleware/validate.js";
 import { CreateEntry, UpdateEntryStatus, EventEntriesQuery, IdParam, BulkSubmitEntries, SetEntrySeed } from "../utils/validators.js";
@@ -19,7 +19,7 @@ function logExpectedError(action: string, req: Request, err: { status: number; m
   );
 }
 
-// list entries by event (club-scoped unless admin)
+// list entries by event (club-scoped unless admin or coordinator of this event)
 router.get("/", requireRoles("CLUB_MANAGER", "COACH", "ADMIN", "SUPERADMIN"), validate(EventEntriesQuery, 'query'), async (req, res, next) => {
   try {
     const { eventId, clubId, divisionId, status, entryType, searchQuery } = req.query as {
@@ -32,9 +32,13 @@ router.get("/", requireRoles("CLUB_MANAGER", "COACH", "ADMIN", "SUPERADMIN"), va
     };
 
     const isAdmin = req.user?.role === "SUPERADMIN" || req.user?.role === "ADMIN";
+    // A coordinator of this event reviews every club's entries, same as an
+    // admin — this mirrors requireEventManager, just read-only, so it isn't
+    // worth the guard's 404-vs-403 machinery for a list endpoint.
+    const isCoordinator = !isAdmin && !!req.user && (await isEventCoordinator(req.user.id, eventId));
     let effectiveClubId = clubId;
 
-    if (!isAdmin) {
+    if (!isAdmin && !isCoordinator) {
       if (!req.user?.clubId) {
         return res.status(400).json({ error: "clubId missing for scoped request" });
       }

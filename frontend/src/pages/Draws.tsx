@@ -128,16 +128,18 @@ const CategoryCard = ({
 )
 
 export default function DrawsPage() {
-  const { role } = useAuth()
+  const { canManageEvent } = useAuth()
   const navigate = useNavigate()
   const toast = useToast()
   const apiError = useApiErrorToast()
   const confirm = useConfirm()
   const queryClient = useQueryClient()
 
-  const canManage = role === "ADMIN" || role === "SUPERADMIN"
-
   const { eventId } = useSelectedEvent()
+
+  // Admin, or coordinator of the selected event — mirrors the backend's
+  // requireEventManager on every draw-mutating route.
+  const canManage = canManageEvent(eventId)
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
 
   // Reset the selected category when the hub switches events.
