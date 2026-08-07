@@ -10,6 +10,7 @@ import {
   AssignDrawMat,
   SetBoutMat,
   ReorderMatQueue,
+  ReorderMatDraws,
   SetCheckIn,
 } from "../utils/validators.js";
 import { getParam } from "../utils/params.js";
@@ -77,6 +78,14 @@ router.patch("/bouts/:boutId/mat", requireEventManager({ in: "lookup", key: "bou
 router.put("/mats/:matId/order", requireEventManager({ in: "lookup", key: "matId", via: "mat" }), validate(ReorderMatQueue), async (req, res, next) => {
   try {
     const row = await RunService.reorderMatQueue(getParam(req.params.matId), req.body.boutIds, { id: req.user!.id });
+    res.json(row);
+  } catch (err: any) { handle(res, next, err); }
+});
+
+// Persist the running order of the categories assigned to a mat
+router.put("/mats/:matId/category-order", requireEventManager({ in: "lookup", key: "matId", via: "mat" }), validate(ReorderMatDraws), async (req, res, next) => {
+  try {
+    const row = await RunService.reorderMatDraws(getParam(req.params.matId), req.body.drawIds, { id: req.user!.id });
     res.json(row);
   } catch (err: any) { handle(res, next, err); }
 });

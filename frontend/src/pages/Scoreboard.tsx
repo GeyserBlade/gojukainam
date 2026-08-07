@@ -192,16 +192,20 @@ const SidePanel = ({
 export default function ScoreboardPage() {
   const { drawId, boutId } = useParams<{ drawId: string; boutId: string }>()
   const navigate = useNavigate()
-  const { role } = useAuth()
+  const { canManageEvent } = useAuth()
   const toast = useToast()
   const apiError = useApiErrorToast()
-  const canManage = role === "ADMIN" || role === "SUPERADMIN"
 
   const { data: draw } = useQuery({
     queryKey: ["draw", drawId],
     queryFn: () => getDraw(drawId!),
     enabled: !!drawId,
   })
+
+  // Scored off the draw's own event, not the hub selection: this page is opened
+  // by drawId from the Run tab, so a coordinator must be judged against the
+  // event that draw belongs to. Mirrors requireEventManager on the score routes.
+  const canManage = canManageEvent(draw?.eventId)
   const bout: DrawBout | undefined = useMemo(
     () => draw?.bouts.find((b) => b.id === boutId),
     [draw, boutId],
@@ -484,27 +488,29 @@ export default function ScoreboardPage() {
   }
 
   // -- guards -----------------------------------------------------------------
-  if (!canManage) {
+  // The permission check needs the draw's eventId, so it waits for the load
+  // rather than flashing a denial at a coordinator on the first render.
+  if (!draw) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-zinc-950 text-white">
-        <p>Only admins can operate the scoreboard.</p>
+      <div className="flex min-h-screen items-center justify-center bg-zinc-950 text-white/70">
+        Loading bout…
       </div>
     )
   }
-  if (draw && !bout) {
+  if (!canManage) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-zinc-950 text-white">
+        <p>Only admins and this event's coordinators can operate the scoreboard.</p>
+      </div>
+    )
+  }
+  if (!bout) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-3 bg-zinc-950 text-white">
         <p>Bout not found in this draw.</p>
         <Button variant="secondary" onClick={() => navigate("/draws")}>
           <ArrowLeft className="h-4 w-4" /> Back to draws
         </Button>
-      </div>
-    )
-  }
-  if (!draw || !bout) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-zinc-950 text-white/70">
-        Loading bout…
       </div>
     )
   }

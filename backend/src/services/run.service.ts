@@ -139,9 +139,20 @@ export class RunService {
   }
 
   static async createMat(data: { eventId: string; name: string; order?: number }) {
-    const count = await prisma.mat.count({ where: { eventId: data.eventId } });
+    // max(order)+1, not count(): after deleting a mat from the middle, count()
+    // hands the new mat an order that already exists, and two mats sharing an
+    // order makes the up/down swap on the Plan tab a no-op.
+    const last = await prisma.mat.findFirst({
+      where: { eventId: data.eventId },
+      orderBy: { order: "desc" },
+      select: { order: true },
+    });
     return prisma.mat.create({
-      data: { eventId: data.eventId, name: data.name, order: data.order ?? count },
+      data: {
+        eventId: data.eventId,
+        name: data.name,
+        order: data.order ?? (last?.order ?? -1) + 1,
+      },
     });
   }
 
@@ -171,9 +182,29 @@ export class RunService {
       if (!mat || mat.eventId !== draw.eventId)
         throw { status: 404, message: "Mat not found for this event" };
     }
+    // Position within the mat. An explicit matOrder wins; a draw already on
+    // this mat keeps the slot it has; anything newly assigned goes to the end
+    // of the queue. Defaulting to 0 (the old behaviour) gave every category on
+    // a mat the same order, so nothing was actually ordered.
+    let matOrder: number | null = null;
+    if (data.matId) {
+      if (data.matOrder != null) {
+        matOrder = data.matOrder;
+      } else if (draw.matId === data.matId && draw.matOrder != null) {
+        matOrder = draw.matOrder;
+      } else {
+        const last = await prisma.draw.findFirst({
+          where: { matId: data.matId, id: { not: drawId } },
+          orderBy: { matOrder: { sort: "desc", nulls: "last" } },
+          select: { matOrder: true },
+        });
+        matOrder = (last?.matOrder ?? -1) + 1;
+      }
+    }
+
     const updated = await prisma.draw.update({
       where: { id: drawId },
-      data: { matId: data.matId, matOrder: data.matId ? data.matOrder ?? 0 : null },
+      data: { matId: data.matId, matOrder },
     });
     await prisma.auditLog.create({
       data: {
@@ -181,10 +212,49 @@ export class RunService {
         entityType: "Draw",
         entityId: drawId,
         action: "ASSIGN_MAT",
-        diffJson: JSON.stringify({ matId: data.matId, matOrder: data.matOrder }),
+        diffJson: JSON.stringify({ matId: data.matId, matOrder }),
       },
     });
     return updated;
+  }
+
+  /**
+   * Persist the running order of the categories on a mat: matOrder = index for
+   * each draw in the given order. Draws must belong to the mat's event, and are
+   * moved onto the mat if they were not already on it.
+   */
+  static async reorderMatDraws(matId: string, drawIds: string[], user: { id: string }) {
+    const mat = await prisma.mat.findUnique({ where: { id: matId } });
+    if (!mat) throw { status: 404, message: "Mat not found" };
+
+    const draws = await prisma.draw.findMany({
+      where: { id: { in: drawIds } },
+      select: { id: true, eventId: true },
+    });
+    const byId = new Map(draws.map((d) => [d.id, d]));
+    for (const id of drawIds) {
+      const draw = byId.get(id);
+      if (!draw) throw { status: 404, message: "Draw not found" };
+      if (draw.eventId !== mat.eventId)
+        throw { status: 400, message: "Draw does not belong to this mat's event" };
+    }
+
+    await prisma.$transaction([
+      ...drawIds.map((id, index) =>
+        prisma.draw.update({ where: { id }, data: { matId, matOrder: index } }),
+      ),
+      prisma.auditLog.create({
+        data: {
+          userId: user.id,
+          entityType: "Mat",
+          entityId: matId,
+          action: "REORDER_CATEGORIES",
+          diffJson: JSON.stringify({ drawIds }),
+        },
+      }),
+    ]);
+
+    return { updatedCount: drawIds.length };
   }
 
   static async setBoutMat(boutId: string, matId: string | null, user: { id: string }) {
