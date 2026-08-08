@@ -4,10 +4,13 @@ This file is the handoff between coding agents. It describes what is in flight
 right now, not the permanent architecture (that's
 [`architecture.md`](architecture.md)).
 
-**Last updated:** 2026-08-08 — by Claude Code: added a standalone practice /
+**Last updated:** 2026-08-08 — by Claude Code: added ±1 second clock
+adjustment buttons next to the existing ±10s, for fine correction when a
+timekeeper lets the clock run a couple seconds long (see "In flight" below).
+
+Previously, same day: added a standalone practice /
 ad-hoc bout scoreboard (no persistence) under the event hub, reusing the real
-live scoreboard's scoring engine via a new shared `BoutScoreboard` component
-(see "In flight" below).
+live scoreboard's scoring engine via a new shared `BoutScoreboard` component.
 
 Previously, same day: the live scoreboard now allows scoring for a short
 window after the bout clock expires, instead of locking out scoring the
@@ -65,6 +68,41 @@ port; those have since been pushed.) Everything here is verified locally against
 a database, never against production data.
 
 ## In flight (uncommitted)
+
+**±1 second clock adjustment (2026-08-08).**
+Real-world case: the timekeeper forgets to stop the clock or lets it run a
+couple seconds too long and needs a fine correction — the existing ±10s step
+is too coarse for that. Added `-1s`/`+1s` buttons next to the existing
+`-10s`/`+10s` in `components/scoreboard/BoutScoreboard.tsx`, calling the same
+`adjustClock(deltaMs)` closure with `±1_000` instead of `±10_000` — no new
+logic, `adjustClock` already generically clamps to `[0, durationMs]` and
+re-arms the atoshi-baraku/end signals for any delta. Same gating as the
+existing ±10s buttons (`saving || state.ended !== null || clockMs === 0` —
+notably *not* gated on `running`, matching the pre-existing behavior that
+these buttons work whether the clock is ticking or stopped). Visually
+grouped the four buttons (plus Hajime/Yame) under a small "Adjust clock"
+label and a two-row layout (±10s flanking Hajime/Yame as before, ±1s as a
+smaller row beneath) instead of leaving four disconnected buttons. Since
+this feature applies to `BoutScoreboard.tsx` directly, it's automatically
+live on both the real-bout Scoreboard and the Practice tab — nothing forked.
+
+No backend change (clock adjustments are ephemeral client state, same as
+before). `adjustClock` is a component-internal closure, not an exported pure
+function in `lib/scoreboard.ts`, so the pre-existing ±10s behavior was never
+covered by `test-scoreboard.ts`; nothing to mirror for ±1s either.
+
+Files: `frontend/src/components/scoreboard/BoutScoreboard.tsx`.
+
+### Verification (run 2026-08-08)
+
+`frontend`: `npx tsc --noEmit` clean. `npx tsx scripts/test-scoreboard.ts` —
+all 30 existing checks still pass (this change touches only component JSX/
+button wiring, not `lib/scoreboard.ts`).
+
+**Not verified in-browser** — not exercised in a running dev server this
+round. In particular unverified: the new buttons' visual grouping/spacing
+in the centre column, and that ±1s actually nudges the displayed clock and
+re-arms the atoshi/end signals correctly at the boundary.
 
 **Standalone practice / ad-hoc bout scoreboard (2026-08-08).**
 Request: a blank AKA vs AO bout under the event hub for practice/exhibition/

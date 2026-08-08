@@ -655,39 +655,66 @@ export function BoutScoreboard({
             </div>
           )}
 
-          <div className="flex items-center gap-2">
-            <Button
-              variant="secondary"
-              size="icon"
-              className="bg-white/10 text-white hover:bg-white/25"
-              disabled={saving || state.ended !== null || clockMs === 0}
-              onClick={() => adjustClock(-10_000)}
-              title="-10 seconds"
-            >
-              <Minus className="h-4 w-4" />
-            </Button>
-            <Button
-              size="lg"
-              className={cn(
-                "h-16 w-32 text-lg",
-                running ? "bg-amber-500 hover:bg-amber-600" : "bg-emerald-600 hover:bg-emerald-700",
-              )}
-              disabled={saving || state.ended !== null || clockMs === 0}
-              onClick={() => setRunning((r) => !r)}
-            >
-              {running ? <Pause className="h-6 w-6" /> : <Play className="h-6 w-6" />}
-              {running ? "Yame" : "Hajime"}
-            </Button>
-            <Button
-              variant="secondary"
-              size="icon"
-              className="bg-white/10 text-white hover:bg-white/25"
-              disabled={saving || state.ended !== null || clockMs === 0}
-              onClick={() => adjustClock(10_000)}
-              title="+10 seconds"
-            >
-              <Plus className="h-4 w-4" />
-            </Button>
+          <div className="flex flex-col items-center gap-1">
+            <p className="text-[9px] font-semibold uppercase tracking-widest text-white/30">
+              Adjust clock
+            </p>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="secondary"
+                size="icon"
+                className="bg-white/10 text-white hover:bg-white/25"
+                disabled={saving || state.ended !== null || clockMs === 0}
+                onClick={() => adjustClock(-10_000)}
+                title="-10 seconds"
+              >
+                <Minus className="h-4 w-4" />
+              </Button>
+              <Button
+                size="lg"
+                className={cn(
+                  "h-16 w-32 text-lg",
+                  running ? "bg-amber-500 hover:bg-amber-600" : "bg-emerald-600 hover:bg-emerald-700",
+                )}
+                disabled={saving || state.ended !== null || clockMs === 0}
+                onClick={() => setRunning((r) => !r)}
+              >
+                {running ? <Pause className="h-6 w-6" /> : <Play className="h-6 w-6" />}
+                {running ? "Yame" : "Hajime"}
+              </Button>
+              <Button
+                variant="secondary"
+                size="icon"
+                className="bg-white/10 text-white hover:bg-white/25"
+                disabled={saving || state.ended !== null || clockMs === 0}
+                onClick={() => adjustClock(10_000)}
+                title="+10 seconds"
+              >
+                <Plus className="h-4 w-4" />
+              </Button>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 px-2 text-[11px] text-white/60 hover:bg-white/10 hover:text-white"
+                disabled={saving || state.ended !== null || clockMs === 0}
+                onClick={() => adjustClock(-1_000)}
+                title="-1 second"
+              >
+                -1s
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 px-2 text-[11px] text-white/60 hover:bg-white/10 hover:text-white"
+                disabled={saving || state.ended !== null || clockMs === 0}
+                onClick={() => adjustClock(1_000)}
+                title="+1 second"
+              >
+                +1s
+              </Button>
+            </div>
           </div>
 
           <div className="flex items-center gap-2">
