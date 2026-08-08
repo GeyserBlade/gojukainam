@@ -185,3 +185,27 @@ export async function setDrawLock(id: string, locked: boolean): Promise<DrawDeta
 export async function deleteDraw(id: string): Promise<void> {
   await api.delete(`/draws/${id}`);
 }
+
+// ---------------------------------------------------------------------------
+// Podium: "is this bout the final" / "are both bronze medals decided" — pure,
+// derived entirely from bracket structure already on DrawDetail. No new
+// backend logic: the final's round is always log2(size), and
+// draw.placements.thirds already only fills in an entry once that side of
+// the repechage ladder is fully resolved (see DrawService.computeDrawState).
+
+/** The single MAIN-bracket bout in the last round — its winner takes gold. */
+export function isFinalBout(draw: DrawDetail, bout: Pick<DrawBout, "phase" | "round">): boolean {
+  return bout.phase === "MAIN" && bout.round === Math.log2(draw.size);
+}
+
+/**
+ * Both bronze-medal bouts' winners, or null while either side of the
+ * repechage ladder is still undecided. Order is arbitrary (bracket-half
+ * order, not seed order) — callers that care about display order should
+ * not assume anything beyond "both medalists, unordered".
+ */
+export function finalBronzeMedalists(draw: DrawDetail): [DrawEntrySummary, DrawEntrySummary] | null {
+  const { thirds } = draw.placements;
+  if (thirds.length < 2) return null;
+  return [thirds[0], thirds[1]];
+}

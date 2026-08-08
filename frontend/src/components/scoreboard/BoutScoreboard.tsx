@@ -26,6 +26,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { cn } from "@/lib/utils"
+import { PodiumBanner } from "@/components/scoreboard/PodiumBanner"
 import {
   CHANNEL_NAME,
   DURATION_PRESETS,
@@ -54,6 +55,7 @@ import {
   type ChannelMessage,
   type DisplayPayload,
   type Outcome,
+  type PodiumMedalist,
   type ScoreKind,
   type ScoreboardSettings,
   type Side,
@@ -239,6 +241,15 @@ export interface BoutScoreboardProps {
    * not a live score feed — omit for bouts with nothing to ping (practice).
    */
   onBoutStarted?: () => void
+  /**
+   * Both bronze medalists, present only when this bout is the tournament
+   * final and both repechage bronze bouts are already decided elsewhere in
+   * the bracket. Gold/silver are filled in here from this bout's own live
+   * resolution (winnerSide + aka/ao identity) — not from anything saved —
+   * so the podium can appear the instant a winner is known, before Save is
+   * even clicked. Omit for practice bouts (no bracket to be a final of).
+   */
+  finalBronzeMedalists?: [PodiumMedalist, PodiumMedalist] | null
 }
 
 export function BoutScoreboard({
@@ -254,6 +265,7 @@ export function BoutScoreboard({
   onSaveWinnerOnly,
   allowDrawDeclaration = false,
   onBoutStarted,
+  finalBronzeMedalists,
 }: BoutScoreboardProps) {
   const toast = useToast()
 
@@ -435,6 +447,14 @@ export function BoutScoreboard({
 
   useEffect(() => {
     const winnerSide = boutOver ? (hanteiWinner ?? resolution.winner) : null
+    const podium =
+      winnerSide && finalBronzeMedalists
+        ? {
+            gold: winnerSide === "aka" ? aka : ao,
+            silver: winnerSide === "aka" ? ao : aka,
+            bronze: finalBronzeMedalists,
+          }
+        : null
     const payload: DisplayPayload = {
       type: "state",
       boutId: persistKey ?? "practice",
@@ -469,10 +489,11 @@ export function BoutScoreboard({
       outcome: boutOver ? resolution.outcome : null,
       soundOn: settings.soundOn,
       displayFlip,
+      podium,
     }
     payloadRef.current = payload
     channelRef.current?.postMessage(payload)
-  }, [aka, ao, categoryLabel, roundLabel, persistKey, state, clockMs, running, atoshiBaraku, boutOver, resolution, hanteiWinner, settings.soundOn, displayFlip])
+  }, [aka, ao, categoryLabel, roundLabel, persistKey, state, clockMs, running, atoshiBaraku, boutOver, resolution, hanteiWinner, settings.soundOn, displayFlip, finalBronzeMedalists])
 
   // -- actions ----------------------------------------------------------------
   const now = () => Date.now()
@@ -578,6 +599,16 @@ export function BoutScoreboard({
   const controlsDisabled = boutOver || saving
   const winnerSide = hanteiWinner ?? resolution.winner
   const bannerSide: Side | "draw" | null = declaredDraw ? "draw" : winnerSide
+  // Gold/silver come from this bout's own live resolution, not from
+  // anything saved — the podium can complete the instant a winner is known.
+  const podium =
+    winnerSide && finalBronzeMedalists
+      ? {
+          gold: winnerSide === "aka" ? aka : ao,
+          silver: winnerSide === "aka" ? ao : aka,
+          bronze: finalBronzeMedalists,
+        }
+      : null
 
   const renderSide = (side: Side) => {
     const fighter = side === "aka" ? aka : ao
@@ -785,7 +816,7 @@ export function BoutScoreboard({
 
       {/* resolution dialog */}
       <Dialog open={resolutionOpen} onOpenChange={setResolutionOpen}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className={cn("sm:max-w-md", podium && "sm:max-w-2xl")}>
           <DialogHeader>
             <DialogTitle>Bout result</DialogTitle>
           </DialogHeader>
@@ -796,8 +827,8 @@ export function BoutScoreboard({
               <span className="text-belt-blue">{sidePoints(state.ao)}</span>
             </p>
             {bannerSide === "draw" ? (
-              <div className="space-y-1 text-center">
-                <p className="text-3xl font-black uppercase tracking-wide text-muted-foreground">
+              <div className="space-y-1 rounded-lg border-4 border-muted-foreground/30 bg-muted/40 py-3 text-center">
+                <p className="text-4xl font-black uppercase tracking-wide text-muted-foreground sm:text-5xl">
                   Draw
                 </p>
                 <Button variant="link" size="sm" className="h-auto p-0 text-xs" onClick={() => setDeclaredDraw(false)}>
@@ -805,23 +836,38 @@ export function BoutScoreboard({
                 </Button>
               </div>
             ) : winnerSide ? (
-              <div className="space-y-1 text-center">
-                <p
+              <div className="space-y-2">
+                {/* Big, unambiguous, readable at a glance — the yellow ring
+                    mirrors the projector's winning-side highlight so both
+                    screens read as "the same signal" at a distance. */}
+                <div
                   className={cn(
-                    "text-3xl font-black uppercase tracking-wide",
-                    winnerSide === "aka" ? "text-flag-red" : "text-belt-blue",
+                    "space-y-1 rounded-lg border-4 py-3 text-center ring-4 ring-yellow-400",
+                    winnerSide === "aka" ? "border-flag-red bg-flag-red/10" : "border-belt-blue bg-belt-blue/10",
                   )}
                 >
-                  {winnerSide === "aka" ? "AKA" : "AO"} wins
-                </p>
-                <p className="text-sm text-muted-foreground">
-                  {winnerSide === "aka" ? aka.name : ao.name}{" "}
-                  <span>({(hanteiWinner ? "HANTEI" : resolution.outcome).toLowerCase()})</span>
-                </p>
-                {!resolution.winner && (
-                  <Button variant="link" size="sm" className="h-auto p-0 text-xs" onClick={() => setHanteiWinner(null)}>
-                    Change hantei pick
-                  </Button>
+                  <p
+                    className={cn(
+                      "text-4xl font-black uppercase tracking-wide sm:text-5xl",
+                      winnerSide === "aka" ? "text-flag-red" : "text-belt-blue",
+                    )}
+                  >
+                    {winnerSide === "aka" ? "AKA" : "AO"} wins
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    {winnerSide === "aka" ? aka.name : ao.name}{" "}
+                    <span>({(hanteiWinner ? "HANTEI" : resolution.outcome).toLowerCase()})</span>
+                  </p>
+                  {!resolution.winner && (
+                    <Button variant="link" size="sm" className="h-auto p-0 text-xs" onClick={() => setHanteiWinner(null)}>
+                      Change hantei pick
+                    </Button>
+                  )}
+                </div>
+                {podium && (
+                  <div className="rounded-lg bg-zinc-950 px-3 py-4">
+                    <PodiumBanner podium={podium} variant="dialog" />
+                  </div>
                 )}
               </div>
             ) : (

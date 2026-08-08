@@ -4,11 +4,17 @@ This file is the handoff between coding agents. It describes what is in flight
 right now, not the permanent architecture (that's
 [`architecture.md`](architecture.md)).
 
-**Last updated:** 2026-08-08 — by Claude Code: Draws now shows a manual
+**Last updated:** 2026-08-08 — by Claude Code: clearer end-of-bout winner
+announcement (bigger "AKA WINS"/"AO WINS", matched between the mat
+scoreboard and the projector display) plus a four-medal WKF podium once the
+tournament final's winner is known and both bronze bouts are already
+decided (see "In flight" below).
+
+Previously, same day: Draws now shows a manual
 refresh button + "last updated" timestamp, and an "In progress" chip on any
 bout the mat scoreboard has started scoring — the score itself is honestly
 *not* shown live, since the backend has zero visibility into a bout until
-the final save (see "In flight" below for why, and what was added).
+the final save.
 
 Previously, same day: added ±1 second clock
 adjustment buttons next to the existing ±10s, for fine correction when a
@@ -74,6 +80,120 @@ port; those have since been pushed.) Everything here is verified locally against
 a database, never against production data.
 
 ## In flight (uncommitted)
+
+**Clearer winner announcement + end-of-final podium (2026-08-08).**
+Two visual asks for the scoreboard's end-of-bout screen: make the winner
+announcement readable at a glance ("competition-day readability from across
+the room"), and show a WKF-style four-medal podium once the tournament
+final is decided.
+
+**Winner announcement — matched between the two screens that show one.**
+Re-read both before touching anything: the mat scoreboard's resolution
+dialog already had an "AKA WINS"/"AO WINS" banner (`text-3xl`, side-colored
+text, added during the practice-mode work) with no background treatment;
+the projector (`ScoreboardDisplay.tsx`) had a *different*, smaller design —
+a modest yellow box captioned "Winner · outcome" over the winner's name at
+`text-[3.6vmin]`, plus a separate `ring-8 ring-inset ring-yellow-400`
+around the whole winning side's panel. Read "the current yellow-screen
+winner display isn't clear enough" as pointing at that projector yellow
+box specifically, and "match the operator screen's big winner banner" as
+pointing back at the dialog's own "AKA WINS" style — so the fix unifies
+both toward the clearer version rather than picking one as the sole
+target:
+- Projector: the yellow box's caption+name is now a `text-[6vmin]` "AKA
+  WINS"/"AO WINS" headline, with name + outcome as a smaller secondary
+  line underneath. The `ring-8` yellow ring around the winning side panel
+  is untouched — kept exactly as it was, per the explicit ask.
+- Dialog: bumped `text-3xl` → `text-4xl sm:text-5xl`, and wrapped the
+  whole banner in a `ring-4 ring-yellow-400` bordered box tinted with the
+  winning side's own color, so the same "yellow ring = winner" signal
+  reads on both screens instead of being projector-only. The "Draw"
+  variant (practice-only) got the same size bump, no yellow ring — there's
+  no winner to ring.
+
+**Podium — detection is pure, reuses backend data instead of new backend
+logic.** `DrawService.computeDrawState` (in `draw.service.ts`, unchanged)
+already derives `draw.placements.{first,second,thirds}` from bracket
+structure — `thirds` only gets an entry once that repechage half is fully
+resolved, so "podium complete" was already representable, just not
+surfaced as a single check anywhere. Added two pure functions to
+`frontend/src/lib/draws.ts` rather than touching the backend:
+- `isFinalBout(draw, bout)` — `bout.phase === "MAIN" && bout.round ===
+  Math.log2(draw.size)`. No hardcoded round numbers; works for any
+  bracket size.
+- `finalBronzeMedalists(draw)` — `draw.placements.thirds` sliced to
+  exactly 2, or `null` if either repechage side isn't resolved yet. This
+  is the "podium is incomplete, don't render" gate from the brief.
+
+**Why gold/silver are computed live, not from `draw.placements`.** The
+operator scoring the final sees the "AKA WINS" banner (and the podium
+below it) the *instant* the local resolution is known — before "Save
+result" is even clicked. `draw.placements.first`/`second` only reflect
+what's been saved to the backend, so sourcing gold/silver from there would
+mean the podium doesn't appear until *after* a save-and-reload, which
+misses the whole point ("once the final's winner is displayed"). Bronze is
+different: those bouts are (in the normal running order) already decided
+and saved by the time the final is being scored, so `draw.placements`
+already has them. Net design: `BoutScoreboard.tsx` takes an optional
+`finalBronzeMedalists?: [PodiumMedalist, PodiumMedalist] | null` prop
+(bronze only), and builds the full four-medal `podium` object itself by
+combining that prop with its own already-live `winnerSide`/`aka`/`ao` —
+gold = winner, silver = loser, bronze = the prop, verbatim. `lib/draws.ts`
+and `lib/scoreboard.ts`/`BoutScoreboard.tsx` stay decoupled exactly as the
+practice-mode extraction left them: the wrapper (`pages/Scoreboard.tsx`)
+is the only place that imports both and does the `isFinalBout` +
+`finalBronzeMedalists` lookup, structurally passing `DrawEntrySummary`
+objects into a prop typed for the smaller `PodiumMedalist` shape (`{name,
+clubName}`) — no reshaping needed, just a superset satisfying a subset.
+
+**New shared component:** `components/scoreboard/PodiumBanner.tsx` — one
+component, two size variants (`"dialog"` rem-scaled, `"display"`
+viewport-scaled to match `ScoreboardDisplay.tsx`'s existing `vmin`
+convention), same layout both times: silver, gold (tallest, centred),
+bronze, bronze — left to right, matching how WKF venues typically lay out
+a 1-2-3-3 podium. Rendered in two places:
+- Mat scoreboard's resolution dialog, below the winner banner, only once
+  `finalBronzeMedalists` is non-null (dialog also widens `sm:max-w-md` →
+  `sm:max-w-2xl` so four blocks have room).
+- Projector display, as a new full-width strip below the boards row
+  (`shrink-0`, not squeezed into the narrow centre clock column) — added
+  below rather than replacing anything, matching the brief's "transition
+  (or add below)" with the simpler, lower-risk of the two options.
+  `DisplayPayload` gained a `podium: PodiumPlacements | null` field,
+  computed identically to the dialog's version inside `BoutScoreboard.tsx`'s
+  existing broadcast effect.
+
+**Practice mode:** never passes `finalBronzeMedalists`, so `podium` is
+always `null` there — no bracket, no final, no podium. No changes needed
+in `pages/hub/Practice.tsx`.
+
+Files: `frontend/src/lib/draws.ts`, `frontend/src/lib/scoreboard.ts`,
+`frontend/src/components/scoreboard/BoutScoreboard.tsx`,
+`frontend/src/components/scoreboard/PodiumBanner.tsx` (new),
+`frontend/src/pages/Scoreboard.tsx`, `frontend/src/pages/ScoreboardDisplay.tsx`,
+`frontend/scripts/test-draws.ts` (new). No backend changes.
+
+### Verification (run 2026-08-08)
+
+`backend` / `frontend`: `npx tsc --noEmit` both clean (backend untouched,
+checked anyway). New `frontend/scripts/test-draws.ts` — 12 checks covering
+`isFinalBout` (round 1/2/3 of a size-8 bracket, a REPECHAGE bout at the same
+round number never counts, size-16 and size-2 edge cases) and
+`finalBronzeMedalists` (null with 0 or 1 bronze decided, both returned
+verbatim with no re-sorting once both are decided). `frontend/scripts/
+test-scoreboard.ts` — all 30 existing checks still pass unchanged (this
+feature didn't touch the pure timer/scoring logic in `lib/scoreboard.ts`,
+only its types and the component consuming it).
+
+**Not verified in-browser** — the user explicitly asked for this to be
+called out. Unverified: the enlarged winner banners actually read clearly
+at a glance on both screens; the podium's four-block layout at `sm:max-w-2xl`
+in the dialog and as a `vmin`-scaled strip on the projector actually looks
+like a podium rather than a cramped row; and — the real end-to-end
+scenario this exists for — that scoring a real final (with both bronzes
+already decided) actually produces a complete four-medal podium rather than
+an edge case in `isFinalBout`/`finalBronzeMedalists` that wasn't caught by
+the unit tests above.
 
 **Live-status awareness on Draws (2026-08-08).**
 Request: while one machine scores a bout on the mat, other machines watching

@@ -6,7 +6,15 @@ import { ArrowLeft } from "lucide-react"
 import { useAuth } from "@/contexts/AuthContext"
 import { useToast, useApiErrorToast } from "@/components/Toast"
 import { Button } from "@/components/ui/button"
-import { getDraw, setBoutScore, setBoutWinner, startBout, type DrawBout } from "@/lib/draws"
+import {
+  finalBronzeMedalists,
+  getDraw,
+  isFinalBout,
+  setBoutScore,
+  setBoutWinner,
+  startBout,
+  type DrawBout,
+} from "@/lib/draws"
 import type { Side } from "@/lib/scoreboard"
 import { BoutScoreboard, type BoutScoreboardSaveResult } from "@/components/scoreboard/BoutScoreboard"
 
@@ -115,6 +123,10 @@ export default function ScoreboardPage() {
     void startBout(drawId!, boutId!).catch(() => {})
   }
 
+  // Podium only when this bout is the final AND both bronze bouts are
+  // already decided elsewhere in the bracket — see lib/draws.ts.
+  const bronze = isFinalBout(draw, bout) ? finalBronzeMedalists(draw) : null
+
   return (
     <BoutScoreboard
       aka={{ name: aka.name, clubName: aka.clubName }}
@@ -128,6 +140,7 @@ export default function ScoreboardPage() {
       onSaveResult={handleSaveResult}
       onSaveWinnerOnly={handleSaveWinnerOnly}
       onBoutStarted={handleBoutStarted}
+      finalBronzeMedalists={bronze}
     />
   )
 }

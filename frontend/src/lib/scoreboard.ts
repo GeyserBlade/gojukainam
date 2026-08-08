@@ -315,6 +315,17 @@ export interface DisplaySide {
   senshu: boolean
 }
 
+export interface PodiumMedalist {
+  name: string
+  clubName: string
+}
+
+export interface PodiumPlacements {
+  gold: PodiumMedalist
+  silver: PodiumMedalist
+  bronze: [PodiumMedalist, PodiumMedalist]
+}
+
 export interface DisplayPayload {
   type: "state"
   boutId: string
@@ -332,6 +343,13 @@ export interface DisplayPayload {
   soundOn: boolean
   /** Operator's requested display orientation: true = AKA on right (swapped). */
   displayFlip: boolean
+  /**
+   * Present only once this bout is the tournament final AND both bronze
+   * bouts are already decided elsewhere in the bracket. Gold/silver are
+   * computed live from this bout's own (possibly unsaved) resolution —
+   * see components/scoreboard/BoutScoreboard.tsx.
+   */
+  podium: PodiumPlacements | null
 }
 
 export type ChannelMessage = DisplayPayload | { type: "hello" } | { type: "closed" }

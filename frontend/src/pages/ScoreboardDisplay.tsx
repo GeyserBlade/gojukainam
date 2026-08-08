@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react"
 import { ArrowLeftRight, Maximize, Minimize } from "lucide-react"
 
 import { cn } from "@/lib/utils"
+import { PodiumBanner } from "@/components/scoreboard/PodiumBanner"
 import {
   CHANNEL_NAME,
   PENALTY_LABELS,
@@ -156,18 +157,31 @@ export default function ScoreboardDisplayPage() {
                   Atoshi baraku
                 </p>
               )}
-              {payload.ended && payload.winnerName && (
+              {payload.ended && payload.winnerName && payload.winnerSide && (
                 <div className="rounded-lg bg-yellow-400 px-[3vmin] py-[1.5vmin] text-center">
-                  <p className="text-[2.2vmin] font-semibold uppercase tracking-widest text-black/70">
-                    Winner{payload.outcome ? ` · ${payload.outcome.toLowerCase()}` : ""}
+                  <p className="text-[6vmin] font-black uppercase leading-none tracking-wide text-black">
+                    {payload.winnerSide === "aka" ? "AKA" : "AO"} WINS
                   </p>
-                  <p className="text-[3.6vmin] font-bold leading-tight text-black">{payload.winnerName}</p>
+                  <p className="mt-[0.6vmin] truncate text-[2.6vmin] font-semibold text-black/80">
+                    {payload.winnerName}
+                    {payload.outcome ? ` · ${payload.outcome.toLowerCase()}` : ""}
+                  </p>
                 </div>
               )}
             </div>
 
             <SideBoard side={rightSide} data={right} winner={payload.ended && payload.winnerSide === rightSide} />
           </div>
+
+          {/* Podium: only once this bout is the final and both bronze
+              bouts are already decided — see components/scoreboard/
+              PodiumBanner.tsx and lib/draws.ts (isFinalBout / bronze
+              gathering). */}
+          {payload.ended && payload.podium && (
+            <div className="shrink-0 bg-black px-[2vmin] py-[2vmin]">
+              <PodiumBanner podium={payload.podium} variant="display" />
+            </div>
+          )}
         </>
       )}
 
