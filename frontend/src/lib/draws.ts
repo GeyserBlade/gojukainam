@@ -27,6 +27,13 @@ export interface DrawBout {
   scoreJson: string | null;
   /** True if the captured score includes at least one post-buzzer award. */
   postTime: boolean;
+  /**
+   * When the mat-side scoreboard first started this bout's clock, or null.
+   * Best-effort status ping only — not a live score. Cleared whenever the
+   * result or fighters are invalidated. See docs/state.md for why the score
+   * itself can't be shown live here.
+   */
+  startedAt: string | null;
 }
 
 export type DrawStatus = "DRAWN" | "IN_PROGRESS" | "COMPLETED";
@@ -164,6 +171,10 @@ export async function setBoutScore(
 ): Promise<DrawDetail> {
   const res = await api.put(`/draws/${drawId}/bouts/${boutId}/score`, data);
   return res.data;
+}
+
+export async function startBout(drawId: string, boutId: string): Promise<void> {
+  await api.post(`/draws/${drawId}/bouts/${boutId}/start`);
 }
 
 export async function setDrawLock(id: string, locked: boolean): Promise<DrawDetail> {

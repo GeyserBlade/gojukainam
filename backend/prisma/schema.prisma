@@ -567,6 +567,16 @@ model Bout {
   /// upstream bracket correction), same as akaScore/aoScore/outcome/scoreJson.
   postTime Boolean @default(false)
 
+  /// Set once, the first time the mat-side scoreboard starts this bout's
+  /// clock (never by any other write path — the app has no other signal
+  /// that a bout is "in progress", since scoring itself stays client-side
+  /// until the final save). Reset to null whenever the result or fighters
+  /// are invalidated, same reasoning as the score-detail fields above: a
+  /// stale "in progress" flag pointing at the wrong matchup is worse than
+  /// none. Read-only status ping for other viewers of the draw — never
+  /// gates scoring itself.
+  startedAt DateTime?
+
   // Per-bout mat override; null = inherit the draw's mat. Survives recompute
   // (recompute never writes matId), lost only if the bout row is deleted.
   matId String?

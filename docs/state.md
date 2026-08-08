@@ -4,9 +4,15 @@ This file is the handoff between coding agents. It describes what is in flight
 right now, not the permanent architecture (that's
 [`architecture.md`](architecture.md)).
 
-**Last updated:** 2026-08-08 — by Claude Code: added ±1 second clock
+**Last updated:** 2026-08-08 — by Claude Code: Draws now shows a manual
+refresh button + "last updated" timestamp, and an "In progress" chip on any
+bout the mat scoreboard has started scoring — the score itself is honestly
+*not* shown live, since the backend has zero visibility into a bout until
+the final save (see "In flight" below for why, and what was added).
+
+Previously, same day: added ±1 second clock
 adjustment buttons next to the existing ±10s, for fine correction when a
-timekeeper lets the clock run a couple seconds long (see "In flight" below).
+timekeeper lets the clock run a couple seconds long.
 
 Previously, same day: added a standalone practice /
 ad-hoc bout scoreboard (no persistence) under the event hub, reusing the real
@@ -68,6 +74,118 @@ port; those have since been pushed.) Everything here is verified locally against
 a database, never against production data.
 
 ## In flight (uncommitted)
+
+**Live-status awareness on Draws (2026-08-08).**
+Request: while one machine scores a bout on the mat, other machines watching
+the Draws page for that division should be able to tell a bout is being
+scored, without navigating in and taking over. Two pieces: a manual refresh
+button + timestamp on the draw view, and an "in progress" indicator on
+individual bout tiles.
+
+**Source-of-truth finding, reported as asked:** `Bout` had no way to
+represent "in progress" before this. `akaScore`/`aoScore`/`outcome`/
+`scoreJson`/`postTime` are written *only* by `setBoutScore`, always
+atomically together with `winnerEntryId` — there is no code path that ever
+writes a partial score with no winner. Scoring itself is 100% client-side
+(the whole point of the `BoutScoreboard` engine — see the two prior entries
+above): the operator's machine holds the live score in React state, mirrors
+it to `localStorage` for its own crash/refresh resume, and the backend
+learns nothing until Save. `Bout` also had no timestamp fields at all
+(`createdAt`/`updatedAt`), so there wasn't even an implicit staleness
+signal to lean on. **Conclusion: "current score" cannot be shown live on
+Draws without a genuinely new sync mechanism, and building a live score
+relay was out of scope for this request** — so the in-progress indicator
+shows status only ("someone has this open and running"), never a score.
+Also worth naming: the existing mat → projector `BroadcastChannel` link
+(`CHANNEL_NAME` in `lib/scoreboard.ts`) can't help here even in principle —
+it's same-browser-profile, cross-tab only, and this is explicitly a
+cross-*machine* scenario (coordinator laptop, coaches' devices).
+
+**Minimum field added, per the brief's explicit allowance:** `Bout.startedAt
+DateTime?` (migration `20260808083208_add_bout_started_at`), set once by a
+new best-effort ping — `POST /draws/:id/bouts/:boutId/start`
+(`DrawService.startBout`, same `requireEventManager` guard as the score
+routes) — fired by `BoutScoreboard.tsx` the first time the clock starts
+(`Hajime`), never by any other path. Idempotent (no-ops if already set),
+deliberately **not** audit-logged — this is a status ping for other
+viewers, not a state change worth an audit trail, unlike every other Bout
+mutation in this file. Reset to `null` in the two places score detail
+already gets invalidated for the same reason (a stale flag pointing at the
+wrong matchup is worse than none): `recompute`'s upstream-correction branch,
+and `setBoutWinner`'s clearing branch (`winnerEntryId: null`). Exposed on
+`DrawBout.startedAt` (ISO string or null) through the existing `getDraw`
+response — no new query.
+
+**Frontend wiring:** `BoutScoreboard.tsx` gained an optional
+`onBoutStarted?: () => void` prop, called once via a new `toggleRunning`
+wrapper around the Hajime/Yame button (guarded by a `startedFiredRef`, same
+pattern as the atoshi/end/award fired-refs already in the file). Practice
+mode never passes this prop — there's no real bout to ping. The real-bout
+wrapper (`pages/Scoreboard.tsx`) implements it as a fire-and-forget
+`startBout(drawId, boutId)` with a swallowed `.catch()` — scoring must never
+block or error out over a status ping failing.
+
+**Draws page (`pages/Draws.tsx`):** a small ghost refresh button + "Last
+updated HH:MM:SS" sits right next to the division name/status badges (not
+inside the `canManage`-gated management-button cluster on the right — any
+viewer with hub access should be able to refresh, not just coordinators/
+admins). Reuses React Query's own `dataUpdatedAt`/`refetch`/`isFetching`
+rather than hand-rolling timestamp state; clicking it refetches both the
+`draw` and `draw-categories` queries so the category list's status badges
+stay in sync too.
+
+**Bout tiles (`components/draws/BracketView.tsx`):** `BoutCard` gained an
+`inProgress = !decided && !!bout.startedAt` strip at the top of the card
+(amber `Timer` icon, pulsing, "In progress", `title` showing the exact
+start time) plus a matching amber card border, mirroring how `decided`
+already gets a green border. **Finished bouts were already correct** — the
+existing `hasScore` block already shows the final score + outcome once
+`akaScore`/`aoScore` are set, verified by reading `BoutCard` before
+touching it; no changes needed there. **Not-started bouts are unchanged**
+— `inProgress` is `false` whenever `startedAt` is `null`.
+
+**Auto-refresh — deliberately not built, flagging per the brief's ask:**
+adding a 30s poll toggle would be trivial (`refetchInterval` is a single
+prop on the existing `useQuery` calls, or a `setInterval` calling the same
+`handleRefresh`). Not added because the brief explicitly asked for manual
+only. If this is worth adding, my inclination would be a toggle next to
+the refresh button defaulting to off, since a busy tournament floor with
+several machines all polling constantly is a real (if small) cost for a
+view that's mostly glanced at.
+
+Files: `backend/prisma/schema.prisma`,
+`backend/prisma/migrations/20260808083208_add_bout_started_at/`,
+`backend/src/services/draw.service.ts`, `backend/src/routes/draws.ts`,
+`backend/scripts/test-bout-scoring.ts`, `frontend/src/lib/draws.ts`,
+`frontend/src/components/scoreboard/BoutScoreboard.tsx`,
+`frontend/src/pages/Scoreboard.tsx`, `frontend/src/pages/Draws.tsx`,
+`frontend/src/components/draws/BracketView.tsx`.
+
+### Verification (run 2026-08-08)
+
+`backend` / `frontend`: `npx tsc --noEmit` both clean. Migration applied
+against local Postgres (same temporary superuser `ALTER ROLE ...
+CREATEDB`/`NOCREATEDB` workaround as before).
+
+`npx tsx scripts/test-bout-scoring.ts`, extended with 12 new checks for
+`startBout` (round-trips, idempotent — a second ping doesn't move the
+timestamp, cleared alongside score detail on a winner-only override,
+coordinator parity, non-coordinator 403) — 32 checks total, all pass, run
+live against a local dev server on an isolated port. `test-draws.ts` and
+`test-event-scope.ts` re-run clean (0 failures) as regression checks — the
+`recompute` change (clearing `startedAt` on fighter/winner changes) sits
+inside a path both scripts exercise heavily. `frontend/scripts/
+test-scoreboard.ts` — all 30 existing checks still pass (this feature
+didn't touch `lib/scoreboard.ts`).
+
+**Not verified in-browser** — the user explicitly asked for this to be
+called out. Unverified: the refresh button and timestamp actually render
+where intended and update on click; the "In progress" chip appears at the
+right moment and disappears once a result is captured; that pressing Hajime
+on a real mat-side Scoreboard genuinely reaches a second machine's Draws
+view after a manual refresh, machine-to-machine, which is the actual
+end-to-end scenario this feature exists for and hasn't been exercised
+outside the HTTP-level test above.
 
 **±1 second clock adjustment (2026-08-08).**
 Real-world case: the timekeeper forgets to stop the clock or lets it run a

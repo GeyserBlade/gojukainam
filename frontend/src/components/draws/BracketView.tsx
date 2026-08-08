@@ -97,6 +97,10 @@ const BoutCard = ({ bout, isRound1, canManage, busy, onSetWinner, onOpenScoreboa
     canManage && !busy && bothPresent && !!bout.id && !!fighter
   const hasScore = bout.akaScore !== null && bout.aoScore !== null
   const scoreable = canManage && !busy && bothPresent && !!bout.id && !!onOpenScoreboard
+  // The mat's scoreboard keeps its score entirely client-side until the
+  // final save, so this is a "someone has this open" status ping, not a
+  // live score feed — see docs/state.md for why.
+  const inProgress = !decided && !!bout.startedAt
 
   const handleClick = (fighter: DrawEntrySummary | null) => {
     if (!fighter || !bout.id) return
@@ -109,8 +113,20 @@ const BoutCard = ({ bout, isRound1, canManage, busy, onSetWinner, onOpenScoreboa
       className={cn(
         "w-48 shrink-0 divide-y overflow-hidden rounded-md border bg-card shadow-sm sm:w-56",
         decided && "border-belt-green/40",
+        inProgress && "border-belt-orange/40",
       )}
     >
+      {inProgress && (
+        <div
+          className="flex items-center gap-1 bg-belt-orange/10 px-2 py-0.5"
+          title={`Started ${new Date(bout.startedAt!).toLocaleTimeString()}`}
+        >
+          <Timer className="h-3 w-3 shrink-0 animate-pulse text-belt-orange" />
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-belt-orange">
+            In progress
+          </span>
+        </div>
+      )}
       <FighterRow
         fighter={bout.aka}
         side="aka"

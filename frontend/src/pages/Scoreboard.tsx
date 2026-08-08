@@ -6,7 +6,7 @@ import { ArrowLeft } from "lucide-react"
 import { useAuth } from "@/contexts/AuthContext"
 import { useToast, useApiErrorToast } from "@/components/Toast"
 import { Button } from "@/components/ui/button"
-import { getDraw, setBoutScore, setBoutWinner, type DrawBout } from "@/lib/draws"
+import { getDraw, setBoutScore, setBoutWinner, startBout, type DrawBout } from "@/lib/draws"
 import type { Side } from "@/lib/scoreboard"
 import { BoutScoreboard, type BoutScoreboardSaveResult } from "@/components/scoreboard/BoutScoreboard"
 
@@ -109,6 +109,12 @@ export default function ScoreboardPage() {
     }
   }
 
+  const handleBoutStarted = () => {
+    // Best-effort status ping for other viewers of the draw — never blocks
+    // or surfaces an error; scoring itself doesn't depend on this succeeding.
+    void startBout(drawId!, boutId!).catch(() => {})
+  }
+
   return (
     <BoutScoreboard
       aka={{ name: aka.name, clubName: aka.clubName }}
@@ -121,6 +127,7 @@ export default function ScoreboardPage() {
       saving={saving}
       onSaveResult={handleSaveResult}
       onSaveWinnerOnly={handleSaveWinnerOnly}
+      onBoutStarted={handleBoutStarted}
     />
   )
 }

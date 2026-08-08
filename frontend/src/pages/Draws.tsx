@@ -145,7 +145,11 @@ export default function DrawsPage() {
   // Reset the selected category when the hub switches events.
   useEffect(() => setSelectedKey(null), [eventId])
 
-  const { data: categories, isLoading: categoriesLoading } = useQuery({
+  const {
+    data: categories,
+    isLoading: categoriesLoading,
+    refetch: refetchCategories,
+  } = useQuery({
     queryKey: ["draw-categories", eventId],
     queryFn: () => listDrawCategories(eventId),
     enabled: !!eventId,
@@ -157,11 +161,24 @@ export default function DrawsPage() {
   )
 
   const drawId = selected?.draw?.id ?? null
-  const { data: draw, isLoading: drawLoading } = useQuery({
+  const {
+    data: draw,
+    isLoading: drawLoading,
+    isFetching: drawFetching,
+    dataUpdatedAt: drawUpdatedAt,
+    refetch: refetchDraw,
+  } = useQuery({
     queryKey: ["draw", drawId],
     queryFn: () => getDraw(drawId!),
     enabled: !!drawId,
   })
+  // Manual only, by design: one machine scores on the mat while others watch
+  // this view for status, and a silent 30s poll was judged not worth the
+  // extra requests without the user asking for it — see docs/state.md.
+  const handleRefresh = () => {
+    refetchDraw()
+    refetchCategories()
+  }
 
   const invalidate = (id?: string) => {
     queryClient.invalidateQueries({ queryKey: ["draw-categories", eventId] })
@@ -368,6 +385,19 @@ export default function DrawsPage() {
                       Locked
                     </Badge>
                   )}
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 shrink-0 print:hidden"
+                    onClick={handleRefresh}
+                    disabled={drawFetching}
+                    title="Refresh this view"
+                  >
+                    <RefreshCw className={cn("h-3.5 w-3.5", drawFetching && "animate-spin")} />
+                  </Button>
+                  <span className="shrink-0 text-[11px] text-muted-foreground print:hidden">
+                    Last updated {drawUpdatedAt ? new Date(drawUpdatedAt).toLocaleTimeString() : "—"}
+                  </span>
                 </div>
                 <div className="flex items-center gap-2 print:hidden">
                   <Button variant="outline" size="sm" onClick={() => window.print()}>

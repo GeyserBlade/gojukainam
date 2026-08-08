@@ -392,6 +392,8 @@ async function recompute(tx: Tx, drawId: string) {
     ) {
       // Fighters or winner changed: any captured score detail no longer
       // describes this bout, so it is invalidated along with the result.
+      // startedAt goes the same way — it was a status ping for the old
+      // matchup, not this one.
       await tx.bout.update({
         where: { id: existing.id },
         data: {
@@ -403,6 +405,7 @@ async function recompute(tx: Tx, drawId: string) {
           outcome: null,
           scoreJson: null,
           postTime: false,
+          startedAt: null,
         },
       });
     }
@@ -863,7 +866,10 @@ export class DrawService {
     }
 
     await prisma.$transaction(async (tx) => {
-      // Winner-only capture: any previous score detail no longer applies
+      // Winner-only capture: any previous score detail no longer applies.
+      // Clearing a result (winnerEntryId: null) also clears startedAt — the
+      // bout goes back to an unknown in-progress state, not a stale "still
+      // being scored" one.
       await tx.bout.update({
         where: { id: boutId },
         data: {
@@ -873,6 +879,7 @@ export class DrawService {
           outcome: null,
           scoreJson: null,
           postTime: false,
+          ...(winnerEntryId ? {} : { startedAt: null }),
         },
       });
       await recompute(tx, drawId);
@@ -887,6 +894,24 @@ export class DrawService {
       });
     });
     return DrawService.get(drawId);
+  }
+
+  /**
+   * Best-effort "someone is scoring this bout" ping, fired once by the
+   * mat-side scoreboard the first time its clock starts. Idempotent (a
+   * second call is a no-op) and unaudited — this is a status signal for
+   * other viewers of the draw, not a state change worth an audit trail.
+   */
+  static async startBout(drawId: string, boutId: string) {
+    const bout = await prisma.bout.findUnique({
+      where: { id: boutId },
+      select: { id: true, drawId: true, startedAt: true },
+    });
+    if (!bout || bout.drawId !== drawId) throw { status: 404, message: "Bout not found" };
+    if (!bout.startedAt) {
+      await prisma.bout.update({ where: { id: boutId }, data: { startedAt: new Date() } });
+    }
+    return { ok: true };
   }
 
   /**
@@ -1023,6 +1048,7 @@ export class DrawService {
           outcome: stored?.outcome ?? null,
           scoreJson: stored?.scoreJson ?? null,
           postTime: stored?.postTime ?? false,
+          startedAt: stored?.startedAt?.toISOString() ?? null,
         };
       }),
       placements: {

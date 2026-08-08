@@ -1,18 +1,20 @@
 /**
- * Post-buzzer bout scoring (the `postTime` audit flag), exercised over real
- * HTTP against the local database — mirrors scripts/test-event-scope.ts's
- * style. A separate file rather than folding into that one: this is about
- * bout-scoring semantics and the audit trail, not event-coordinator scope
- * leaks, which test-event-scope.ts already covers thoroughly on its own.
+ * Post-buzzer bout scoring (the `postTime` audit flag) and the in-progress
+ * status ping (`startedAt`), exercised over real HTTP against the local
+ * database — mirrors scripts/test-event-scope.ts's style. A separate file
+ * rather than folding into that one: this is about bout-scoring semantics
+ * and status, not event-coordinator scope leaks, which test-event-scope.ts
+ * already covers thoroughly on its own.
  *
  * What this does NOT re-test: whether requireEventManager correctly scopes
  * admin/coordinator access to draw routes in general — that's
- * test-event-scope.ts's job, and setBoutScore/setBoutWinner use the exact
- * same guard as every other draw route. What's new here is `postTime`
- * itself: does it round-trip, does it reset when score detail is
- * invalidated, does it show up in the audit log, and — the "don't loosen
- * anything" check — can a coordinator (not just an admin) set it, same as
- * they already could set every other score field.
+ * test-event-scope.ts's job, and setBoutScore/setBoutWinner/startBout use
+ * the exact same guard as every other draw route. What's new here is
+ * `postTime` and `startedAt` themselves: do they round-trip, do they reset
+ * when score detail is invalidated, does postTime show up in the audit log
+ * (startedAt deliberately doesn't — see DrawService.startBout), and — the
+ * "don't loosen anything" check — can a coordinator (not just an admin) set
+ * them, same as they already could set every other score field.
  *
  * Run: ALLOW_DEV_AUTH=true npm run dev          # in one shell
  *      npx tsx scripts/test-bout-scoring.ts     # in another
@@ -217,6 +219,50 @@ async function main() {
       boutAfterWinnerOnly,
     );
 
+    console.log("\nstartBout: best-effort in-progress ping (startedAt):");
+    const beforeStart = await call("GET", `/draws/${drawId}`, asAdmin);
+    const boutBeforeStart = beforeStart.body?.bouts?.find((b: any) => b.id === boutId);
+    check(
+      "no startedAt yet — the winner-only override just cleared it along with score detail",
+      boutBeforeStart?.startedAt === null,
+      boutBeforeStart,
+    );
+
+    const startRes = await call("POST", `/draws/${drawId}/bouts/${boutId}/start`, asAdmin);
+    check("start -> 200", startRes.status === 200, startRes);
+    const afterStart = await call("GET", `/draws/${drawId}`, asAdmin);
+    const boutAfterStart = afterStart.body?.bouts?.find((b: any) => b.id === boutId);
+    check("startedAt now set", !!boutAfterStart?.startedAt, boutAfterStart);
+
+    console.log("\nstartBout is idempotent — a second ping doesn't move the timestamp:");
+    const firstStartedAt = boutAfterStart.startedAt;
+    await new Promise((r) => setTimeout(r, 20));
+    const startAgain = await call("POST", `/draws/${drawId}/bouts/${boutId}/start`, asAdmin);
+    check("second start -> 200", startAgain.status === 200, startAgain);
+    const afterSecondStart = await call("GET", `/draws/${drawId}`, asAdmin);
+    const boutAfterSecondStart = afterSecondStart.body?.bouts?.find((b: any) => b.id === boutId);
+    check(
+      "timestamp unchanged by the second ping, not bumped forward",
+      boutAfterSecondStart?.startedAt === firstStartedAt,
+      { first: firstStartedAt, second: boutAfterSecondStart?.startedAt },
+    );
+
+    console.log("\nclearing a result also clears startedAt (a stale ping shouldn't outlive the matchup it described):");
+    const scoreForClearTest = await call("PUT", `/draws/${drawId}/bouts/${boutId}/score`, asAdmin, {
+      winnerEntryId: entryA.id,
+      outcome: "POINTS",
+      akaScore: 2,
+      aoScore: 1,
+    });
+    check("scored (bout now has both a result and a startedAt) -> 200", scoreForClearTest.status === 200, scoreForClearTest);
+    const clearRes = await call("PUT", `/draws/${drawId}/bouts/${boutId}`, asAdmin, { winnerEntryId: null });
+    const boutAfterClear = clearRes.body?.bouts?.find((b: any) => b.id === boutId);
+    check(
+      "startedAt cleared alongside the rest of the score detail",
+      boutAfterClear?.startedAt === null,
+      boutAfterClear,
+    );
+
     console.log("\ncoordinator (not just admin) can set postTime — permission unchanged:");
     await prisma.eventCoordinator.upsert({
       where: { eventId_userId: { eventId: event.id, userId: devUser.id } },
@@ -234,6 +280,9 @@ async function main() {
     const boutAfterCoord = asCoord.body?.bouts?.find((b: any) => b.id === boutId);
     check("coordinator's postTime:true persisted, same as admin's", boutAfterCoord?.postTime === true, boutAfterCoord);
 
+    const startAsCoord = await call("POST", `/draws/${drawId}/bouts/${boutId}/start`, asCoordinator);
+    check("coordinator can also ping start — same guard as the score routes", startAsCoord.status === 200, startAsCoord);
+
     console.log("\nnon-coordinator, non-admin still refused (unchanged from before postTime existed):");
     await prisma.eventCoordinator.deleteMany({ where: { eventId: event.id, userId: devUser.id } });
     const asPlainClub = await call("PUT", `/draws/${drawId}/bouts/${boutId}/score`, asCoordinator, {
@@ -244,6 +293,9 @@ async function main() {
       postTime: true,
     });
     check("plain club manager (grant revoked) -> 403", asPlainClub.status === 403, asPlainClub);
+
+    const startAsPlainClub = await call("POST", `/draws/${drawId}/bouts/${boutId}/start`, asCoordinator);
+    check("plain club manager (grant revoked) -> 403 on start too", startAsPlainClub.status === 403, startAsPlainClub);
   } finally {
     await prisma.entry.deleteMany({ where: { id: { in: [entryA.id, entryB.id] } } });
     await prisma.athlete.deleteMany({ where: { id: { in: [athleteA.id, athleteB.id] } } });

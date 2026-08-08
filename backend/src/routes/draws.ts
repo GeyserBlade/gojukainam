@@ -120,6 +120,18 @@ router.put("/:id/bouts/:boutId", requireEventManager({ in: "lookup", key: "id", 
   }
 });
 
+// Best-effort "this bout is being scored now" ping from the mat-side
+// scoreboard — no body, idempotent, unaudited (see DrawService.startBout).
+router.post("/:id/bouts/:boutId/start", requireEventManager({ in: "lookup", key: "id", via: "draw" }), validate(BoutParams, "params"), async (req, res, next) => {
+  try {
+    const row = await DrawService.startBout(getParam(req.params.id), getParam(req.params.boutId));
+    res.json(row);
+  } catch (err: any) {
+    if (err.status && err.message) return res.status(err.status).json({ error: err.message });
+    next(err);
+  }
+});
+
 // Capture a fully scored WKF kumite result (points, outcome, detail)
 router.put("/:id/bouts/:boutId/score", requireEventManager({ in: "lookup", key: "id", via: "draw" }), validateMultiple({ params: BoutParams, body: SetBoutScore }), async (req, res, next) => {
   try {

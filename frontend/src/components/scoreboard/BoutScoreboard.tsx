@@ -233,6 +233,12 @@ export interface BoutScoreboardProps {
    * progression — but a practice bout has no bracket to progress.
    */
   allowDrawDeclaration?: boolean
+  /**
+   * Fired once, the first time the clock starts (Hajime), so other viewers
+   * of the draw can tell this bout is underway. Best-effort status ping,
+   * not a live score feed — omit for bouts with nothing to ping (practice).
+   */
+  onBoutStarted?: () => void
 }
 
 export function BoutScoreboard({
@@ -247,6 +253,7 @@ export function BoutScoreboard({
   onSaveResult,
   onSaveWinnerOnly,
   allowDrawDeclaration = false,
+  onBoutStarted,
 }: BoutScoreboardProps) {
   const toast = useToast()
 
@@ -302,6 +309,7 @@ export function BoutScoreboard({
   const atoshiFiredRef = useRef(false)
   const endFiredRef = useRef(false)
   const awardFiredRef = useRef(false)
+  const startedFiredRef = useRef(false)
 
   const atoshiBaraku = clockMs <= ATOSHI_MS && clockMs > 0
   const awarding = awardMs !== null && awardMs > 0
@@ -491,6 +499,15 @@ export function BoutScoreboard({
   const kiken = (side: Side) => dispatch({ type: "KIKEN", side, at: now(), postTime: awarding })
   const undo = () => setLog((prev) => prev.slice(0, -1))
 
+  const toggleRunning = () =>
+    setRunning((r) => {
+      if (!r && !startedFiredRef.current) {
+        startedFiredRef.current = true
+        onBoutStarted?.()
+      }
+      return !r
+    })
+
   const resetBout = () => {
     setLog([])
     setClockMs(settings.durationMs)
@@ -677,7 +694,7 @@ export function BoutScoreboard({
                   running ? "bg-amber-500 hover:bg-amber-600" : "bg-emerald-600 hover:bg-emerald-700",
                 )}
                 disabled={saving || state.ended !== null || clockMs === 0}
-                onClick={() => setRunning((r) => !r)}
+                onClick={toggleRunning}
               >
                 {running ? <Pause className="h-6 w-6" /> : <Play className="h-6 w-6" />}
                 {running ? "Yame" : "Hajime"}
