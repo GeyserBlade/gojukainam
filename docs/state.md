@@ -4,9 +4,14 @@ This file is the handoff between coding agents. It describes what is in flight
 right now, not the permanent architecture (that's
 [`architecture.md`](architecture.md)).
 
-**Last updated:** 2026-08-08 — by Claude Code: the live scoreboard now allows
-scoring for a short window after the bout clock expires, instead of locking
-out scoring the instant it hits zero (see "In flight" below).
+**Last updated:** 2026-08-08 — by Claude Code: added a standalone practice /
+ad-hoc bout scoreboard (no persistence) under the event hub, reusing the real
+live scoreboard's scoring engine via a new shared `BoutScoreboard` component
+(see "In flight" below).
+
+Previously, same day: the live scoreboard now allows scoring for a short
+window after the bout clock expires, instead of locking out scoring the
+instant it hits zero.
 
 Previously, 2026-08-07: fixed the Run → Plan tab, where assigning categories
 to mats produced only order 0/1 and the mats showed nothing.
@@ -60,6 +65,109 @@ port; those have since been pushed.) Everything here is verified locally against
 a database, never against production data.
 
 ## In flight (uncommitted)
+
+**Standalone practice / ad-hoc bout scoreboard (2026-08-08).**
+Request: a blank AKA vs AO bout under the event hub for practice/exhibition/
+teaching, with no database involvement, reusing the real scoreboard's
+scoring/timer/awarding-window logic rather than rebuilding it.
+
+**Extraction: `frontend/src/pages/Scoreboard.tsx` was tightly coupled** to a
+real `bout`/`draw` (route params, `useQuery(getDraw)`, `canManageEvent`,
+`setBoutScore`/`setBoutWinner`, `boutId`-keyed `localStorage` persistence,
+navigation to `/draws`) interleaved with a large amount of logic that was
+already generic (the clock/action-log/awarding-window state machine,
+`resolveOutcome`, `SidePanel`, nearly the whole render tree). Split it: moved
+the stateful component wholesale into a new
+`frontend/src/components/scoreboard/BoutScoreboard.tsx`, parameterized by
+props instead of a `DrawBout`:
+
+- `aka`/`ao: { name, clubName }` — display identity only, no `entryId`.
+- `persistKey: string | null` — real bouts pass `boutId` (unchanged
+  crash/refresh resume behavior); `null` disables the resume-on-mount and
+  persist-on-change effects entirely, so practice mode never touches
+  `localStorage` and a refresh genuinely loses the bout.
+- `onSaveResult?` / `onSaveWinnerOnly?` — when present, the resolution
+  dialog's primary action calls back with a computed result (winner side,
+  outcome, scores, `postTime`, `scoreJson`); the component itself does no
+  network I/O. When absent (practice mode), the dialog shows **New bout**
+  instead of **Save result**, and the "skip scoring, record winner only"
+  block in Settings is hidden outright rather than a disabled no-op, per the
+  brief ("or the save button hidden").
+- `allowDrawDeclaration?` — practice-only; adds a "Call it a draw" option
+  next to the hantei picker (real bouts never get this — WKF rules require a
+  decisive winner for bracket progression, but a practice bout has no
+  bracket).
+
+`frontend/src/pages/Scoreboard.tsx` is now a thin wrapper: fetches the draw,
+runs the same permission/not-found guards as before, and adapts
+`setBoutScore`/`setBoutWinner` into `onSaveResult`/`onSaveWinnerOnly`
+callbacks (still doing its own toast/navigate/error handling — the shared
+component only clears its own persisted-bout cache on a successful save,
+via a rethrow-on-failure contract). Net: no behavior change for real bouts,
+same files doing the same network calls, just relocated.
+
+New page: `frontend/src/pages/hub/Practice.tsx` — owns two `Input`s for
+editable AKA/AO names (default "AKA"/"AO", trimmed and falling back to the
+default if blank) above the shared `<BoutScoreboard persistKey={null}
+allowDrawDeclaration />`, with no `onSaveResult`/`onSaveWinnerOnly` at all.
+
+**One deliberate behavior change to the shared dialog, applied to *both*
+modes:** the resolution dialog now shows a large "AKA WINS" / "AO WINS"
+banner (colored per side) once a winner is known — including once a hantei
+pick is made — instead of the old small "Winner: {name} (outcome)" line that
+stayed under the still-visible hantei picker. This was the brief's explicit
+ask ("big clear... banner using the existing resolve-outcome logic") and
+felt reasonable to apply uniformly rather than forking the dialog's whole
+layout by mode. Because this removes the old "pick again from the same
+screen" affordance, added a small "Change hantei pick" / "Change" link back
+to the picker/draw state — the one deviation from a pure lines-for-lines
+port, called out here rather than left silent.
+
+**Permissioning:** `roles: ALL` (`SUPERADMIN, ADMIN, CLUB_MANAGER, COACH,
+ATHLETE`) in `EventHubLayout.tsx`'s `TABS` — the same, least-privileged set
+already used by Overview/Draws/Run/Results, matching the brief's "match
+whatever the least-privileged existing hub route uses" literally. No
+additional in-page permission check, consistent with those other tabs.
+Tab placed between Estimator and Run; route `/hub/practice` →
+`pages/hub/Practice.tsx`.
+
+**Layout tradeoff, called out rather than fixed:** the real Scoreboard is a
+full-screen route with no `AppShell` chrome. Embedding the same
+`min-h-screen`-styled component inside a hub tab (which lives inside
+`AppShell`'s `max-w-7xl` padded container, per the brief's explicit "new tab
+in the event hub" placement) means the Practice tab renders as a very tall,
+width-constrained panel rather than a true edge-to-edge takeover. Chose not
+to special-case the hub layout to break out of that container — a real fix
+would mean either a "chromeless" hub-tab escape hatch or duplicating
+`AppShell`'s container math with negative margins guessed at rather than
+verified; neither felt like the "small refactor" the brief asked for.
+Flagging this as the one place the practice experience visibly diverges from
+"identical to a real match."
+
+Files: `frontend/src/components/scoreboard/BoutScoreboard.tsx` (new),
+`frontend/src/pages/Scoreboard.tsx` (rewritten as a thin wrapper),
+`frontend/src/pages/hub/Practice.tsx` (new),
+`frontend/src/components/layout/EventHubLayout.tsx`, `frontend/src/App.tsx`.
+No backend changes — this feature is entirely client-side by design.
+
+### Verification (run 2026-08-08)
+
+`backend` / `frontend`: `npx tsc --noEmit` both clean (backend untouched,
+checked anyway per the standard). `npx tsx scripts/test-scoreboard.ts` — all
+30 existing checks still pass unchanged, confirming the pure logic in
+`lib/scoreboard.ts` was not touched by this extraction (only the React
+component that consumes it moved/split). No new pure-function tests added:
+the new practice-mode behavior (draw declaration, the winner banner, hiding
+the save flow) lives entirely in `BoutScoreboard.tsx`'s component logic, not
+in a new pure function worth a `test-*.ts` script.
+
+**Not verified in-browser** — not exercised in a running dev server this
+round, per the same standard as the prior entry. In particular unverified:
+the Practice tab actually renders and scores a full bout end-to-end, the
+editable name inputs feed through to both side panels and the projected
+display broadcast, the "Call it a draw" / "Change" affordances behave as
+designed, and the tall/width-constrained layout described above looks
+acceptable rather than broken.
 
 **Score after the buzzer: a post-time awarding window (2026-08-08).**
 Real-world case: judges saw a valid technique land just before the buzzer and

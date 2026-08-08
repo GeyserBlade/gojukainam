@@ -38,6 +38,7 @@ const TABS: HubTab[] = [
   { to: "/hub/review", label: "Review", roles: CLUB, coordinator: true },
   { to: "/hub/draws", label: "Draws", roles: ALL },
   { to: "/hub/estimator", label: "Estimator", roles: ADMIN, coordinator: true },
+  { to: "/hub/practice", label: "Practice", roles: ALL },
   { to: "/hub/run", label: "Run", roles: ALL },
   { to: "/hub/results", label: "Results", roles: ALL },
 ]
