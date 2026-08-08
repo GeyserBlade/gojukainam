@@ -560,6 +560,12 @@ model Bout {
   aoScore   Int?
   outcome   String? // POINTS | GAP | SENSHU | HANTEI | HANSOKU | KIKEN
   scoreJson String? // full per-side breakdown + action log
+  /// True when the captured score includes at least one action entered after
+  /// the bout clock expired (the mat's short post-buzzer awarding window).
+  /// Audit-trail flag only — scoring itself is never blocked by this. Reset
+  /// to false whenever score detail is invalidated (winner-only override,
+  /// upstream bracket correction), same as akaScore/aoScore/outcome/scoreJson.
+  postTime Boolean @default(false)
 
   // Per-bout mat override; null = inherit the draw's mat. Survives recompute
   // (recompute never writes matId), lost only if the bout row is deleted.

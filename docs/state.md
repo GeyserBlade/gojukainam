@@ -4,9 +4,12 @@ This file is the handoff between coding agents. It describes what is in flight
 right now, not the permanent architecture (that's
 [`architecture.md`](architecture.md)).
 
-**Last updated:** 2026-08-07 — by Claude Code: fixed the Run → Plan tab, where
-assigning categories to mats produced only order 0/1 and the mats showed
-nothing (see "In flight" below).
+**Last updated:** 2026-08-08 — by Claude Code: the live scoreboard now allows
+scoring for a short window after the bout clock expires, instead of locking
+out scoring the instant it hits zero (see "In flight" below).
+
+Previously, 2026-08-07: fixed the Run → Plan tab, where assigning categories
+to mats produced only order 0/1 and the mats showed nothing.
 
 Previously, same day: the estimator now estimates WKF double-repechage bronze
 bouts instead of leaving them out entirely — a user check on a real 9-entry
@@ -57,6 +60,133 @@ port; those have since been pushed.) Everything here is verified locally against
 a database, never against production data.
 
 ## In flight (uncommitted)
+
+**Score after the buzzer: a post-time awarding window (2026-08-08).**
+Real-world case: judges saw a valid technique land just before the buzzer and
+need to award it, but the scoreboard locked out scoring the instant the clock
+hit zero.
+
+Root of the diagnosis: the block was **100% client-side, in
+`frontend/src/pages/Scoreboard.tsx`** — `boutOver = state.ended !== null ||
+clockMs === 0`, and `controlsDisabled = boutOver || saving` gets passed down
+to disable every score/penalty/senshu/kiken button. The backend
+(`PUT /draws/:id/bouts/:boutId(/score)`, `DrawService.setBoutWinner`/
+`setBoutScore`) has **no time, lock, or status gate at all** — it already
+freely accepts a score write at any point, before or long after a bout, draw
+locked or not. So there was no server-side enforcement to relax; this is
+entirely a frontend UX fix. Also found in passing: the existing ±10-second
+clock buttons were only disabled by `state.ended !== null`, not by
+`clockMs === 0` — meaning "bump the clock back up to reopen scoring" already
+worked as an undocumented workaround. This feature replaces that improvised
+trick with an explicit, correct mechanism and disables the ±10s buttons once
+the main clock is spent (see below).
+
+**Design shipped: the recommended "awarding window" shape**, not the smaller
+fallback (always-open-until-Finalize) — nothing in the code argued against
+the richer version, since there's a real, live, ticking client clock
+(`clockMs`/`running`, already built for the atoshi-baraku warning and end
+buzzer) to key a genuine short window off. Model, in
+`frontend/src/lib/scoreboard.ts`:
+
+- `awardMs: number | null` — `null` = not in a window, a number = counting
+  down (`0` = spent). Deliberately not a named state-machine type: the rest
+  of this page is already written in a reactive/derived style (`boutOver`,
+  `resolution` etc. are plain computed values, not stored transitions), so
+  this follows the same shape rather than introducing a second style.
+- `startAwardingWindow(ended, awardMs, awardWindowMs)` — starts the window
+  when the main clock hits zero, *unless* the bout already ended decisively
+  (gap/hansoku/kiken at the same instant — no window needed, nothing left to
+  award). Idempotent, so it's safe to call from an effect that might re-fire.
+- `tickAward` — same `Math.max(0, ms - delta)` shape as the existing main
+  clock ticker, ticks independently (the award window isn't pausable —
+  once started it just runs, since it's meant to be a short, unambiguous
+  grace period, not something the operator manages mid-score).
+- `finalizeAwardingWindow()` — the new "Finalize result" button; always
+  closes the window to exactly `0` immediately, same end-state as it running
+  out naturally.
+- `isBoutOver({ ended, clockMs, awardMs })` — the single source of truth
+  `controlsDisabled` now derives from: locked once decisively ended
+  (regardless of the window), or once the clock is at zero *and* no window
+  is actively counting down. This is the one-line summary of the whole
+  feature: during an active window, `clockMs === 0` no longer means locked.
+- `anyPostTime(log)` — every dispatched action (`SCORE`/`PENALTY`/`SENSHU`/
+  `KIKEN`) already carried `at: number`; added an optional `postTime?:
+  boolean`, tagged `true` at dispatch time whenever `awardMs` is actively
+  counting down. `anyPostTime` folds the log to one flag for the save
+  payload — this is the audit-trail request from the brief, done at the
+  action level (which action was late) not just a single "was this bout
+  late" bit, and it rides along for free inside the existing `scoreJson`
+  blob too since that already serializes the whole log.
+
+**Backend, additive only — no gate added.** `Bout.postTime Boolean @default(false)`
+(migration `20260808062535_add_bout_post_time`). `SetBoutScore` validator
+gained an optional `postTime`; `DrawService.setBoutScore` persists it and
+includes it in the `SCORE` audit log's `diffJson`. Reset to `false` in the
+two places the other score fields already get nulled out for the same
+reason (stale detail): `setBoutWinner`'s winner-only override, and
+`recompute`'s upstream-correction branch. Deliberately did **not** add a
+lock/status check to the score routes — that would be a scope-creep gate the
+brief didn't ask for, and (as found above) the routes never had one; adding
+one now would be a behavior change unrelated to this feature.
+
+**Other UI decisions:**
+
+- ±10s clock buttons, and Hajime/Yame, are now also disabled once
+  `clockMs === 0` (previously only gated on `state.ended`/`saving`) — the
+  awarding window is the one correct path for "more time after the buzzer"
+  now, not the old clock-bump workaround.
+- The awarding window's remaining time and length are persisted alongside
+  the rest of the in-progress bout (`localStorage`, crash/refresh resume),
+  so a refresh mid-window resumes where it left off instead of granting a
+  fresh window.
+- Window length (`awardWindowMs`, default 30s) lives in `ScoreboardSettings`
+  next to `durationMs`/`winByGap`, with a matching settings-dialog input.
+  The brief said "configurable later" — made it configurable now instead,
+  since it's the exact same settings mechanism already in the file; there
+  was no real reason to hardcode it and revisit this component again later.
+- No new visual indicator for `postTime` on `BracketView`/results — storage
+  + the live scoreboard experience satisfies "the audit trail distinguishes
+  normal from post-buzzer awards" as asked; a badge elsewhere is a natural,
+  separate follow-up, not implemented here.
+- Permissioning untouched: still `requireEventManager` (admin or this
+  event's coordinator) server-side, still `canManageEvent` client-side —
+  scoring *when* changed, scoring *who* did not.
+
+Files: `backend/prisma/schema.prisma`, `backend/prisma/migrations/20260808062535_add_bout_post_time/`,
+`backend/src/utils/validators.ts`, `backend/src/services/draw.service.ts`,
+`backend/scripts/test-bout-scoring.ts` (new), `frontend/src/lib/scoreboard.ts`,
+`frontend/src/lib/draws.ts`, `frontend/src/pages/Scoreboard.tsx`,
+`frontend/scripts/test-scoreboard.ts` (new).
+
+### Verification (run 2026-08-08)
+
+`backend` / `frontend`: `npx tsc --noEmit` both clean. Migration applied
+against local Postgres (shadow-db permission needed a temporary local
+superuser `ALTER ROLE ... CREATEDB`, reverted immediately after).
+
+`npx tsx scripts/test-scoreboard.ts` (frontend, pure functions) — 30 checks,
+including the exact lifecycle named in the brief: clock reaches 0 → window
+opens → a late score is tagged `postTime` → window ticks to 0 → bout locks;
+plus "Finalize clicked early" and "a decisive ending pre-empts an active
+window" as separate scenarios.
+
+`npx tsx scripts/test-bout-scoring.ts` (backend, real HTTP against local
+Postgres, isolated port so as not to disturb another session's dev server)
+— 15 checks: `postTime` round-trips through both the write response and a
+fresh `GET`; defaults to `false` when omitted; resets on a winner-only
+override; the audit log's `diffJson` reflects `postTime` on the write
+immediately after it (checked per-write, not just "the latest row", after
+catching a mistake doing exactly that while writing this test); a
+coordinator (not just an admin) can set it; a plain club manager with the
+grant revoked still gets 403 — confirming permissioning is unchanged.
+`scripts/test-draws.ts` and `scripts/test-event-scope.ts` re-run clean
+(0 failures) as regression checks.
+
+**Not verified in-browser** — the user explicitly asked for this to be
+called out rather than exercised this round. The actual timer ticking,
+the amber banner's appearance/timing against the real 100ms interval, the
+Finalize button's placement, and the settings-dialog input have only been
+read, not clicked through.
 
 **Run → Plan tab: mat assignment actually works now (2026-08-07).**
 User report: "as i add categories to mats or floors, it shows either 1 or 0 as

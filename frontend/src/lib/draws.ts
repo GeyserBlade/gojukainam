@@ -25,6 +25,8 @@ export interface DrawBout {
   aoScore: number | null;
   outcome: BoutOutcome | null;
   scoreJson: string | null;
+  /** True if the captured score includes at least one post-buzzer award. */
+  postTime: boolean;
 }
 
 export type DrawStatus = "DRAWN" | "IN_PROGRESS" | "COMPLETED";
@@ -157,6 +159,7 @@ export async function setBoutScore(
     akaScore: number;
     aoScore: number;
     scoreJson?: string;
+    postTime?: boolean;
   }
 ): Promise<DrawDetail> {
   const res = await api.put(`/draws/${drawId}/bouts/${boutId}/score`, data);

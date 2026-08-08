@@ -25,11 +25,20 @@ export const HANSOKU_LEVEL = 5 // penalty value when H is reached (1-based)
 export type ScoreKind = "yuko" | "wazaari" | "ippon"
 export const SCORE_POINTS: Record<ScoreKind, number> = { yuko: 1, wazaari: 2, ippon: 3 }
 
+// `postTime` marks an action entered during the post-buzzer awarding window
+// (see BoutClockState below) — optional and defaulting to falsy everywhere
+// it's read, so existing persisted logs from before this field existed
+// replay identically.
 export type BoutAction =
-  | { type: "SCORE"; side: Side; kind: ScoreKind; at: number }
-  | { type: "PENALTY"; side: Side; level: number; at: number } // set ladder level 0..5
-  | { type: "SENSHU"; side: Side | null; at: number } // manual override / clear
-  | { type: "KIKEN"; side: Side; at: number } // side withdraws -> opponent wins
+  | { type: "SCORE"; side: Side; kind: ScoreKind; at: number; postTime?: boolean }
+  | { type: "PENALTY"; side: Side; level: number; at: number; postTime?: boolean } // set ladder level 0..5
+  | { type: "SENSHU"; side: Side | null; at: number; postTime?: boolean } // manual override / clear
+  | { type: "KIKEN"; side: Side; at: number; postTime?: boolean } // side withdraws -> opponent wins
+
+/** True if any action in the log was entered after the clock expired. */
+export function anyPostTime(log: BoutAction[]): boolean {
+  return log.some((a) => a.postTime === true)
+}
 
 export interface SideScore {
   yuko: number
@@ -154,18 +163,90 @@ export function resolveOutcome(state: BoutScoreState): Resolution {
 }
 
 // ---------------------------------------------------------------------------
+// Post-buzzer awarding window
+//
+// The bout clock (clockMs, tracked in the page, not here) is unaffected: it
+// still runs down to 0 and buzzes exactly as before. What changes is what
+// happens next. Previously hitting 0 disabled scoring immediately. Now:
+// hitting 0 starts a short second countdown (`awardMs`) during which
+// scoring stays open — real-world case: judges saw a valid technique just
+// before the buzzer and need a moment to award it. Modelled as
+// `number | null` rather than a named-state machine because the rest of
+// this page is already written in that reactive/derived style (`boutOver`,
+// `resolution` etc. are plain computed values, not stored state) — null
+// means "not in a window", a number means "counting down (or spent, at 0)".
+//
+// Deliberately kept separate from `BoutScoreState.ended`: a decisive
+// in-bout ending (gap win / hansoku / kiken) always locks the bout
+// immediately regardless of the award window, exactly as it did before this
+// feature existed — see `isBoutOver`.
+
+export const DEFAULT_AWARD_WINDOW_MS = 30_000
+
+/**
+ * One tick of the awarding countdown. No-op if not currently in a window
+ * (null) or already exhausted (0) — mirrors how the main clock's own
+ * `Math.max(0, ms - delta)` ticking is written in Scoreboard.tsx.
+ */
+export function tickAward(awardMs: number | null, deltaMs: number): number | null {
+  if (awardMs === null || awardMs <= 0) return awardMs
+  return Math.max(0, awardMs - deltaMs)
+}
+
+/**
+ * Called when the main clock reaches zero. Starts the window unless the
+ * bout is already decisively over (no window needed — there's nothing left
+ * to award) or a window has already been started (idempotent, so this is
+ * safe to call from an effect that might re-fire).
+ */
+export function startAwardingWindow(
+  ended: BoutScoreState["ended"],
+  awardMs: number | null,
+  awardWindowMs: number,
+): number | null {
+  if (ended !== null) return awardMs
+  if (awardMs !== null) return awardMs
+  return awardWindowMs
+}
+
+/** Operator clicks "Finalize result" — closes the window immediately. */
+export function finalizeAwardingWindow(): number {
+  return 0
+}
+
+/**
+ * Whether the bout is locked (no more scoring, resolution stands). A
+ * decisive ending always locks it. Otherwise it's locked once the clock has
+ * hit zero *and* there is no active awarding window still counting down —
+ * i.e. the window was never entered, has been spent, or was finalized early.
+ */
+export function isBoutOver(params: {
+  ended: BoutScoreState["ended"]
+  clockMs: number
+  awardMs: number | null
+}): boolean {
+  const inAwardingWindow = params.awardMs !== null && params.awardMs > 0
+  return params.ended !== null || (params.clockMs === 0 && !inAwardingWindow)
+}
+
+// ---------------------------------------------------------------------------
 // Settings (persisted globally)
 
 export interface ScoreboardSettings {
   durationMs: number
   winByGap: number
   soundOn: boolean
+  /** Post-buzzer awarding window length. Configurable, unlike the v1 brief's
+   *  "say 30 seconds, configurable later" — it's the exact same settings
+   *  pattern as durationMs/winByGap, so there was no reason to hardcode it. */
+  awardWindowMs: number
 }
 
 export const DEFAULT_SETTINGS: ScoreboardSettings = {
   durationMs: 120_000, // 2:00
   winByGap: 8,
   soundOn: true,
+  awardWindowMs: DEFAULT_AWARD_WINDOW_MS,
 }
 
 export const DURATION_PRESETS = [60_000, 90_000, 120_000, 180_000]
@@ -194,6 +275,9 @@ export interface PersistedBout {
   clockMs: number
   durationMs: number
   winByGap: number
+  /** null = not in the awarding window; persisted so a refresh mid-window
+   *  resumes where it left off instead of granting a fresh window. */
+  awardMs: number | null
 }
 
 const boutKey = (boutId: string) => `scoreboard:bout:${boutId}`

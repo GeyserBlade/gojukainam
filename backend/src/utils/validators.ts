@@ -171,6 +171,10 @@ export const SetBoutScore = z.object({
   akaScore: z.number().int().min(0).max(99),
   aoScore: z.number().int().min(0).max(99),
   scoreJson: z.string().max(20000).optional(),
+  /// True when at least one scored action was entered after the bout clock
+  /// expired (the mat's post-buzzer awarding window). Audit-trail only — the
+  /// route never uses this to accept or reject the write.
+  postTime: z.boolean().optional(),
 });
 
 export const BoutParams = z.object({

@@ -402,6 +402,7 @@ async function recompute(tx: Tx, drawId: string) {
           aoScore: null,
           outcome: null,
           scoreJson: null,
+          postTime: false,
         },
       });
     }
@@ -865,7 +866,14 @@ export class DrawService {
       // Winner-only capture: any previous score detail no longer applies
       await tx.bout.update({
         where: { id: boutId },
-        data: { winnerEntryId, akaScore: null, aoScore: null, outcome: null, scoreJson: null },
+        data: {
+          winnerEntryId,
+          akaScore: null,
+          aoScore: null,
+          outcome: null,
+          scoreJson: null,
+          postTime: false,
+        },
       });
       await recompute(tx, drawId);
       await tx.auditLog.create({
@@ -894,6 +902,7 @@ export class DrawService {
       akaScore: number;
       aoScore: number;
       scoreJson?: string;
+      postTime?: boolean;
     },
     user: { id: string }
   ) {
@@ -904,6 +913,8 @@ export class DrawService {
     if (data.winnerEntryId !== bout.akaEntryId && data.winnerEntryId !== bout.aoEntryId)
       throw { status: 422, message: "Winner must be one of the bout's fighters" };
 
+    const postTime = data.postTime ?? false;
+
     await prisma.$transaction(async (tx) => {
       await tx.bout.update({
         where: { id: boutId },
@@ -913,6 +924,7 @@ export class DrawService {
           aoScore: data.aoScore,
           outcome: data.outcome,
           scoreJson: data.scoreJson ?? null,
+          postTime,
         },
       });
       await recompute(tx, drawId);
@@ -928,6 +940,7 @@ export class DrawService {
             outcome: data.outcome,
             akaScore: data.akaScore,
             aoScore: data.aoScore,
+            postTime,
           }),
         },
       });
@@ -1009,6 +1022,7 @@ export class DrawService {
           aoScore: stored?.aoScore ?? null,
           outcome: stored?.outcome ?? null,
           scoreJson: stored?.scoreJson ?? null,
+          postTime: stored?.postTime ?? false,
         };
       }),
       placements: {

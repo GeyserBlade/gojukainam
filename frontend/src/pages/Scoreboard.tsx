@@ -2,9 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
 import { useQuery } from "@tanstack/react-query"
 import {
+  AlertTriangle,
   ArrowLeft,
   ArrowLeftRight,
   ExternalLink,
+  Flag,
   Minus,
   Pause,
   Play,
@@ -34,9 +36,12 @@ import {
   HANSOKU_LEVEL,
   PENALTY_FULL_NAMES,
   PENALTY_LABELS,
+  anyPostTime,
   clearPersistedBout,
+  finalizeAwardingWindow,
   formatClock,
   initialBoutState,
+  isBoutOver,
   loadPersistedBout,
   loadSettings,
   persistBout,
@@ -47,6 +52,8 @@ import {
   resolveOutcome,
   saveSettings,
   sidePoints,
+  startAwardingWindow,
+  tickAward,
   type BoutAction,
   type ChannelMessage,
   type DisplayPayload,
@@ -254,13 +261,18 @@ export default function ScoreboardPage() {
   // -- clock ----------------------------------------------------------------
   const [clockMs, setClockMs] = useState(settings.durationMs)
   const [running, setRunning] = useState(false)
+  // Post-buzzer awarding window: null = not in one, a number = counting down
+  // (0 = spent). See lib/scoreboard.ts for why this shape, not a named FSM.
+  const [awardMs, setAwardMs] = useState<number | null>(null)
   const [resolutionOpen, setResolutionOpen] = useState(false)
   const [hanteiWinner, setHanteiWinner] = useState<Side | null>(null)
   const [saving, setSaving] = useState(false)
   const atoshiFiredRef = useRef(false)
   const endFiredRef = useRef(false)
+  const awardFiredRef = useRef(false)
 
   const atoshiBaraku = clockMs <= ATOSHI_MS && clockMs > 0
+  const awarding = awardMs !== null && awardMs > 0
 
   // resume persisted bout on mount
   useEffect(() => {
@@ -269,6 +281,7 @@ export default function ScoreboardPage() {
     if (persisted) {
       setLog(persisted.log)
       setClockMs(persisted.clockMs)
+      setAwardMs(persisted.awardMs ?? null)
       if (persisted.clockMs <= ATOSHI_MS) atoshiFiredRef.current = true
       toast.info("Resumed bout in progress")
     }
@@ -278,16 +291,17 @@ export default function ScoreboardPage() {
   // persist on change
   useEffect(() => {
     if (!boutId) return
-    if (log.length === 0 && clockMs === settings.durationMs) return
+    if (log.length === 0 && clockMs === settings.durationMs && awardMs === null) return
     persistBout(boutId, {
       log,
       clockMs,
       durationMs: settings.durationMs,
       winByGap: settings.winByGap,
+      awardMs,
     })
-  }, [boutId, log, clockMs, settings.durationMs, settings.winByGap])
+  }, [boutId, log, clockMs, awardMs, settings.durationMs, settings.winByGap])
 
-  // ticking
+  // ticking — main clock
   useEffect(() => {
     if (!running) return
     const id = window.setInterval(() => {
@@ -295,6 +309,18 @@ export default function ScoreboardPage() {
     }, 100)
     return () => window.clearInterval(id)
   }, [running])
+
+  // ticking — awarding window. Unlike the main clock this isn't
+  // start/pause-able: once started it runs on its own, since it's meant to
+  // be a short, unambiguous grace period rather than something the operator
+  // manages while also trying to score a play.
+  useEffect(() => {
+    if (!awarding) return
+    const id = window.setInterval(() => {
+      setAwardMs((ms) => tickAward(ms, 100))
+    }, 100)
+    return () => window.clearInterval(id)
+  }, [awarding])
 
   // atoshi baraku signal
   useEffect(() => {
@@ -304,7 +330,9 @@ export default function ScoreboardPage() {
     }
   }, [atoshiBaraku, running, settings.soundOn])
 
-  // time up
+  // time up: buzzer fires as before, but instead of locking the bout
+  // immediately this starts the awarding window (unless the bout already
+  // ended decisively at the same instant — startAwardingWindow no-ops then).
   useEffect(() => {
     if (clockMs === 0 && running) {
       setRunning(false)
@@ -312,15 +340,29 @@ export default function ScoreboardPage() {
         endFiredRef.current = true
         if (settings.soundOn) playEndBuzzer()
       }
+      setAwardMs((prev) => startAwardingWindow(state.ended, prev, settings.awardWindowMs))
+    }
+  }, [clockMs, running, settings.soundOn, settings.awardWindowMs, state.ended])
+
+  // awarding window closed (naturally ticked to 0, or "Finalize result"
+  // clicked) — this is the moment the bout actually locks, so this is where
+  // the resolution dialog opens rather than at the buzzer itself.
+  useEffect(() => {
+    if (awardMs === 0 && !awardFiredRef.current) {
+      awardFiredRef.current = true
       setResolutionOpen(true)
     }
-  }, [clockMs, running, settings.soundOn])
+  }, [awardMs])
 
-  // bout ended by state (gap / hansoku / kiken)
+  // bout ended by state (gap / hansoku / kiken) — always locks immediately,
+  // award window or not: there's nothing left to wait for once the bout is
+  // decisively over.
   useEffect(() => {
     if (state.ended && !endFiredRef.current) {
       endFiredRef.current = true
+      awardFiredRef.current = true // a decisive ending pre-empts the window
       setRunning(false)
+      setAwardMs(0)
       if (settings.soundOn) playEndBuzzer()
       setResolutionOpen(true)
     }
@@ -335,7 +377,7 @@ export default function ScoreboardPage() {
   const payloadRef = useRef<DisplayPayload | null>(null)
 
   const resolution = useMemo(() => resolveOutcome(state), [state])
-  const boutOver = state.ended !== null || clockMs === 0
+  const boutOver = isBoutOver({ ended: state.ended, clockMs, awardMs })
 
   useEffect(() => {
     const channel = new BroadcastChannel(CHANNEL_NAME)
@@ -402,7 +444,7 @@ export default function ScoreboardPage() {
   }, [])
 
   const score = (side: Side, kind: ScoreKind) => {
-    dispatch({ type: "SCORE", side, kind, at: now() })
+    dispatch({ type: "SCORE", side, kind, at: now(), postTime: awarding })
     if (settings.soundOn) playScoreBlip()
   }
   const removeLastScore = (side: Side) => {
@@ -414,31 +456,39 @@ export default function ScoreboardPage() {
     })
   }
   const setPenalty = (side: Side, level: number) =>
-    dispatch({ type: "PENALTY", side, level, at: now() })
+    dispatch({ type: "PENALTY", side, level, at: now(), postTime: awarding })
   const toggleSenshu = (side: Side) =>
-    dispatch({ type: "SENSHU", side: state[side].senshu ? null : side, at: now() })
-  const kiken = (side: Side) => dispatch({ type: "KIKEN", side, at: now() })
+    dispatch({ type: "SENSHU", side: state[side].senshu ? null : side, at: now(), postTime: awarding })
+  const kiken = (side: Side) => dispatch({ type: "KIKEN", side, at: now(), postTime: awarding })
   const undo = () => setLog((prev) => prev.slice(0, -1))
 
   const resetBout = () => {
     setLog([])
     setClockMs(settings.durationMs)
     setRunning(false)
+    setAwardMs(null)
     setResolutionOpen(false)
     setHanteiWinner(null)
     atoshiFiredRef.current = false
     endFiredRef.current = false
+    awardFiredRef.current = false
     if (boutId) clearPersistedBout(boutId)
   }
 
+  // Only adjusts the main clock, so it's a no-op once that clock is spent —
+  // "more time" past the buzzer is what the awarding window (and Finalize
+  // result) is for now, not winding the main clock back up.
   const adjustClock = (deltaMs: number) =>
     setClockMs((ms) => {
+      if (ms === 0) return ms
       const next = Math.max(0, Math.min(settings.durationMs, ms + deltaMs))
       // Re-arm the signals when the timekeeper winds the clock back up
       if (next > 0) endFiredRef.current = false
       if (next > ATOSHI_MS) atoshiFiredRef.current = false
       return next
     })
+
+  const finalizeResult = () => setAwardMs(finalizeAwardingWindow())
 
   const saveResult = async () => {
     if (!drawId || !boutId || !bout?.aka || !bout?.ao) return
@@ -454,6 +504,7 @@ export default function ScoreboardPage() {
         outcome: hanteiWinner ? "HANTEI" : resolution.outcome,
         akaScore: sidePoints(state.aka),
         aoScore: sidePoints(state.ao),
+        postTime: anyPostTime(state.log),
         scoreJson: JSON.stringify({
           aka: state.aka,
           ao: state.ao,
@@ -604,12 +655,30 @@ export default function ScoreboardPage() {
             </p>
           )}
 
+          {/* Post-buzzer awarding window: real-world case is a valid technique
+              landed just before the buzzer — the clock is done, but scoring
+              stays open a little longer rather than locking instantly. */}
+          {awarding && (
+            <div
+              data-testid="awarding-banner"
+              className="flex w-full flex-col items-center gap-1 rounded-md border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-center"
+            >
+              <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-amber-400">
+                <AlertTriangle className="h-3.5 w-3.5" />
+                Time expired — awarding score if any
+              </p>
+              <p data-testid="award-clock" className="font-mono text-2xl font-bold tabular-nums text-amber-300">
+                {formatClock(awardMs ?? 0)}
+              </p>
+            </div>
+          )}
+
           <div className="flex items-center gap-2">
             <Button
               variant="secondary"
               size="icon"
               className="bg-white/10 text-white hover:bg-white/25"
-              disabled={saving || state.ended !== null}
+              disabled={saving || state.ended !== null || clockMs === 0}
               onClick={() => adjustClock(-10_000)}
               title="-10 seconds"
             >
@@ -621,7 +690,7 @@ export default function ScoreboardPage() {
                 "h-16 w-32 text-lg",
                 running ? "bg-amber-500 hover:bg-amber-600" : "bg-emerald-600 hover:bg-emerald-700",
               )}
-              disabled={boutOver && clockMs === 0}
+              disabled={saving || state.ended !== null || clockMs === 0}
               onClick={() => setRunning((r) => !r)}
             >
               {running ? <Pause className="h-6 w-6" /> : <Play className="h-6 w-6" />}
@@ -631,7 +700,7 @@ export default function ScoreboardPage() {
               variant="secondary"
               size="icon"
               className="bg-white/10 text-white hover:bg-white/25"
-              disabled={saving || state.ended !== null}
+              disabled={saving || state.ended !== null || clockMs === 0}
               onClick={() => adjustClock(10_000)}
               title="+10 seconds"
             >
@@ -664,14 +733,25 @@ export default function ScoreboardPage() {
             Win by {settings.winByGap} points gap · {formatClock(settings.durationMs)} bout
           </p>
 
-          <Button
-            variant="secondary"
-            className="bg-white/15 text-white hover:bg-white/30"
-            disabled={saving}
-            onClick={() => setResolutionOpen(true)}
-          >
-            End bout / result
-          </Button>
+          {awarding ? (
+            <Button
+              className="bg-amber-500 text-black hover:bg-amber-600"
+              disabled={saving}
+              onClick={finalizeResult}
+            >
+              <Flag className="h-4 w-4" />
+              Finalize result
+            </Button>
+          ) : (
+            <Button
+              variant="secondary"
+              className="bg-white/15 text-white hover:bg-white/30"
+              disabled={saving}
+              onClick={() => setResolutionOpen(true)}
+            >
+              End bout / result
+            </Button>
+          )}
         </div>
 
         {renderSide(akaOnLeft ? "ao" : "aka")}
@@ -785,6 +865,27 @@ export default function ScoreboardPage() {
                   if (Number.isFinite(gap) && gap >= 2 && gap <= 20) updateSettings({ winByGap: gap })
                 }}
               />
+            </div>
+            <div>
+              <Label className="mb-1.5 block">Awarding window after time expires</Label>
+              <Input
+                type="number"
+                min={0}
+                max={120}
+                className="w-24"
+                placeholder="secs"
+                value={Math.round(settings.awardWindowMs / 1000)}
+                onChange={(e) => {
+                  const secs = Number(e.target.value)
+                  if (Number.isFinite(secs) && secs >= 0 && secs <= 120) {
+                    updateSettings({ awardWindowMs: secs * 1000 })
+                  }
+                }}
+              />
+              <p className="mt-1 text-xs text-muted-foreground">
+                How long scoring stays open after the buzzer for a technique landed
+                just before time — e.g. judges awarding a score seen right at the buzzer.
+              </p>
             </div>
             <div className="flex items-center justify-between">
               <Label>Sounds (atoshi baraku + end buzzer)</Label>
