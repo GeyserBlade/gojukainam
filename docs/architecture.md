@@ -66,9 +66,15 @@ and hydrates from `GET /api/auth/me`. `<Protected>` in `App.tsx` guards routes.
 Enums: `Role`, `Gender`, `EntryType`, `EntryStatus`, `TeamStatus`,
 `InvoiceStatus`, `EventStatus`, `DocumentType`, `CategoryType`.
 
-Models: `User`, `MagicLink`, `PasswordReset`, `Club`, `Event`, `Division`,
-`WeightClass`, `Belt`, `Athlete`, `Entry`, `Team`, `TeamMember`, `Invoice`,
-`AuditLog`, `Document`.
+Registration and billing: `User`, `MagicLink`, `PasswordReset`, `Club`, `Event`,
+`Division`, `WeightClass`, `Belt`, `Athlete`, `Entry`, `Team`, `TeamMember`,
+`Invoice`, `AuditLog`, `Document`, `EventCoordinator`.
+
+Competition day: `Draw`, `DrawSlot`, `Bout`, `Mat`, `ScheduleBlock`. These carry
+both the plan and the run — `Draw.matId`/`Draw.matOrder` say which floor a
+category runs on and in what order, and `ScheduleBlock` holds the ceremonies and
+breaks placed between them. Read `schema.prisma` itself before changing any of
+them; the doc names them but the reasoning lives in the schema comments.
 
 Key relationships:
 

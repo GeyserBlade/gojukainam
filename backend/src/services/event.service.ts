@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { prisma } from "../lib/prisma.js";
-import { CreateEvent, UpdateEvent, CreateDivision, UpdateDivision, CreateWeightClass, UpdateWeightClass } from "../utils/validators.js";
+import { CreateEvent, UpdateEvent, CreateDivision, UpdateDivision, CreateWeightClass, UpdateWeightClass, EventTimingConfig } from "../utils/validators.js";
 import { ageOn } from "../utils/eligibility.js";
 import { TEMPLATES, TEMPLATE_META, type TemplateName } from "../data/wkf-template.js";
 import type { Gender } from "@prisma/client";
@@ -311,6 +311,83 @@ export class EventService {
       age: ageOn(event.startDate, athlete.dob),
       isEntered: enteredAthleteIds.has(athlete.id),
     }));
+  }
+
+  // ============ Timing config ============
+  //
+  // Tournament-wide timing defaults (Event.timingJson). Read always returns a
+  // complete config: an event that has never been configured, or one whose
+  // stored JSON predates a field, is filled in from EventTimingConfig's
+  // defaults rather than handing the caller a half-empty object to guess at.
+
+  static async getTiming(eventId: string) {
+    const event = await prisma.event.findUnique({
+      where: { id: eventId },
+      select: { timingJson: true },
+    });
+    if (!event) throw { status: 404, message: "Event not found" };
+    return this.parseTiming(event.timingJson);
+  }
+
+  /**
+   * Stored JSON -> a complete config. Unparseable or non-object JSON falls back
+   * to the defaults instead of throwing: a corrupt blob must not make the event
+   * hub's Overview tab unreadable, and the next save overwrites it anyway.
+   */
+  static parseTiming(timingJson: string | null) {
+    if (!timingJson) return EventTimingConfig.parse({});
+    let raw: unknown;
+    try {
+      raw = JSON.parse(timingJson);
+    } catch {
+      return EventTimingConfig.parse({});
+    }
+    const parsed = EventTimingConfig.safeParse(raw);
+    return parsed.success ? parsed.data : EventTimingConfig.parse({});
+  }
+
+  static async updateTiming(eventId: string, data: unknown) {
+    const config = EventTimingConfig.parse(data);
+    await prisma.event.update({
+      where: { id: eventId },
+      data: { timingJson: JSON.stringify(config) },
+    });
+    // The normalized config, not the raw body — the caller's partial input has
+    // had every missing field defaulted by now, and that's what was stored.
+    return config;
+  }
+
+  /**
+   * Point the timing config's mat count at the mats that actually exist.
+   *
+   * `EventTimingConfig.mats` and the `Mat` rows are two statements of the same
+   * fact, and before the plan board existed only the estimator read the first
+   * one, so drift was invisible. Adding or removing a floor on the plan is the
+   * organizer saying how many floors the tournament has — this makes the
+   * estimator and every other reader of the config agree with that, instead of
+   * quietly running on a number nobody has touched since setup.
+   *
+   * Read-modify-write of the whole blob rather than a partial patch: the config
+   * is one JSON column, and `parseTiming` has already filled in every default,
+   * so what gets written back is complete either way.
+   */
+  static async syncMatCount(eventId: string) {
+    const [event, matCount] = await Promise.all([
+      prisma.event.findUnique({ where: { id: eventId }, select: { timingJson: true } }),
+      prisma.mat.count({ where: { eventId } }),
+    ]);
+    if (!event) return;
+    // The config's floor <-> mat mapping has no meaning at zero, and the Zod
+    // schema's floor is 1, so an event with every mat deleted keeps the last
+    // count rather than failing the write.
+    if (matCount < 1) return;
+
+    const timing = this.parseTiming(event.timingJson);
+    if (timing.mats === matCount) return;
+    await prisma.event.update({
+      where: { id: eventId },
+      data: { timingJson: JSON.stringify({ ...timing, mats: matCount }) },
+    });
   }
 
   static async updateConfig(eventId: string, config: any) {

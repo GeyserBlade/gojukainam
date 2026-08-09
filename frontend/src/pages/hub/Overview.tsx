@@ -15,6 +15,7 @@ import { useSelectedEvent } from "@/contexts/SelectedEventContext"
 import { Card, CardContent } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
 import { PublicBoardShare } from "@/components/events/PublicBoardShare"
+import { EventTimingCard } from "@/components/events/EventTimingCard"
 import { cn } from "@/lib/utils"
 import { getReadiness } from "@/lib/events"
 
@@ -136,6 +137,8 @@ export default function Overview() {
         <CheckCircle2 className="size-3.5" />
         {r.divisions} division{r.divisions === 1 ? "" : "s"} configured.
       </p>
+
+      <EventTimingCard eventId={eventId} canManage={canManage} />
 
       {canManage && event && <PublicBoardShare event={event} />}
     </div>

@@ -18,6 +18,7 @@ import {
   EligibleAthletesQuery,
   AthletePoolQuery,
   ApplyTemplate,
+  EventTimingConfig,
   SetPublicAccess,
   AddCoordinator,
   CoordinatorParams,
@@ -332,6 +333,31 @@ router.post("/:id/apply-template", requireEventManager({ in: "params", key: "id"
     if (err.status && err.message) {
       return res.status(err.status).json({ error: err.message });
     }
+    next(err);
+  }
+});
+
+// ============ Timing ============
+
+// tournament timing defaults (any logged user — coaches and clubs need to know
+// when the ceremonies and lunch break fall; only managers may change them)
+router.get("/:id/timing", validate(IdParam, "params"), async (req, res, next) => {
+  try {
+    res.json(await EventService.getTiming(getParam(req.params.id)));
+  } catch (err: any) {
+    if (err.status && err.message) {
+      return res.status(err.status).json({ error: err.message });
+    }
+    next(err);
+  }
+});
+
+// set tournament timing defaults (admins, or this event's coordinator — the
+// same people who already edit divisions and event config)
+router.put("/:id/timing", requireEventManager({ in: "params", key: "id" }), validateMultiple({ params: IdParam, body: EventTimingConfig }), async (req, res, next) => {
+  try {
+    res.json(await EventService.updateTiming(getParam(req.params.id), req.body));
+  } catch (err) {
     next(err);
   }
 });

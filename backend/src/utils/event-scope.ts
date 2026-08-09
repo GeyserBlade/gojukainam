@@ -28,7 +28,14 @@ export type EventSource =
   | { in: "params" | "body" | "query"; key: string }
   | { in: "lookup"; key: string; via: LookupModel };
 
-type LookupModel = "division" | "weightClass" | "draw" | "mat" | "entry" | "bout";
+type LookupModel =
+  | "division"
+  | "weightClass"
+  | "draw"
+  | "mat"
+  | "entry"
+  | "bout"
+  | "scheduleBlock";
 
 /**
  * id -> eventId, one per model reachable from a route param. `bout` is the only
@@ -48,6 +55,9 @@ const LOOKUPS: Record<LookupModel, (id: string) => Promise<string | null>> = {
   bout: async (id) =>
     (await prisma.bout.findUnique({ where: { id }, select: { draw: { select: { eventId: true } } } }))?.draw
       ?.eventId ?? null,
+  scheduleBlock: async (id) =>
+    (await prisma.scheduleBlock.findUnique({ where: { id }, select: { eventId: true } }))?.eventId ??
+    null,
 };
 
 async function resolveEventId(req: Request, source: EventSource): Promise<string | null> {

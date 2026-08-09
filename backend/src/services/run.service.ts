@@ -1,5 +1,6 @@
 import { prisma } from "../lib/prisma.js";
 import { computeDrawState } from "./draw.service.js";
+import { EventService } from "./event.service.js";
 
 // Day-of "run the event" board: per-mat queues of ready bouts, mat planning,
 // and check-in. Bracket bouts are compute-derived, so this reads slots +
@@ -147,13 +148,17 @@ export class RunService {
       orderBy: { order: "desc" },
       select: { order: true },
     });
-    return prisma.mat.create({
+    const mat = await prisma.mat.create({
       data: {
         eventId: data.eventId,
         name: data.name,
         order: data.order ?? (last?.order ?? -1) + 1,
       },
     });
+    // Adding a floor on the plan board is the organizer restating how many
+    // floors the tournament runs on; the timing config has to follow.
+    await EventService.syncMatCount(data.eventId);
+    return mat;
   }
 
   static async updateMat(matId: string, data: { name?: string; order?: number }) {
@@ -165,8 +170,21 @@ export class RunService {
   static async deleteMat(matId: string) {
     const mat = await prisma.mat.findUnique({ where: { id: matId } });
     if (!mat) throw { status: 404, message: "Mat not found" };
-    // Draws/bouts referencing this mat fall back to unassigned (SetNull).
+
+    // A completed category's floor is a record of where it was actually fought.
+    // Deleting the mat would null that out (Draw.matId is SetNull), rewriting
+    // history as a side effect of a planning action — so refuse instead.
+    const completed = await prisma.draw.count({ where: { matId, status: "COMPLETED" } });
+    if (completed > 0)
+      throw {
+        status: 409,
+        message: `${mat.name} has ${completed} completed ${completed === 1 ? "category" : "categories"} on it and cannot be removed`,
+      };
+
+    // Remaining draws/bouts referencing this mat fall back to unassigned
+    // (SetNull); its breaks are deleted with it (Cascade).
     await prisma.mat.delete({ where: { id: matId } });
+    await EventService.syncMatCount(mat.eventId);
   }
 
   // ---- Assignment ----
@@ -177,6 +195,11 @@ export class RunService {
   ) {
     const draw = await prisma.draw.findUnique({ where: { id: drawId } });
     if (!draw) throw { status: 404, message: "Draw not found" };
+    // Same rule the plan board enforces: a category that has been fought keeps
+    // the floor it ran on — but one that never had a floor can still be given
+    // one. See plan.service.ts for the full reasoning.
+    if (draw.status === "COMPLETED" && draw.matId !== null && draw.matId !== data.matId)
+      throw { status: 409, message: "That category has already been completed and cannot be moved" };
     if (data.matId) {
       const mat = await prisma.mat.findUnique({ where: { id: data.matId } });
       if (!mat || mat.eventId !== draw.eventId)

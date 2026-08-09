@@ -4,13 +4,24 @@ This file is the handoff between coding agents. It describes what is in flight
 right now, not the permanent architecture (that's
 [`architecture.md`](architecture.md)).
 
-**Last updated:** 2026-08-08 — by Claude Code: clearer end-of-bout winner
+**Last updated:** 2026-08-09 — by Claude Code: a new **Plan** tab in the event
+hub — drag-and-drop mat planning with an interactive, to-scale schedule,
+ceremonies and breaks, and floor management that drives the tournament's mat
+count. Replaces the Run page's old "Plan" sub-tab. Now also carries separate
+kata timing (performance length, and whether the pair performs together or one
+after the other) and a **Draft schedule** auto-scheduler. See "In flight" below.
+
+Previously, same day: tournament timing config
+captured per event (event hub → Overview) and per category (event hub →
+Setup). Storage + UI only; the duration estimator is deliberately untouched.
+
+Previously, 2026-08-08: clearer end-of-bout winner
 announcement (bigger "AKA WINS"/"AO WINS", matched between the mat
 scoreboard and the projector display) plus a four-medal WKF podium once the
 tournament final's winner is known and both bronze bouts are already
-decided (see "In flight" below).
+decided.
 
-Previously, same day: Draws now shows a manual
+Previously, 2026-08-08: Draws now shows a manual
 refresh button + "last updated" timestamp, and an "In progress" chip on any
 bout the mat scoreboard has started scoring — the score itself is honestly
 *not* shown live, since the backend has zero visibility into a bout until
@@ -80,6 +91,401 @@ port; those have since been pushed.) Everything here is verified locally against
 a database, never against production data.
 
 ## In flight (uncommitted)
+
+**Tournament planning — the hub's new Plan tab (2026-08-09).**
+Request: a separate "Plan" option alongside Run, with a good UI for managing
+mats: drag categories from a list onto mats and between mats, reorder them,
+add and remove mats (updating the master mats/floors config), custom floor
+names, completed categories locked, category status shown, opening/closing
+ceremonies and lunch breaks included, breaks that stretch across all floors
+displayed as such, and an interactive schedule so timing is part of the plan.
+
+**Where it lives.** `/hub/plan` (`pages/hub/Plan.tsx`), visible to every role —
+the plan *is* the schedule, and a coach wants to know which floor their
+athletes are on and roughly when. The board is read-only for anyone who can't
+manage the event, with a one-line note rather than a hidden tab.
+
+**The Run page's "Plan" sub-tab is gone**, and its `PlanTab` deleted. It did
+the same job against no schedule; keeping both would have been two mat planners
+disagreeing. `Run.tsx` is now day-of only (Run + Check-in) and its empty state
+points at the new tab. The `/run/mats` and `/run/draws/:id/mat` endpoints stay —
+Plan reuses mat CRUD, so both surfaces share one set of mats.
+
+**Storage decisions.**
+- `ScheduleBlock` (migration `20260809140000_add_schedule_blocks`) — one row per
+  ceremony or break. Its own table rather than derived from `Event.timingJson`:
+  the timing config holds *defaults* (is there a lunch, how long), the plan
+  holds the concrete blocks the organizer placed. Deriving them would make
+  "move lunch after the U14 pools on Mat 2" unrepresentable.
+- `matId: null` = venue-wide (a band across every floor, pinned by `startTime`);
+  `matId` set = the block sits in that floor's running order. `onDelete: Cascade`
+  on the mat, deliberately not SetNull — deleting a mat must not silently
+  promote that mat's coffee break into a venue-wide stoppage.
+- **A block on a floor shares one `matOrder` index space with that floor's
+  draws.** That is what lets a break sit *between* two categories, and it is
+  why the ordering endpoint takes both kinds in one list.
+- `EventTimingConfig` gains `dayStartTime` ("HH:MM", default "08:00"). A string,
+  not a DateTime: it is a time of day in the venue with no timezone of its own.
+
+**The completed-category rule, and where it is enforced.** A COMPLETED draw
+keeps the floor it was fought on — `PlanService.setOrder` and
+`RunService.assignDrawMat` both reject a floor change (409), and
+`RunService.deleteMat` refuses to delete a floor with completed categories on
+it (which would null their `matId` via SetNull and rewrite history as a side
+effect of a planning action). Two deliberate narrowings, both found by writing
+the tests:
+- **Its index within the floor may shift.** Inserting anything above it
+  necessarily renumbers everything below, so pinning the index would fail the
+  whole write for an edit that never touched the completed category.
+- **`matId: null` is exempt.** A category fought before anyone opened the plan
+  has no floor recorded, so there is nothing to protect; refusing that first
+  placement made it permanently *unplaceable* rather than merely unmovable.
+
+The UI half: completed categories get no drag handle, and `normalizeLane` pulls
+them to the front of their floor after every drag so a drop can never land above
+one. That is interaction polish, not the guard — the board is a shared surface
+and two planners can drag at once.
+
+**Mat count and the timing config are now one fact.** `EventService.syncMatCount`
+runs after mat create/delete and writes `timingJson.mats` to the real mat count,
+and the Overview timing card's "Mats / floors" field is **read-only** with a
+pointer to Plan. Before, the two were independent statements of the same thing
+and only the estimator read the config one, so drift was invisible.
+
+**The schedule engine** (`frontend/src/lib/schedule.ts`) is pure and unit-tested.
+Every floor starts together once the opening ceremony is done, runs its own
+order, and pauses for any venue-wide band; the day ends when the slowest floor
+finishes, plus the closing ceremony. Specifics worth knowing:
+- A category's minutes = bouts × (bout clock + transition) × (1 + buffer), plus
+  one changeover — resolved per category through the *stored* timing config and
+  its per-division overrides. This is the first thing to actually consume that
+  config (see the timing entry below, which deliberately only captured it).
+- Bout counts come from `estimatedRepechageBouts`, **imported** from
+  `lib/estimator.ts` rather than re-derived, so the two can never disagree.
+  `lib/estimator.ts` and `pages/hub/Estimator.tsx` are otherwise byte-for-byte
+  untouched, as asked.
+- Repechage is counted for **kata too**: the draw engine builds both disciplines
+  from the same bracket with the same repechage, so scheduling kata without
+  bronze bouts would under-book every kata floor.
+- A category with fewer than two entries costs zero floor time — including no
+  changeover, or every empty category would pad the day by five minutes.
+- A venue-wide break is *absorbed*, not worked around: the item running when the
+  venue stops keeps one bar whose span includes the break (`pausedMin`), and an
+  item that would have *started* inside the window waits instead (`waitMin`).
+  Splitting the card in two would have been the same information, drawn twice.
+- Anchoring: an explicit `startTime` always wins; otherwise OPENING runs at the
+  start and CLOSING at the end. Anything else venue-wide with no time is
+  reported as unscheduled rather than guessed at.
+
+**UI.** One `DndContext` over every lane (each floor plus the unassigned pool),
+with a live `onDragOver` cross-lane preview — without it the columns only reflow
+on release and the user is aiming at a gap that isn't there. Lane state is local
+so the schedule below re-times *as you drag*, and server data is only allowed to
+overwrite it when no drag and no write is in flight (`dragActive || isPending`),
+with an explicit cancel path restoring the server order. One `PUT /plan/order`
+per drop carries every lane the item passed through, so a cross-floor move is a
+single transaction rather than a remove and an insert that can half-fail.
+
+Venue-wide bands are drawn **in each floor's column** at the position that
+floor's running order reaches, hatched and full-bleed with an "Every floor"
+chip — plus as a strip across all columns on the timeline. Adding lunch reads
+the config's `lunch.mode`: `ALL_MATS` creates one venue-wide band at a suggested
+midpoint, `PER_FLOOR` creates one break on each floor.
+
+**Test data.** `backend/scripts/seed-test-tournament.ts` builds a full
+tournament to exercise this against: 8 clubs, 190 athletes, 414 entries, 52
+categories (kata, kumite with weight classes, and team events) from the
+`NKF_FULL_2026` template, 46 real brackets, 4 categories fought to a podium and
+3 mid-way, on 3 floors. Everything goes through the service layer, so statuses
+are *derived* — seeded data that lies about its own shape is worse than none.
+Deterministic (fixed PRNG seed), re-runnable, and `--clean` removes exactly its
+own rows. Two UI bugs surfaced the moment it was used and are fixed: the weight
+class was the first thing the title's ellipsis ate, leaving five identical
+"Cadet Boys Kumite (14/15…" cards, so it is now a chip that never shrinks; and
+a category in the unassigned pool claimed "no bouts" because it had no
+*schedule* — it now shows the bout count computed from its own entries, which
+is what you need to decide which floor to put it on.
+
+**Kata timing, and the auto-drafter (2026-08-09, same session).**
+
+*Two kata settings.* `kataBoutDurationSec` (default 90) and `kataMode`
+(`SEQUENTIAL` | `TOGETHER`, default SEQUENTIAL) on `EventTimingConfig`, edited
+in their own block on the Overview timing card. `schedule.ts` grew
+`boutSecondsFor`, which is now the single place that decides what a bout costs
+a mat:
+
+- kumite → match clock + transition;
+- kata → performance × **performances-per-bout** + transition, where SEQUENTIAL
+  (AKA performs, then AO, then flags — the WKF format) is 2 and TOGETHER (both
+  on the floor at once) is 1.
+
+That factor of two is the whole point: on a 9-bout kata category with the
+default numbers it is 36 minutes against 23. A per-category `boutDurationSec`
+override on a kata division now means "this category's performance length", with
+the doubling still applied on top. `ScheduleCategoryInput` carries `isKata`
+rather than inferring it, because it decides which of the two event defaults
+applies.
+
+*The drafter* — `frontend/src/lib/autoschedule.ts`, pure and unit-tested,
+surfaced as a "Draft schedule" button on Plan. It proposes; nothing is written
+until the planner reads the summary and applies it.
+
+- **Order**: `compareCategories` = minAge, maxAge, kata-before-kumite, gender,
+  title. Sorting on minAge *and* maxAge keeps genuinely different bands apart
+  (Junior 16-17 ahead of Senior 16-99) instead of lumping everything starting at
+  the same age.
+- **Two strategies.** `BALANCE_FLOORS` places each category on whichever floor
+  frees up soonest. `AGE_GROUP_PER_FLOOR` keeps an (age range, gender) group's
+  kata and kumite on one floor so nobody is called to two floors at once.
+- **Only what actually clashes is bound together.** Two weight classes of one
+  division never share an athlete, so a group that is all kumite (or all kata)
+  spreads freely; only a group holding *both* disciplines is pinned to one
+  floor. Without this, six senior kumite weight classes piled onto one floor —
+  measured on the seeded event, floors went 10/18/18 categories.
+- **Groups are assigned largest-first**, then each floor is sorted back into age
+  order. Assigning in age order reads nicer but balances badly: the biggest
+  groups land last with no room left to even them out. Same measurement after
+  both fixes: **14/17/15 categories, floors finishing within 4 minutes**, and
+  clashes down from 10 to 3.
+- **An age group joins a floor it already has a foothold on.** A category that
+  has been fought cannot move, so the rest of its group goes to *its* floor
+  rather than the least-loaded one — otherwise the strategy's one promise was
+  broken by exactly the category that is hardest to fix by hand. This was a real
+  bug found by dumping the applied order: the pinned Junior Male Kata sat on
+  Tatami A while its five kumite weight classes went to The Blue Hall.
+- **Residual clashes are reported, not hidden.** A kata and a kumite category
+  with overlapping age ranges and the same gender, running at the same time on
+  different floors, is listed in the dialog with times and floor names. It
+  cannot be fully eliminated by floor assignment — "Senior 16+" overlaps every
+  band above it — so the honest answer is to show the planner what is left.
+- **Blocks**: opening and closing anchored to the day, lunch at the midpoint of
+  the *drafted* competition rounded to the half hour, honouring `lunch.mode`
+  (one venue-wide band, or one break per floor spliced between two categories
+  at the position nearest that time). A kind already in the plan is never
+  proposed again, so re-drafting cannot stack a second opening ceremony.
+- **Applying** creates the blocks first (they need real ids), splices per-floor
+  ones into their lanes with `applyBlockIndexes`, then writes every lane —
+  including the pool — in one `PUT /plan/order`.
+
+Check-in is deliberately *not* auto-placed: the config has a `checkin` block but
+no block kind means "check-in", and inventing one was outside what was asked.
+
+*Files*: `backend/src/utils/validators.ts`,
+`backend/scripts/test-event-timing.ts`, `backend/scripts/seed-test-tournament.ts`,
+`frontend/src/lib/timing.ts`, `frontend/src/lib/schedule.ts`,
+`frontend/src/lib/autoschedule.ts` (new),
+`frontend/src/components/events/EventTimingCard.tsx`,
+`frontend/src/components/plan/DraftScheduleDialog.tsx` (new),
+`frontend/src/components/plan/PlanCards.tsx`, `frontend/src/pages/hub/Plan.tsx`,
+`frontend/scripts/test-schedule.ts`, `frontend/scripts/test-autoschedule.ts` (new).
+
+*Verification*: `npx tsx scripts/test-autoschedule.ts` — 47 checks covering the
+ordering rule, both strategies, the pinned-sibling rule, balance-with-age-order,
+clash detection (and the three cases that are *not* clashes: same discipline,
+different genders, single-discipline groups), block proposal including the
+per-floor lunch and the no-duplicates rule, and `applyBlockIndexes`.
+`test-schedule.ts` grew to 72 checks with the kata timing. `test-event-timing.ts`
+covers the two new fields round-tripping and an unknown kata format being
+rejected without disturbing the stored config. Applied end to end in the browser
+against the 52-category seeded tournament; the resulting order was dumped from
+the database and checked category by category.
+
+**Not done / next.** The estimator still runs on its own session inputs; now
+that the plan computes a real schedule from the stored config, folding the
+Estimator tab into it (or retiring it) is the obvious follow-up, but it was
+out of scope here. Kata categories still inherit the event's default bout
+duration because `DivisionTiming` on Setup only lists kumite — cheap to change
+(one filter) if kata should carry its own performance length.
+
+Files: `backend/prisma/schema.prisma`,
+`backend/prisma/migrations/20260809140000_add_schedule_blocks/`,
+`backend/src/utils/validators.ts`, `backend/src/utils/event-scope.ts`,
+`backend/src/services/plan.service.ts` (new),
+`backend/src/services/event.service.ts`, `backend/src/services/run.service.ts`,
+`backend/src/routes/plan.ts` (new), `backend/src/server.ts`,
+`backend/scripts/test-plan.ts` (new), `frontend/src/lib/schedule.ts` (new),
+`frontend/src/lib/plan.ts` (new), `frontend/src/lib/timing.ts`,
+`frontend/src/components/plan/` (new: `PlanBoard`, `PlanCards`,
+`ScheduleTimeline`, `BlockDialog`, `plan-visuals`),
+`frontend/src/pages/hub/Plan.tsx` (new), `frontend/src/pages/Run.tsx`,
+`frontend/src/components/events/EventTimingCard.tsx`,
+`frontend/src/components/layout/EventHubLayout.tsx`, `frontend/src/App.tsx`,
+`frontend/scripts/test-schedule.ts` (new),
+`backend/scripts/seed-test-tournament.ts` (new), `AGENTS.md`.
+
+### Verification (run 2026-08-09)
+
+`backend` / `frontend`: `npx tsc --noEmit` and `npm run build` both clean.
+Migration applied to local Postgres via `prisma migrate diff` + `migrate deploy`
+(the local role still lacks CREATEDB).
+
+`npx tsx scripts/test-schedule.ts` (frontend, pure) — 63 checks: clock parsing
+and formatting including the past-midnight case, bout counts and the
+draw-vs-live entry count, duration resolution including `bufferPct: 0` as a real
+override, a plain parallel day, a venue break absorbed by the running item, an
+item pushed past a break it would start inside, a per-floor break costing only
+its own floor, every anchoring case, all six warning codes, and the shared
+`matOrder` index space.
+
+`npx tsx scripts/test-plan.ts` (backend, real HTTP against local Postgres) — 51
+checks: mat count sync up and down, custom floor names, the one-call board, dense
+0-based reordering, atomic cross-floor moves, unassign clearing the position
+rather than writing 0, all four completed-category cases, a per-floor break
+having its clock time dropped and appended past the categories, breaks
+interleaved with categories, a break refused in the pool, another event's
+category refused, duplicate ids refused, edit/delete, read-open/write-guarded
+authorization with the coordinator grant, and `configJson` untouched throughout.
+
+Exercised live in the browser against a seeded 9-category, 3-floor event:
+floors added and named, categories dragged from the pool onto a floor (the pool
+emptied, the timeline re-timed from 76 to 93 bouts live, and the order
+persisted), a per-floor break added and appended, the venue-wide lunch band
+rendered inside every floor column and across the timeline, and the completed
+category confirmed to have no drag handle. Three visual fixes came out of that
+pass: the clipped first hour label, the cramped venue-band text in a narrow
+column, and the wrapping time line on a card.
+
+Regressions all clean: `test-draws.ts`, `test-event-scope.ts`,
+`test-bout-scoring.ts`, `test-event-timing.ts`, `test-estimator.ts` (46),
+`test-scoreboard.ts` (30), `test-timing.ts` (44).
+
+---
+
+**Tournament timing config, captured per event and per category (2026-08-09).**
+Request: lift the estimator's timing variables into the event's own
+configuration — tournament defaults under the hub's Overview tab, per-category
+bout duration / injury-stoppage buffer / win-by-points gap under Setup, with
+opening and closing ceremonies specified and the lunch break stating whether
+all mats close together or each floor breaks on its own.
+
+**Explicitly scoped to capture and storage.** The user asked for the
+estimator itself to be left alone ("i have another plan with this"), so
+`lib/estimator.ts` and `pages/hub/Estimator.tsx` are byte-for-byte
+unchanged: the Estimator tab still runs on its own session-only inputs and
+does not read the stored config. That wiring is the obvious next step and is
+deliberately not done here.
+
+**Storage decisions.**
+- `Event.timingJson String?` — a validated JSON blob (`EventTimingConfig` in
+  `backend/src/utils/validators.ts`), *not* a key inside the existing
+  `configJson`. `configJson` is the unvalidated YAML-rules snapshot and
+  `PUT /events/:id/config` replaces it wholesale, so timing stored there
+  would be silently clobbered by an unrelated config write. A test asserts
+  `configJson` is untouched by timing writes.
+- `Division.boutDurationSec Int?` / `bufferPct Float?` / `winByGap Int?`
+  (migration `20260809101500_add_event_and_division_timing`). All three
+  nullable, and **null means "inherit", never "zero"** — that's why they have
+  no numeric default in the Zod schema, and why an explicit `bufferPct: 0` is
+  stored as a real override (covered by a test on each side).
+- Every field on `EventTimingConfig` has a Zod default, so an event that was
+  never configured — or one whose stored blob predates a field — reads back a
+  *complete* config rather than a half-empty object the UI would have to
+  guess at. `EventService.parseTiming` also degrades a corrupt or wrong-shaped
+  blob to the defaults instead of throwing: a bad blob must not make the
+  Overview tab unreadable, and the next save overwrites it.
+
+**The win-gap default is derived, not copied.** `defaultWinByGap` (in
+`frontend/src/lib/timing.ts`) returns 6 for categories aged 13 and below and 8
+above. Keyed on `maxAge`, not `minAge` — a category is only "13 and below" if
+nobody in it can be older than 13, so a division spanning 12–14 takes the
+senior gap. Deriving it rather than writing it onto the division at creation
+time means editing a category's age range keeps its default honest, and it
+never has to be backfilled onto the 32 divisions that already exist.
+
+**Routes.** `GET /events/:id/timing` is open to any logged-in user (a coach
+wants to know when lunch and the ceremonies fall); `PUT /events/:id/timing` is
+`requireEventManager` like every other event-config route. Per-category timing
+rides on the *existing* `PUT /events/divisions/:divisionId` — no new endpoint,
+so it inherits that route's `requireEventManager({ in: "lookup" })` guard
+unchanged.
+
+**UI.**
+- `components/events/EventTimingCard.tsx` on Overview: mats, default bout
+  duration (sec, with a live "Match clock — 1:30" hint), transition between
+  bouts, injury/stoppage buffer %, changeover per category, then opening
+  ceremony / closing ceremony / lunch / check-in as toggle+minutes blocks.
+  Lunch adds the mode picker ("All mats close together" vs "Each floor breaks
+  on its own"), disabled when lunch is off. Explicit Save (not save-on-change)
+  with dirty tracking, Discard, and Reset to defaults. A non-manager sees the
+  same card with every control disabled and a one-line note, rather than the
+  card being hidden — the read route is open, so hiding it would withhold
+  information the server is happy to give.
+- `components/events/DivisionTiming.tsx` on Setup: one row per **kumite**
+  category with the three fields. An empty box means inherited and shows the
+  inherited value as its *placeholder*, so a blank box always reads as the
+  value that will actually be used; an overridden box gets a primary-coloured
+  border and a per-row reset that clears all three. Edits commit on blur, not
+  per keystroke — the controlled-input-clobbered-by-refetch trap that bit the
+  Run → Plan mat order (see below) — and values are clamped to the Zod ranges
+  client-side so a typo can't 400.
+- **Kata categories are deliberately not listed**, and the UI says so: a bout
+  clock and a points gap have no meaning for kata, and the estimator these
+  feed is kumite-only. Cheap to reverse if kata should carry a performance
+  duration — it's one filter.
+- Timing shares one query key (`["event-timing", eventId]`) across both tabs,
+  so Setup's inherited placeholders update the moment Overview's defaults are
+  saved (verified live: changing the default 120 → 90 moved every inherited
+  placeholder to 90).
+
+Files: `backend/prisma/schema.prisma`,
+`backend/prisma/migrations/20260809101500_add_event_and_division_timing/`,
+`backend/src/utils/validators.ts`, `backend/src/services/event.service.ts`,
+`backend/src/routes/events.ts`, `backend/scripts/test-event-timing.ts` (new),
+`frontend/src/lib/timing.ts` (new), `frontend/src/lib/events.ts`,
+`frontend/src/components/events/EventTimingCard.tsx` (new),
+`frontend/src/components/events/DivisionTiming.tsx` (new),
+`frontend/src/pages/hub/Overview.tsx`, `frontend/src/pages/hub/Setup.tsx`,
+`frontend/scripts/test-timing.ts` (new).
+
+### Verification (run 2026-08-09)
+
+`backend` / `frontend`: `npx tsc --noEmit` and `npm run build` both clean.
+Migration applied to local Postgres via `prisma migrate diff` + `migrate
+deploy` (the local role still lacks CREATEDB).
+
+`npx tsx scripts/test-timing.ts` (frontend, pure) — 44 checks: normalization
+and clamping, the win-gap age rule including the 13/14 boundary and the
+maxAge-not-minAge choice, inherit-vs-override resolution per field, the
+explicit-0-is-not-absent case, and `formatBoutDuration`.
+
+`npx tsx scripts/test-event-timing.ts` (backend, real HTTP against local
+Postgres on an isolated port) — 42 checks: unconfigured event reads complete
+defaults without writing anything, partial write normalized and round-tripped,
+ceremonies/lunch off round-trip as off, out-of-range values rejected (mats 0,
+buffer 500%, unknown lunch mode) with the stored config left untouched,
+corrupt and wrong-shaped blobs degrade to defaults, read open to a plain club
+manager but write 403 until the coordinator grant exists, per-category
+overrides round-trip through the division list, null clears one field without
+disturbing the others, `bufferPct: 0` stores as 0, and a timing-only update
+leaves the category's name/ages/gender and the event's `configJson` alone.
+
+Regressions all clean: `test-draws.ts`, `test-event-scope.ts`,
+`test-bout-scoring.ts` (32), `test-estimator.ts` (46), `test-scoreboard.ts`
+(30).
+
+**In-browser (dev servers on 4000/5173, local Postgres, ADMIN then COACH via
+the dev-auth localStorage shortcut).** On the seeded "Namibia Goju Kai
+Nationals 2025" (32 divisions): saved mats 4 / bout 90s / opening ceremony off
+/ lunch PER_FLOOR, confirmed the "Tournament timing saved" toast, that the
+Save button returns to disabled, that a full reload replays every value, and
+that the row in Postgres holds exactly the normalized JSON. On Setup, the 16
+kumite categories rendered with win-gap placeholders 6/6/6/6 for U8–U14 and
+8/8/8/8 for Cadet/Junior/Senior/Veteran — the age rule, live, against real
+data — and bout placeholders of 90 inherited from the default just saved.
+Overrode one bout duration (highlight + tooltip appear, reset clears it),
+then set a buffer of 20 on U14 Male and a win gap of 6 on Cadet Male and
+confirmed both in the database with the other two fields still null. As a
+COACH: the card renders read-only with every input disabled, no Save/Reset,
+the explanatory note, and no Setup tab at all. Console clean apart from the
+already-documented benign pre-login `/auth/me` 401s. All test data reverted
+afterwards (`timingJson` back to null, all 32 divisions' overrides cleared).
+
+**Not verified: screenshots.** The browser pane in this session would not
+composite — every screenshot came back blank or with a stale overlay — so all
+of the above was verified through the DOM, the network log and the database
+rather than visually. The layout of both new sections (the timing card's
+three-column grid, the Setup rows' alignment at narrow widths) has been read,
+not seen.
 
 **Clearer winner announcement + end-of-final podium (2026-08-08).**
 Two visual asks for the scoreboard's end-of-bout screen: make the winner

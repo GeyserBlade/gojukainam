@@ -38,6 +38,10 @@ const TABS: HubTab[] = [
   { to: "/hub/review", label: "Review", roles: CLUB, coordinator: true },
   { to: "/hub/draws", label: "Draws", roles: ALL },
   { to: "/hub/estimator", label: "Estimator", roles: ADMIN, coordinator: true },
+  // Visible to everyone: the plan is also the schedule, and a coach wants to
+  // know which floor their athletes are on and roughly when. The board itself
+  // is read-only unless the user can manage the event.
+  { to: "/hub/plan", label: "Plan", roles: ALL },
   { to: "/hub/practice", label: "Practice", roles: ALL },
   { to: "/hub/run", label: "Run", roles: ALL },
   { to: "/hub/results", label: "Results", roles: ALL },

@@ -232,6 +232,17 @@ model Event {
   status     EventStatus @default(ACTIVE)
   /// JSON string of your YAML config (persisted snapshot)
   configJson String
+  /// Tournament-wide timing defaults: mats, default bout duration, injury/
+  /// stoppage buffer, changeover, ceremonies and the lunch break (including
+  /// whether all mats close together or each floor breaks on its own).
+  /// Shape and defaults live in `EventTimingConfig` (utils/validators.ts);
+  /// null means "never configured" and readers fall back to those defaults.
+  ///
+  /// Deliberately a column of its own rather than a key inside `configJson`:
+  /// that field is an unvalidated whole-object snapshot of the YAML rules and
+  /// `PUT /events/:id/config` replaces it wholesale, so timing stored there
+  /// would be silently clobbered by an unrelated config write.
+  timingJson String?
   /// When set, a read-only public board is reachable at /board/<token>.
   /// null = public board disabled. Rotating the token revokes old links.
   publicToken String? @unique
@@ -242,9 +253,10 @@ model Event {
   teams         Team[]
   invoices      Invoice[]
   documents     Document[]
-  draws         Draw[]
-  mats          Mat[]
-  coordinators  EventCoordinator[]
+  draws          Draw[]
+  mats           Mat[]
+  coordinators   EventCoordinator[]
+  scheduleBlocks ScheduleBlock[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -268,6 +280,15 @@ model Division {
   gender    Gender
   category  CategoryType // KATA or KUMITE
   notes     String?
+
+  /// Per-category timing. All three are nullable and null means "not
+  /// overridden", never "zero": bout duration and buffer then fall back to the
+  /// event's `timingJson` defaults, and the win-by-points gap falls back to the
+  /// age-derived default (6 for categories capped at 13, 8 above — see
+  /// defaultWinByGap in the frontend's lib/timing.ts).
+  boutDurationSec Int?
+  bufferPct       Float?
+  winByGap        Int?
 
   entries       Entry[]
   teams         Team[]
@@ -606,12 +627,58 @@ model Mat {
   name    String
   order   Int    @default(0)
 
-  draws Draw[]
-  bouts Bout[]
+  draws          Draw[]
+  bouts          Bout[]
+  scheduleBlocks ScheduleBlock[]
 
   createdAt DateTime @default(now())
 
   @@index([eventId])
+}
+
+/// A non-competition block in the day's plan: the opening and closing
+/// ceremonies, lunch, or any other break the organizer wants on the schedule.
+///
+/// Deliberately its own table rather than derived from `Event.timingJson`:
+/// the timing config holds *defaults* (is there a lunch, how long), while the
+/// plan holds the concrete blocks the organizer has actually placed — which
+/// floor they sit on, in what running order, at what time. Deriving them would
+/// make "move lunch after the U14 pools on Mat 2" unrepresentable.
+model ScheduleBlock {
+  id      String @id @default(cuid())
+  eventId String
+  event   Event  @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  kind    ScheduleBlockKind
+  label   String
+  minutes Int
+
+  /// null = the block spans every floor and is drawn as a band across the whole
+  /// plan. Set = it sits inside that one mat's running order, interleaved with
+  /// the mat's categories through `matOrder` (the two share one index space).
+  ///
+  /// Cascade, not SetNull: deleting a mat must not silently promote that mat's
+  /// coffee break into a venue-wide stoppage.
+  matId    String?
+  mat      Mat?    @relation(fields: [matId], references: [id], onDelete: Cascade)
+  matOrder Int?
+
+  /// Venue-wide blocks only: "HH:MM" clock anchor for when the whole venue
+  /// stops. null anchors the block to the day instead — OPENING runs before
+  /// the first bout on every mat, CLOSING after the last one.
+  startTime String?
+
+  createdAt DateTime @default(now())
+
+  @@index([eventId])
+  @@index([matId])
+}
+
+enum ScheduleBlockKind {
+  OPENING
+  CLOSING
+  LUNCH
+  BREAK
 }
 
 model Document {

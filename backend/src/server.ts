@@ -24,6 +24,7 @@ import { router as belts } from "./routes/belts.js";
 import { router as documents } from "./routes/documents.js";
 import { router as draws } from "./routes/draws.js";
 import { router as run } from "./routes/run.js";
+import { router as plan } from "./routes/plan.js";
 import { router as publicBoard } from "./routes/public.js";
 import { router as billing } from "./routes/billing.js";
 import { router as competition } from "./routes/competition.js";
@@ -155,6 +156,7 @@ app.use("/api/billing", billing);
 app.use("/api/competition", competition);
 app.use("/api/draws", draws);
 app.use("/api/run", run);
+app.use("/api/plan", plan);
 
 app.use(errorHandler);
 

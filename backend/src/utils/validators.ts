@@ -290,6 +290,142 @@ export const UpdateEventStatus = z.object({
   status: EventStatusEnum,
 });
 
+// ---------------- Event timing ----------------
+//
+// The tournament's default timing variables, stored on Event.timingJson and
+// edited from the event hub's Overview tab. Every field has a default, so
+// parsing `{}` yields a complete, usable config — which is exactly what the
+// read path does for an event that has never been configured.
+//
+// The plan board's schedule (frontend `lib/schedule.ts`) reads these to time
+// the day. The older Estimator tab does not — it still runs on its own
+// session-only inputs, which is a deliberate leftover, not an oversight.
+
+/**
+ * How the lunch break interacts with the mats.
+ * - ALL_MATS: every mat stops at the same time; the whole venue breaks together.
+ * - PER_FLOOR: each floor/mat takes its own break when its running order allows,
+ *   so competition never fully stops.
+ */
+export const LunchModeEnum = z.enum(["ALL_MATS", "PER_FLOOR"]);
+
+/**
+ * How a kata bout is run, which decides how many performances it costs the mat.
+ * - SEQUENTIAL: AKA performs, then AO, then the flags. Two performances per
+ *   bout — the WKF format, and the default here.
+ * - TOGETHER: both competitors perform side by side at the same time. One
+ *   performance per bout, so the category takes roughly half as long.
+ *
+ * This is the single biggest lever on how long a kata category runs, which is
+ * why it is a stored setting rather than an assumption baked into the maths.
+ */
+export const KataModeEnum = z.enum(["SEQUENTIAL", "TOGETHER"]);
+
+const timedBlock = (enabled: boolean, minutes: number) =>
+  z.object({
+    enabled: z.boolean().default(enabled),
+    minutes: z.number().min(0).max(600).default(minutes),
+  });
+
+/**
+ * "HH:MM", 24-hour. Stored as a string rather than a DateTime because it is a
+ * time of day on whatever day the event runs, with no timezone of its own —
+ * the plan's schedule is read off a wall clock in the venue.
+ */
+export const ClockTime = z
+  .string()
+  .regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Expected a time as HH:MM");
+
+export const EventTimingConfig = z.object({
+  /** Mats/floors running in parallel. */
+  mats: z.number().int().min(1).max(50).default(2),
+  /** When the first block of the day starts — the plan's schedule counts from here. */
+  dayStartTime: ClockTime.default("08:00"),
+  /** Default kumite bout clock for a category that doesn't override it. */
+  defaultBoutDurationSec: z.number().int().min(10).max(1800).default(120),
+  /**
+   * How long one kata *performance* takes. Separate from the kumite clock
+   * because they are unrelated numbers — a kata is ~90s of choreography, a
+   * kumite bout is a 2-3 minute fight.
+   */
+  kataBoutDurationSec: z.number().int().min(10).max(1800).default(90),
+  /** Whether a kata bout costs the mat one performance or two — see KataModeEnum. */
+  kataMode: KataModeEnum.default("SEQUENTIAL"),
+  /** Mat time between bouts — competitor changeover, not the match itself. */
+  transitionSecondsPerBout: z.number().int().min(0).max(1800).default(60),
+  /** Default injury/stoppage buffer, as a percentage on top of bout time. */
+  defaultBufferPct: z.number().min(0).max(100).default(10),
+  /** Time a mat loses moving from one category to the next. */
+  changeoverMinutes: z.number().min(0).max(240).default(5),
+  opening: timedBlock(true, 15).default({ enabled: true, minutes: 15 }),
+  closing: timedBlock(true, 15).default({ enabled: true, minutes: 15 }),
+  lunch: z
+    .object({
+      enabled: z.boolean().default(true),
+      minutes: z.number().min(0).max(600).default(30),
+      mode: LunchModeEnum.default("ALL_MATS"),
+    })
+    .default({ enabled: true, minutes: 30, mode: "ALL_MATS" }),
+  /** Athlete check-in / warm-up block before the first bout. Off by default. */
+  checkin: timedBlock(false, 20).default({ enabled: false, minutes: 20 }),
+});
+
+export type EventTimingConfigInput = z.input<typeof EventTimingConfig>;
+export type EventTimingConfigParsed = z.output<typeof EventTimingConfig>;
+
+// ---------------- Tournament plan ----------------
+//
+// The plan is the concrete running order: which categories sit on which floor,
+// in what sequence, with the ceremonies and breaks placed between them.
+
+export const ScheduleBlockKindEnum = z.enum(["OPENING", "CLOSING", "LUNCH", "BREAK"]);
+
+/**
+ * `matId: null` means the block spans every floor; a `startTime` then says when
+ * the whole venue stops. A block on a mat is positioned by the running-order
+ * endpoint instead, so it takes neither `startTime` nor `matOrder` here.
+ */
+export const CreateScheduleBlock = z.object({
+  eventId: z.string().min(1),
+  kind: ScheduleBlockKindEnum,
+  label: z.string().min(1).max(80),
+  minutes: z.number().int().min(0).max(600),
+  matId: z.string().min(1).optional().nullable(),
+  startTime: ClockTime.optional().nullable(),
+});
+
+export const UpdateScheduleBlock = z.object({
+  label: z.string().min(1).max(80).optional(),
+  minutes: z.number().int().min(0).max(600).optional(),
+  startTime: ClockTime.optional().nullable(),
+});
+
+export const PlanItemRef = z.object({
+  kind: z.enum(["CATEGORY", "BLOCK"]),
+  id: z.string().min(1),
+});
+
+/**
+ * The whole board in one write. Every lane the drag touched is sent complete,
+ * so a cross-floor move is one atomic transaction rather than a remove and an
+ * insert that can half-fail and leave a category on two floors' worth of
+ * ordering — or on none.
+ *
+ * `matId: null` is the unassigned pool: categories only, since a break has to
+ * belong either to a floor or to the whole venue.
+ */
+export const SetPlanOrder = z.object({
+  eventId: z.string().min(1),
+  lanes: z
+    .array(
+      z.object({
+        matId: z.string().min(1).nullable(),
+        items: z.array(PlanItemRef),
+      }),
+    )
+    .min(1),
+});
+
 // ---------------- Divisions ----------------
 export const CategoryTypeEnum = z.enum(["KATA", "KUMITE"]);
 
@@ -302,6 +438,13 @@ export const CreateDivision = z.object({
   gender: GenderEnum,
   category: CategoryTypeEnum, // KATA or KUMITE
   notes: z.string().optional().nullable(),
+
+  // Per-category timing overrides. null clears the override and returns the
+  // category to the inherited value — it never means "zero seconds"/"no gap",
+  // so these deliberately have no numeric default here.
+  boutDurationSec: z.number().int().min(10).max(1800).optional().nullable(),
+  bufferPct: z.number().min(0).max(100).optional().nullable(),
+  winByGap: z.number().int().min(1).max(20).optional().nullable(),
 });
 
 export const UpdateDivision = CreateDivision.omit({ eventId: true }).partial();

@@ -1,20 +1,14 @@
-import { useEffect, useMemo, useState } from "react"
+import { useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
-  ArrowDown,
-  ArrowUp,
   Check,
   Flag,
   GripVertical,
-  Lock,
   MonitorPlay,
   MoveRight,
-  Plus,
   Search,
   Swords,
-  Trash2,
-  X,
 } from "lucide-react"
 import {
   DndContext,
@@ -34,8 +28,7 @@ import { CSS } from "@dnd-kit/utilities"
 
 import { useAuth } from "@/contexts/AuthContext"
 import { useSelectedEvent } from "@/contexts/SelectedEventContext"
-import { useToast, useApiErrorToast } from "@/components/Toast"
-import { useConfirm } from "@/components/ConfirmDialog"
+import { useApiErrorToast } from "@/components/Toast"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -47,37 +40,24 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { cn } from "@/lib/utils"
-import { listEvents } from "@/lib/events"
-import { listDrawCategories, setBoutScore, setBoutWinner, type DrawCategoryRow } from "@/lib/draws"
 import { EntryService, type Entry } from "@/lib/entries"
+import { setBoutScore, setBoutWinner } from "@/lib/draws"
 import {
-  assignDrawMat,
-  createMat,
-  deleteMat,
   getRunBoard,
-  listMats,
-  reorderMatCategories,
   reorderMatQueue,
   setBoutMat,
-  updateMat,
-  type Mat,
   type RunBoard,
   type RunEntry,
   type RunQueueItem,
 } from "@/lib/run"
 
-type TabKey = "plan" | "checkin" | "run"
+// The mat/category planning that used to live here as a "Plan" sub-tab moved to
+// the hub's own Plan tab, which does the same job against a real schedule. This
+// page is now day-of only: run the bouts, check people in.
+type TabKey = "checkin" | "run"
 
 const boutKeyOf = (i: RunQueueItem) => `${i.drawId}:${i.phase}:${i.round}:${i.position}`
 
@@ -130,13 +110,11 @@ export default function RunPage() {
         <TabsList>
           <TabsTrigger value="run">Run</TabsTrigger>
           <TabsTrigger value="checkin">Check-in</TabsTrigger>
-          <TabsTrigger value="plan">Plan</TabsTrigger>
         </TabsList>
       </Tabs>
 
       {tab === "run" && <RunTab eventId={eventId} canManage={canManage} />}
       {tab === "checkin" && <CheckInTab eventId={eventId} canManage={canManage} />}
-      {tab === "plan" && <PlanTab eventId={eventId} canManage={canManage} />}
     </>
   )
 }
@@ -229,7 +207,7 @@ function RunTab({ eventId, canManage }: { eventId: string; canManage: boolean })
         <CardContent className="py-16 text-center">
           <Swords className="mx-auto mb-3 h-8 w-8 text-muted-foreground" />
           <p className="text-sm text-muted-foreground">
-            No bouts ready to run. Generate draws and assign categories to mats on the Plan tab.
+            No bouts ready to run. Generate draws, then put the categories on a floor under Plan.
           </p>
         </CardContent>
       </Card>
@@ -510,431 +488,6 @@ function CheckInTab({ eventId, canManage }: { eventId: string; canManage: boolea
           ))}
         </div>
       )}
-    </div>
-  )
-}
-
-// ============================ PLAN TAB ============================
-// A category that actually has a generated draw — only those can go on a mat.
-type DrawnCategory = DrawCategoryRow & { draw: NonNullable<DrawCategoryRow["draw"]> }
-
-const categoryTitle = (row: DrawCategoryRow) =>
-  row.weightClassName ? `${row.divisionName} · ${row.weightClassName}` : row.divisionName
-
-const categoryKey = (row: DrawCategoryRow) => `${row.divisionId}:${row.weightClassId ?? ""}`
-
-// One category inside a mat card. `handleProps` is present only when the row
-// sits inside a DndContext; without it the grip is omitted rather than dead.
-function MatCategoryRow({
-  row,
-  index,
-  canManage,
-  onUnassign,
-  handleProps,
-}: {
-  row: DrawnCategory
-  index: number
-  canManage: boolean
-  onUnassign: () => void
-  handleProps?: Record<string, unknown>
-}) {
-  return (
-    <div className="flex items-center gap-1.5 rounded-md border bg-background px-2 py-1.5">
-      {handleProps ? (
-        <button
-          type="button"
-          className="shrink-0 touch-none cursor-grab text-muted-foreground active:cursor-grabbing"
-          aria-label={`Reorder ${categoryTitle(row)}`}
-          {...handleProps}
-        >
-          <GripVertical className="size-3.5" />
-        </button>
-      ) : (
-        <span className="w-3.5 shrink-0" />
-      )}
-      <span className="w-4 shrink-0 text-center text-[11px] font-semibold tabular-nums text-muted-foreground">
-        {index + 1}
-      </span>
-      <div className="min-w-0 flex-1">
-        <p className="flex items-center gap-1.5 truncate text-sm font-medium leading-tight">
-          {categoryTitle(row)}
-          {row.draw.locked && (
-            <Lock className="h-3 w-3 shrink-0 text-belt-blue" aria-label="Locked" />
-          )}
-        </p>
-        <p className="truncate text-[11px] leading-tight text-muted-foreground">
-          {row.category} · {row.draw.size}-draw · {row.entryCount}{" "}
-          {row.entryCount === 1 ? "entry" : "entries"}
-        </p>
-      </div>
-      {canManage && (
-        <Button
-          size="icon-xs"
-          variant="ghost"
-          onClick={onUnassign}
-          aria-label={`Remove ${categoryTitle(row)} from this mat`}
-        >
-          <X />
-        </Button>
-      )}
-    </div>
-  )
-}
-
-function SortableMatCategory(props: {
-  row: DrawnCategory
-  index: number
-  canManage: boolean
-  onUnassign: () => void
-}) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-    id: props.row.draw.id,
-  })
-  return (
-    <div
-      ref={setNodeRef}
-      style={{
-        transform: CSS.Transform.toString(transform),
-        transition,
-        opacity: isDragging ? 0.5 : 1,
-      }}
-    >
-      <MatCategoryRow {...props} handleProps={{ ...attributes, ...listeners }} />
-    </div>
-  )
-}
-
-function PlanTab({ eventId, canManage }: { eventId: string; canManage: boolean }) {
-  const queryClient = useQueryClient()
-  const toast = useToast()
-  const apiError = useApiErrorToast()
-  const confirm = useConfirm()
-  const [newMatName, setNewMatName] = useState("")
-
-  const { data: mats = [], isLoading: matsLoading } = useQuery({
-    queryKey: ["mats", eventId],
-    queryFn: () => listMats(eventId),
-  })
-
-  const { data: categories = [], isLoading: catsLoading } = useQuery({
-    queryKey: ["draw-categories", eventId],
-    queryFn: () => listDrawCategories(eventId),
-  })
-
-  const invalidate = () => {
-    queryClient.invalidateQueries({ queryKey: ["mats", eventId] })
-    queryClient.invalidateQueries({ queryKey: ["draw-categories", eventId] })
-    queryClient.invalidateQueries({ queryKey: ["run-board", eventId] })
-  }
-
-  const createMutation = useMutation({
-    mutationFn: (name: string) => createMat(eventId, name),
-    onSuccess: () => {
-      setNewMatName("")
-      invalidate()
-      toast.success("Mat added")
-    },
-    onError: (e) => apiError(e, "Could not add the mat"),
-  })
-
-  const reorderMutation = useMutation({
-    mutationFn: ({ matId, order }: { matId: string; order: number }) => updateMat(matId, { order }),
-    onSuccess: invalidate,
-    onError: (e) => apiError(e, "Could not reorder mats"),
-  })
-
-  const deleteMutation = useMutation({
-    mutationFn: (matId: string) => deleteMat(matId),
-    onSuccess: () => {
-      invalidate()
-      toast.success("Mat removed")
-    },
-    onError: (e) => apiError(e, "Could not remove the mat"),
-  })
-
-  // matOrder is deliberately omitted: the backend appends the category to the
-  // end of the mat's running order.
-  const assignMutation = useMutation({
-    mutationFn: ({ drawId, matId }: { drawId: string; matId: string | null }) =>
-      assignDrawMat(drawId, matId),
-    onSuccess: invalidate,
-    onError: (e) => apiError(e, "Could not assign the category"),
-  })
-
-  const reorderCategoriesMutation = useMutation({
-    mutationFn: ({ matId, drawIds }: { matId: string; drawIds: string[] }) =>
-      reorderMatCategories(matId, drawIds),
-    onError: (e) => apiError(e, "Could not save the category order"),
-    onSettled: invalidate,
-  })
-
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
-
-  const swapOrder = (index: number, dir: -1 | 1) => {
-    const a = mats[index]
-    const b = mats[index + dir]
-    if (!a || !b) return
-    reorderMutation.mutate({ matId: a.id, order: b.order })
-    reorderMutation.mutate({ matId: b.id, order: a.order })
-  }
-
-  const handleDeleteMat = async (mat: Mat) => {
-    const ok = await confirm({
-      title: `Remove ${mat.name}?`,
-      description: "Categories and bouts on this mat become unassigned.",
-      confirmText: "Remove",
-      destructive: true,
-    })
-    if (ok) deleteMutation.mutate(mat.id)
-  }
-
-  // Only categories that actually have a generated draw can be assigned to a mat.
-  const drawnCategories = useMemo(
-    () => categories.filter((c): c is DrawnCategory => !!c.draw),
-    [categories],
-  )
-
-  // The categories on each mat, in running order — this is what the mat cards
-  // list, and what was missing entirely before.
-  const byMat = useMemo(() => {
-    const map = new Map<string, DrawnCategory[]>()
-    for (const row of drawnCategories) {
-      if (!row.draw.matId) continue
-      const list = map.get(row.draw.matId)
-      if (list) list.push(row)
-      else map.set(row.draw.matId, [row])
-    }
-    for (const list of map.values()) {
-      list.sort(
-        (a, b) =>
-          (a.draw.matOrder ?? Number.MAX_SAFE_INTEGER) -
-            (b.draw.matOrder ?? Number.MAX_SAFE_INTEGER) ||
-          categoryTitle(a).localeCompare(categoryTitle(b)),
-      )
-    }
-    return map
-  }, [drawnCategories])
-
-  // Unassigned first: that's the work still to be done.
-  const categoryList = useMemo(
-    () =>
-      [...drawnCategories].sort(
-        (a, b) =>
-          Number(!!a.draw.matId) - Number(!!b.draw.matId) ||
-          categoryTitle(a).localeCompare(categoryTitle(b)),
-      ),
-    [drawnCategories],
-  )
-
-  const unassignedCount = drawnCategories.filter((c) => !c.draw.matId).length
-
-  // Reorder categories within a mat: optimistic local move, then persist.
-  const handleReorderCategories =
-    (matId: string, rows: DrawnCategory[]) => (event: DragEndEvent) => {
-      const { active, over } = event
-      if (!over || active.id === over.id) return
-      const ids = rows.map((r) => r.draw.id)
-      const oldIndex = ids.indexOf(String(active.id))
-      const newIndex = ids.indexOf(String(over.id))
-      if (oldIndex < 0 || newIndex < 0) return
-      const next = arrayMove(rows, oldIndex, newIndex)
-      const orderByDrawId = new Map(next.map((r, i) => [r.draw.id, i]))
-      queryClient.setQueryData<DrawCategoryRow[]>(["draw-categories", eventId], (old) =>
-        old?.map((r) =>
-          r.draw && orderByDrawId.has(r.draw.id)
-            ? { ...r, draw: { ...r.draw, matOrder: orderByDrawId.get(r.draw.id)! } }
-            : r,
-        ),
-      )
-      reorderCategoriesMutation.mutate({ matId, drawIds: next.map((r) => r.draw.id) })
-    }
-
-  return (
-    <div className="grid gap-4 lg:grid-cols-2">
-      {/* Mats, each with the categories assigned to it in running order */}
-      <div className="space-y-2">
-        <h3 className="font-medium text-sm text-muted-foreground">
-          Mats {canManage && mats.length > 0 && "· drag a category to set its running order"}
-        </h3>
-        {matsLoading || catsLoading ? (
-          <Skeleton className="h-24 w-full" />
-        ) : (
-          <div className="space-y-2">
-            {mats.map((mat, i) => {
-              const rows = byMat.get(mat.id) ?? []
-              return (
-              <Card key={mat.id}>
-                <CardContent className="space-y-2 px-3 py-2.5">
-                  <div className="flex items-center gap-2">
-                    <span className="flex-1 truncate text-sm font-medium">{mat.name}</span>
-                    <span className="shrink-0 text-[11px] text-muted-foreground">
-                      {rows.length} {rows.length === 1 ? "category" : "categories"}
-                    </span>
-                    {canManage && (
-                      <div className="flex items-center gap-0.5">
-                        <Button
-                          size="icon-xs"
-                          variant="ghost"
-                          disabled={i === 0 || reorderMutation.isPending}
-                          onClick={() => swapOrder(i, -1)}
-                          aria-label="Move up"
-                        >
-                          <ArrowUp />
-                        </Button>
-                        <Button
-                          size="icon-xs"
-                          variant="ghost"
-                          disabled={i === mats.length - 1 || reorderMutation.isPending}
-                          onClick={() => swapOrder(i, 1)}
-                          aria-label="Move down"
-                        >
-                          <ArrowDown />
-                        </Button>
-                        <Button
-                          size="icon-xs"
-                          variant="ghost"
-                          onClick={() => handleDeleteMat(mat)}
-                          aria-label="Remove mat"
-                        >
-                          <Trash2 className="text-flag-red" />
-                        </Button>
-                      </div>
-                    )}
-                  </div>
-
-                  {rows.length === 0 ? (
-                    <p className="rounded-md border border-dashed px-2 py-3 text-center text-[11px] text-muted-foreground">
-                      No categories on this mat yet.
-                    </p>
-                  ) : canManage && rows.length > 1 ? (
-                    <DndContext
-                      sensors={sensors}
-                      collisionDetection={closestCenter}
-                      onDragEnd={handleReorderCategories(mat.id, rows)}
-                    >
-                      <SortableContext
-                        items={rows.map((r) => r.draw.id)}
-                        strategy={verticalListSortingStrategy}
-                      >
-                        <div className="space-y-1.5">
-                          {rows.map((row, idx) => (
-                            <SortableMatCategory
-                              key={row.draw.id}
-                              row={row}
-                              index={idx}
-                              canManage={canManage}
-                              onUnassign={() =>
-                                assignMutation.mutate({ drawId: row.draw.id, matId: null })
-                              }
-                            />
-                          ))}
-                        </div>
-                      </SortableContext>
-                    </DndContext>
-                  ) : (
-                    <div className="space-y-1.5">
-                      {rows.map((row, idx) => (
-                        <MatCategoryRow
-                          key={row.draw.id}
-                          row={row}
-                          index={idx}
-                          canManage={canManage}
-                          onUnassign={() =>
-                            assignMutation.mutate({ drawId: row.draw.id, matId: null })
-                          }
-                        />
-                      ))}
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-              )
-            })}
-            {mats.length === 0 && (
-              <p className="text-xs text-muted-foreground py-2">No mats yet.</p>
-            )}
-            {canManage && (
-              <div className="flex gap-2 pt-1">
-                <Input
-                  placeholder="e.g. Mat 1"
-                  value={newMatName}
-                  onChange={(e) => setNewMatName(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && newMatName.trim()) createMutation.mutate(newMatName.trim())
-                  }}
-                />
-                <Button
-                  onClick={() => createMutation.mutate(newMatName.trim())}
-                  disabled={!newMatName.trim() || createMutation.isPending}
-                >
-                  <Plus />
-                  Add
-                </Button>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* Category assignment */}
-      <div className="space-y-2">
-        <h3 className="font-medium text-sm text-muted-foreground">
-          Assign categories to mats
-          {drawnCategories.length > 0 && ` · ${unassignedCount} unassigned`}
-        </h3>
-        {catsLoading ? (
-          <Skeleton className="h-40 w-full" />
-        ) : drawnCategories.length === 0 ? (
-          <Card>
-            <CardContent className="py-10 text-center text-sm text-muted-foreground">
-              No draws generated yet. Create draws on the Draws & Results page first.
-            </CardContent>
-          </Card>
-        ) : (
-          <div className="space-y-2">
-            {categoryList.map((row) => (
-              <Card key={categoryKey(row)} className={cn(!row.draw.matId && "border-dashed")}>
-                <CardContent className="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5">
-                  <div className="min-w-0">
-                    <p className="flex items-center gap-1.5 truncate text-sm font-medium">
-                      {categoryTitle(row)}
-                      {row.draw.locked && (
-                        <Lock className="h-3 w-3 shrink-0 text-belt-blue" aria-label="Locked" />
-                      )}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      {row.category} · {row.draw.size}-draw · {row.entryCount}{" "}
-                      {row.entryCount === 1 ? "entry" : "entries"}
-                    </p>
-                  </div>
-                  <Select
-                    value={row.draw.matId ?? "none"}
-                    onValueChange={(v) =>
-                      assignMutation.mutate({
-                        drawId: row.draw.id,
-                        matId: v === "none" ? null : v,
-                      })
-                    }
-                    disabled={!canManage || assignMutation.isPending}
-                  >
-                    <SelectTrigger size="sm" className="w-40">
-                      <SelectValue placeholder="Unassigned" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">Unassigned</SelectItem>
-                      {mats.map((m) => (
-                        <SelectItem key={m.id} value={m.id}>
-                          {m.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        )}
-      </div>
     </div>
   )
 }

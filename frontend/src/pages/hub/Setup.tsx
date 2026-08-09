@@ -1,16 +1,20 @@
 import { useAuth } from "@/contexts/AuthContext"
 import { useSelectedEvent } from "@/contexts/SelectedEventContext"
 import { DivisionsWeights } from "@/components/events/DivisionsWeights"
+import { DivisionTiming } from "@/components/events/DivisionTiming"
 import { EventCoordinators } from "@/components/events/EventCoordinators"
 
 export default function Setup() {
   const { eventId } = useSelectedEvent()
-  const { role } = useAuth()
+  const { role, canManageEvent } = useAuth()
   if (!eventId) return null
 
   // Only admins appoint. A coordinator reaching this screen sees the roster
   // read-only — the server refuses the mutations either way.
   const canAppoint = role === "SUPERADMIN" || role === "ADMIN"
+  // Division edits (including the timing fields) are requireEventManager, so a
+  // coordinator may change them for their own event.
+  const canManage = canManageEvent(eventId)
 
   return (
     <div className="space-y-4">
@@ -21,6 +25,7 @@ export default function Setup() {
         </p>
       </div>
       <DivisionsWeights eventId={eventId} />
+      <DivisionTiming eventId={eventId} canManage={canManage} />
       <EventCoordinators eventId={eventId} canAppoint={canAppoint} />
     </div>
   )

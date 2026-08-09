@@ -1,4 +1,5 @@
 import { api } from "./api";
+import { normalizeEventTiming, type EventTiming } from "./timing";
 
 export type EventStatus = "DRAFT" | "ACTIVE" | "CLOSED" | "ARCHIVED";
 
@@ -37,6 +38,11 @@ export interface Division {
   gender: "Male" | "Female";
   category: CategoryType;
   notes?: string | null;
+  // Per-category timing overrides. null = inherit (the event's timing defaults
+  // for duration/buffer, the age rule for the win gap) — see lib/timing.ts.
+  boutDurationSec?: number | null;
+  bufferPct?: number | null;
+  winByGap?: number | null;
   _count?: {
     entries: number;
   };
@@ -123,6 +129,9 @@ export interface CreateDivisionDto {
   gender: "Male" | "Female";
   category?: CategoryType;
   notes?: string;
+  boutDurationSec?: number | null;
+  bufferPct?: number | null;
+  winByGap?: number | null;
 }
 
 export interface CreateWeightClassDto {
@@ -212,6 +221,25 @@ export async function deleteEvent(id: string): Promise<void> {
 export async function setPublicAccess(id: string, enabled: boolean): Promise<Event> {
   const res = await api.post(`/events/${id}/public-token`, { enabled });
   return res.data;
+}
+
+// ============ Timing ============
+//
+// Tournament-wide timing defaults, edited from the event hub's Overview tab.
+// Reading is open to any logged-in user (coaches want to know when the
+// ceremonies and lunch break fall); writing is admin-or-coordinator, enforced
+// server-side by requireEventManager.
+
+export async function getEventTiming(eventId: string): Promise<EventTiming> {
+  const res = await api.get(`/events/${eventId}/timing`);
+  // The API already normalizes, but an event stored before a field existed
+  // would otherwise surface as undefined in a controlled input.
+  return normalizeEventTiming(res.data);
+}
+
+export async function updateEventTiming(eventId: string, timing: EventTiming): Promise<EventTiming> {
+  const res = await api.put(`/events/${eventId}/timing`, timing);
+  return normalizeEventTiming(res.data);
 }
 
 // ============ Divisions ============
