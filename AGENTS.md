@@ -117,6 +117,19 @@ npx tsx scripts/test-event-scope.ts      # coordinator authorization, over HTTP
 `test-event-scope.ts` drives a **running** backend, so start it with
 `ALLOW_DEV_AUTH=true` first; `test-draws.ts` talks to the database directly.
 
+For a realistic tournament to click around in — 8 clubs, 190 athletes, 52
+categories across kata/kumite/team with weight classes, real brackets, and a
+few categories already fought:
+
+```bash
+cd backend && npx tsx scripts/seed-test-tournament.ts          # --clean removes it
+```
+
+It builds everything through the service layer (`applyTemplate`,
+`DrawService.create`, `setBoutWinner`), so draw shapes and DRAWN/IN_PROGRESS/
+COMPLETED statuses are derived rather than stamped on. Re-running replaces its
+own data and touches nothing else.
+
 Note the local `gojukainam` role lacks `CREATEDB`, so `prisma migrate dev`
 fails on its shadow database. Generate migrations with
 `prisma migrate diff --from-schema-datasource ... --to-schema-datamodel ...`,
