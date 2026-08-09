@@ -69,6 +69,86 @@ const SideBoard = ({ side, data, winner }: { side: "aka" | "ao"; data: DisplaySi
   )
 }
 
+/** One fighter's final score, colour-coded, on the result screen. */
+const FinalScore = ({ side, data, dim }: { side: "aka" | "ao"; data: DisplaySide; dim: boolean }) => (
+  <div
+    className={cn(
+      "flex min-w-0 flex-1 flex-col items-center rounded-lg px-[2vmin] py-[1.5vmin] transition-opacity",
+      side === "aka" ? "bg-red-700" : "bg-blue-800",
+      dim && "opacity-40",
+    )}
+  >
+    <p className="font-display text-[2.4vmin] uppercase tracking-widest text-white/80">
+      {side === "aka" ? "AKA" : "AO"}
+    </p>
+    <p className="w-full truncate text-center text-[3.4vmin] font-bold leading-tight text-white">
+      {data.name}
+    </p>
+    <p className="w-full truncate text-center text-[2vmin] text-white/70">{data.clubName}</p>
+    <p className="font-mono text-[9vmin] font-bold leading-none text-white tabular-nums">
+      {data.points}
+    </p>
+  </div>
+)
+
+/**
+ * What the mats see once the operator calls a result: the final score, a
+ * winner announcement big enough to read from the floor, and the podium when
+ * this bout decided the category.
+ *
+ * Replaces the live board rather than sitting beside it — at this moment there
+ * is no live bout to show, and everyone in the hall is looking up.
+ */
+const ResultScreen = ({
+  payload,
+  left,
+  right,
+  leftSide,
+  rightSide,
+}: {
+  payload: DisplayPayload
+  left: DisplaySide
+  right: DisplaySide
+  leftSide: "aka" | "ao"
+  rightSide: "aka" | "ao"
+}) => (
+  <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-[2.5vmin] px-[3vmin] py-[2vmin]">
+    <div className="flex w-full max-w-[150vmin] items-stretch justify-center gap-[2vmin]">
+      <FinalScore side={leftSide} data={left} dim={!payload.isDraw && payload.winnerSide !== leftSide} />
+      <FinalScore side={rightSide} data={right} dim={!payload.isDraw && payload.winnerSide !== rightSide} />
+    </div>
+
+    {payload.isDraw ? (
+      <div className="rounded-xl border-[0.6vmin] border-white/30 bg-white/10 px-[6vmin] py-[2vmin] text-center">
+        <p className="text-[9vmin] font-black uppercase leading-none tracking-wide text-white">Draw</p>
+      </div>
+    ) : (
+      payload.winnerSide && (
+        <div className="rounded-xl bg-yellow-400 px-[6vmin] py-[2vmin] text-center ring-[0.8vmin] ring-yellow-200">
+          <p className="text-[9vmin] font-black uppercase leading-none tracking-wide text-black">
+            {payload.winnerSide === "aka" ? "AKA" : "AO"} wins
+          </p>
+          <p className="mt-[0.8vmin] truncate text-[3.4vmin] font-bold leading-tight text-black">
+            {payload.winnerName}
+          </p>
+          <p className="truncate text-[2.2vmin] leading-tight text-black/70">
+            {payload.winnerClubName}
+            {payload.outcome ? ` · ${payload.outcome.toLowerCase()}` : ""}
+          </p>
+        </div>
+      )
+    )}
+
+    {/* Only once this bout is the final and both bronze bouts are already
+        decided — see lib/draws.ts (isFinalBout / bronze gathering). */}
+    {payload.podium && (
+      <div className="w-full max-w-[150vmin] shrink">
+        <PodiumBanner podium={payload.podium} variant="display" />
+      </div>
+    )}
+  </div>
+)
+
 export default function ScoreboardDisplayPage() {
   const [payload, setPayload] = useState<DisplayPayload | null>(null)
   const [flipped, setFlipped] = useState(() => localStorage.getItem(FLIP_KEY) === "1")
@@ -139,47 +219,43 @@ export default function ScoreboardDisplayPage() {
             </p>
           </div>
 
-          {/* boards */}
-          <div className="flex min-h-0 flex-1">
-            <SideBoard side={leftSide} data={left} winner={payload.ended && payload.winnerSide === leftSide} />
+          {payload.resultShown && (payload.winnerSide || payload.isDraw) ? (
+            <ResultScreen
+              payload={payload}
+              left={left}
+              right={right}
+              leftSide={leftSide}
+              rightSide={rightSide}
+            />
+          ) : (
+            /* live boards */
+            <div className="flex min-h-0 flex-1">
+              <SideBoard side={leftSide} data={left} winner={false} />
 
-            <div className="flex w-[56vmin] shrink-0 flex-col items-center justify-center gap-[2vmin] bg-black px-[1vmin]">
-              <p
-                className={cn(
-                  "font-mono text-[20vmin] font-bold leading-none tabular-nums",
-                  payload.atoshiBaraku && !payload.ended ? "animate-pulse text-red-500" : "text-white",
-                )}
-              >
-                {formatClock(payload.clockMs)}
-              </p>
-              {payload.atoshiBaraku && !payload.ended && (
-                <p className="text-center text-[2.6vmin] font-bold uppercase tracking-widest text-red-400">
-                  Atoshi baraku
+              <div className="flex w-[56vmin] shrink-0 flex-col items-center justify-center gap-[2vmin] bg-black px-[1vmin]">
+                <p
+                  className={cn(
+                    "font-mono text-[20vmin] font-bold leading-none tabular-nums",
+                    payload.atoshiBaraku && !payload.ended ? "animate-pulse text-red-500" : "text-white",
+                  )}
+                >
+                  {formatClock(payload.clockMs)}
                 </p>
-              )}
-              {payload.ended && payload.winnerName && payload.winnerSide && (
-                <div className="rounded-lg bg-yellow-400 px-[3vmin] py-[1.5vmin] text-center">
-                  <p className="text-[6vmin] font-black uppercase leading-none tracking-wide text-black">
-                    {payload.winnerSide === "aka" ? "AKA" : "AO"} WINS
+                {payload.atoshiBaraku && !payload.ended && (
+                  <p className="text-center text-[2.6vmin] font-bold uppercase tracking-widest text-red-400">
+                    Atoshi baraku
                   </p>
-                  <p className="mt-[0.6vmin] truncate text-[2.6vmin] font-semibold text-black/80">
-                    {payload.winnerName}
-                    {payload.outcome ? ` · ${payload.outcome.toLowerCase()}` : ""}
+                )}
+                {/* Time is up but the operator has not called it yet — say so
+                    rather than leaving the floor staring at a frozen 00:00. */}
+                {payload.ended && (
+                  <p className="text-center text-[2.6vmin] font-bold uppercase tracking-widest text-white/70">
+                    Time
                   </p>
-                </div>
-              )}
-            </div>
+                )}
+              </div>
 
-            <SideBoard side={rightSide} data={right} winner={payload.ended && payload.winnerSide === rightSide} />
-          </div>
-
-          {/* Podium: only once this bout is the final and both bronze
-              bouts are already decided — see components/scoreboard/
-              PodiumBanner.tsx and lib/draws.ts (isFinalBout / bronze
-              gathering). */}
-          {payload.ended && payload.podium && (
-            <div className="shrink-0 bg-black px-[2vmin] py-[2vmin]">
-              <PodiumBanner podium={payload.podium} variant="display" />
+              <SideBoard side={rightSide} data={right} winner={false} />
             </div>
           )}
         </>

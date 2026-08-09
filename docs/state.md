@@ -92,6 +92,42 @@ a database, never against production data.
 
 ## In flight (uncommitted)
 
+**The projector now shows the result, not just the operator (2026-08-09).**
+The winner announcement and the podium were only ever on the operator's own
+screen, because both live in the result *dialog* and the broadcast payload
+derived its winner from `boutOver` — which is false for the normal case of a
+bout called before the clock runs out. The mats watched a live scoreboard while
+the operator was looking at a winner.
+
+`DisplayPayload` gains `resultShown` (the bout ended **or** the operator opened
+the result dialog), `winnerClubName` and `isDraw` — a draw had no
+representation at all, so declaring one showed the projector nothing.
+`ScoreboardDisplay` swaps the live board for a full result screen: final score
+with the loser dimmed, a winner announcement sized for the floor, and the
+podium underneath. "Continue bout" puts the live board back.
+
+The unmount guard that keeps a finished result on the projector after the
+operator navigates away now tracks `resultShown` rather than `boutOver`, or a
+bout called early still wiped the screen on Save — the same bug the guard was
+written for, one case wider.
+
+`PodiumBanner` lays the names in a fixed-height row pinned to the top of
+equal-height columns (`items-stretch` + `mt-auto` on the step) instead of
+hanging them off each step. Previously they inherited the podium's stagger, so
+the taller the step the higher its name floated into the next column's text;
+columns are also wider with more gap.
+
+Verified live with the operator and projector side by side: winner + podium
+appear the moment the result dialog opens, survive Save and the navigate to
+/draws, revert on "Continue bout", and the draw path shows a DRAW panel with
+neither side dimmed. Message-log checked on the channel to confirm no spurious
+`closed` is sent.
+
+Not committed with the rest — this began as someone else's in-flight change to
+`BoutScoreboard.tsx` / `PodiumBanner.tsx` (a projector "closed" fix and podium
+sizing) that was already in the tree.
+
+
 **Tournament planning — the hub's new Plan tab (2026-08-09).**
 Request: a separate "Plan" option alongside Run, with a good UI for managing
 mats: drag categories from a list onto mats and between mats, reorder them,

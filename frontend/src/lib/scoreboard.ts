@@ -336,9 +336,23 @@ export interface DisplayPayload {
   clockMs: number
   running: boolean
   atoshiBaraku: boolean
+  /** The bout's clock is done. Drives the end buzzer and the clock styling. */
   ended: boolean
+  /**
+   * The operator is *showing* the result: either the bout ran out, or they
+   * opened the result dialog to call it. Distinct from `ended` because the
+   * common case is a bout stopped early — the operator calls the result on a
+   * clock that never reached zero, and the projector still has to announce it.
+   * Without this the mats saw a live scoreboard while the operator was looking
+   * at a winner.
+   */
+  resultShown: boolean
   winnerSide: Side | null
   winnerName: string | null
+  /** Winner's club, for the projector's announcement. */
+  winnerClubName: string | null
+  /** The operator declared a draw — no winner, but still a result to show. */
+  isDraw: boolean
   outcome: Outcome | null
   soundOn: boolean
   /** Operator's requested display orientation: true = AKA on right (swapped). */

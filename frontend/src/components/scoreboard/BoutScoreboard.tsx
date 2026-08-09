@@ -430,6 +430,14 @@ export function BoutScoreboard({
 
   const resolution = useMemo(() => resolveOutcome(state), [state])
   const boutOver = isBoutOver({ ended: state.ended, clockMs, awardMs })
+  // Read at unmount time by the channel-setup effect below, whose cleanup
+  // otherwise only ever sees the value this had when the effect first ran
+  // (mount, always false) — a plain ref kept current by the payload effect.
+  //
+  // Tracks "a result is on show", not "the clock ran out": the common case is
+  // a bout called early, and that projector announcement has to survive the
+  // operator navigating away just as much as a timed-out one does.
+  const resultShownRef = useRef(false)
 
   useEffect(() => {
     const channel = new BroadcastChannel(CHANNEL_NAME)
@@ -440,13 +448,29 @@ export function BoutScoreboard({
       }
     }
     return () => {
-      channel.postMessage({ type: "closed" } satisfies ChannelMessage)
+      // A finished bout's result (and podium) should stay up on the
+      // projector after the operator navigates away to save it — that's
+      // the exact moment anyone glancing at the floor screen wants to see
+      // it. Previously this unconditionally posted "closed" on every
+      // unmount, which wiped the projector back to "Waiting for the
+      // scoreboard…" the instant Save was clicked, before anyone could
+      // actually see the result it had just shown. Only send "closed" for
+      // a genuinely abandoned bout (navigated away before any result).
+      if (!resultShownRef.current) {
+        channel.postMessage({ type: "closed" } satisfies ChannelMessage)
+      }
       channel.close()
     }
   }, [])
 
   useEffect(() => {
-    const winnerSide = boutOver ? (hanteiWinner ?? resolution.winner) : null
+    // The result is on show once the bout is over *or* the operator has opened
+    // the result dialog. Keying the projector off `boutOver` alone meant a bout
+    // stopped early — the normal case — announced nothing to the mats while the
+    // operator was looking at a winner on their own screen.
+    const showingResult = boutOver || resolutionOpen
+    const winnerSide = showingResult && !declaredDraw ? (hanteiWinner ?? resolution.winner) : null
+    const winnerFighter = winnerSide ? (winnerSide === "aka" ? aka : ao) : null
     const podium =
       winnerSide && finalBronzeMedalists
         ? {
@@ -484,16 +508,21 @@ export function BoutScoreboard({
       running,
       atoshiBaraku,
       ended: boutOver,
+      resultShown: showingResult,
       winnerSide,
-      winnerName: winnerSide ? (winnerSide === "aka" ? aka.name : ao.name) : null,
-      outcome: boutOver ? resolution.outcome : null,
+      winnerName: winnerFighter?.name ?? null,
+      winnerClubName: winnerFighter?.clubName ?? null,
+      isDraw: showingResult && declaredDraw,
+      // Hantei is the operator's pick, not something `resolveOutcome` derives.
+      outcome: showingResult ? (hanteiWinner ? "HANTEI" : resolution.outcome) : null,
       soundOn: settings.soundOn,
       displayFlip,
       podium,
     }
     payloadRef.current = payload
+    resultShownRef.current = showingResult
     channelRef.current?.postMessage(payload)
-  }, [aka, ao, categoryLabel, roundLabel, persistKey, state, clockMs, running, atoshiBaraku, boutOver, resolution, hanteiWinner, settings.soundOn, displayFlip, finalBronzeMedalists])
+  }, [aka, ao, categoryLabel, roundLabel, persistKey, state, clockMs, running, atoshiBaraku, boutOver, resolutionOpen, declaredDraw, resolution, hanteiWinner, settings.soundOn, displayFlip, finalBronzeMedalists])
 
   // -- actions ----------------------------------------------------------------
   const now = () => Date.now()

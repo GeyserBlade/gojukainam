@@ -46,36 +46,63 @@ export function PodiumBanner({
       >
         Final results
       </p>
-      <div className={cn("flex items-end justify-center", isDisplay ? "gap-[1.5vmin]" : "gap-2 sm:gap-3")}>
+      {/* Names sit in a fixed-height row *above* the steps, so all four align
+          on one baseline. Hanging them off each step meant they inherited the
+          podium's stagger and ran into their neighbours — the taller the step,
+          the higher its name floated into the next column's text. */}
+      {/* items-stretch, not items-end: every column is the same height, the
+          name row is pinned to the top of it and the step to the bottom. That
+          is what puts the four names on one line while the steps keep their
+          1st-is-tallest stagger. */}
+      <div className={cn("flex items-stretch justify-center", isDisplay ? "gap-[2.5vmin]" : "gap-3 sm:gap-4")}>
         {blocks.map((b, i) => {
           const style = RANK_STYLE[b.rank]
           return (
             <div
               key={i}
-              className={cn("flex flex-col items-center", isDisplay ? "w-[16vmin] gap-[0.8vmin]" : "w-20 gap-1.5 sm:w-24")}
+              className={cn(
+                "flex min-w-0 flex-col items-center",
+                isDisplay ? "w-[22vmin] gap-[1vmin]" : "w-32 gap-2 sm:w-36",
+              )}
             >
-              <div className={cn("text-center", isDisplay ? "min-h-[5vmin]" : "min-h-[2.5rem]")}>
+              <div
+                className={cn(
+                  "flex w-full flex-col justify-end px-1 text-center",
+                  isDisplay ? "h-[8vmin] gap-[0.3vmin]" : "h-14 gap-0.5",
+                )}
+              >
                 <p
                   className={cn(
-                    "truncate font-semibold leading-tight text-white",
-                    isDisplay ? "text-[2.2vmin]" : "text-[11px] sm:text-xs",
+                    "line-clamp-2 leading-tight font-semibold break-words hyphens-auto text-white",
+                    isDisplay ? "text-[2vmin]" : "text-[11px] sm:text-xs",
                   )}
                 >
                   {b.medalist.name}
                 </p>
-                <p className={cn("truncate text-white/60", isDisplay ? "text-[1.7vmin]" : "text-[9px] sm:text-[10px]")}>
+                <p
+                  className={cn(
+                    "truncate leading-tight text-white/60",
+                    isDisplay ? "text-[1.5vmin]" : "text-[9px] sm:text-[10px]",
+                  )}
+                >
                   {b.medalist.clubName}
                 </p>
               </div>
               <div
                 className={cn(
-                  "flex w-full items-start justify-center rounded-t-md pt-1.5 ring-2",
+                  "mt-auto flex w-full items-start justify-center rounded-t-md pt-1.5 ring-2",
                   HEIGHT[variant][b.rank],
                   style.bg,
                   style.ring,
                 )}
               >
-                <span className={cn("font-display font-bold", style.text, isDisplay ? "text-[3vmin]" : "text-lg sm:text-xl")}>
+                <span
+                  className={cn(
+                    "font-display font-bold",
+                    style.text,
+                    isDisplay ? "text-[3vmin]" : "text-lg sm:text-xl",
+                  )}
+                >
                   {style.label}
                 </span>
               </div>
