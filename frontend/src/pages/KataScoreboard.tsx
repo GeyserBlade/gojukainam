@@ -164,7 +164,13 @@ function CompetitorPanel({
           <SelectTrigger className="h-11 w-full border-white/20 bg-black/40 text-white">
             <SelectValue placeholder="Choose a kata" />
           </SelectTrigger>
-          <SelectContent>
+          {/* `popper` rather than the app's usual item-aligned default. With
+              item-aligned, Radix drives scrolling through hover-only chevrons
+              and the list could be scrolled down but not back up. A popper
+              content is an ordinary scroll container: wheel, trackpad and
+              touch-drag all work, in both directions. Capped so the panel
+              never covers the judges' flags behind it. */}
+          <SelectContent position="popper" className="max-h-[min(60vh,20rem)]">
             {groups.map(([style, list]) => (
               <SelectGroup key={style}>
                 <SelectLabel>{style}</SelectLabel>

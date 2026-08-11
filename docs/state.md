@@ -122,6 +122,25 @@ counted along would announce the decision before the referee does. Before the
 reveal the mats see who is on and what they are performing; after it, the five
 flags, the winner and the podium if it was a final.
 
+*The list is Goju Kai Namibia's own, fifteen katas
+(`20260811120000_kata_list_goju_kai_namibia`).* The first migration seeded a
+broader syllabus; this one narrows it to what the association actually competes,
+in competition order. Three are the same kata under the association's
+romanisation (Seiyunchin → **Seinchin**, Sanseru → **Sanseiru**, Suparinpei →
+**Suarinpei**) and are renamed in place, not dropped and re-inserted — a rename
+keeps any `KataPerformance` pointing at the right row. Everything dropped is
+deleted only when nothing has been performed against it, and retired otherwise.
+
+*The kata picker uses `position="popper"`.* The app's shared `SelectContent`
+defaults to `item-aligned`, where Radix drives scrolling through hover-only
+chevrons; on a long list that meant the dropdown could be scrolled down and then
+not back up, because no scroll-up chevron ever appeared. A popper content is an
+ordinary `overflow-y-auto` container, so wheel, trackpad and touch-drag all work
+in both directions. **Only the kata pickers were changed** — the same latent
+problem applies to every long dropdown in the app, but fixing the shared default
+changes where every dropdown in the app opens, and that is not something to
+change unverified.
+
 *The kata list is a table, because the rules the user wants next are queries.*
 `Kata` is global reference data like `Belt` (21 rows, Goju Kai / Goju-ryu, seeded
 **in the migration** — `prisma/seed.ts` refuses to run against a populated

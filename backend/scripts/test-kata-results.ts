@@ -62,14 +62,16 @@ async function main() {
 
   console.log("— the seeded kata list —");
   const katas = await KataService.getAll();
-  check("the syllabus is seeded", katas.length >= 20, katas.length);
+  // Deliberately not an exact list: the allowable katas are the association's
+  // to set, and 20260811120000 already narrowed them once.
+  check("the allowable list is populated", katas.length >= 10, katas.length);
   check("it comes back beginner-first", katas.every((k, i) => i === 0 || katas[i - 1].order <= k.order));
   check("every kata in the choosable list is active", katas.every((k) => k.active));
 
   const saifa = katas.find((k) => k.name === "Saifa");
-  const seiyunchin = katas.find((k) => k.name === "Seiyunchin");
-  const tensho = katas.find((k) => k.name === "Tensho");
-  if (!saifa || !seiyunchin || !tensho) throw new Error("Expected the seeded Goju-ryu katas to exist");
+  const seinchin = katas.find((k) => k.name === "Seinchin");
+  const seisan = katas.find((k) => k.name === "Seisan");
+  if (!saifa || !seinchin || !seisan) throw new Error("Expected the seeded Goju-ryu katas to exist");
 
   console.log("\n— fixtures —");
   await removeFixtures();
@@ -137,7 +139,7 @@ async function main() {
       akaScore: 3,
       aoScore: 2,
       akaKataId: saifa.id,
-      aoKataId: seiyunchin.id,
+      aoKataId: seinchin.id,
       scoreJson: JSON.stringify({ kind: "kata", panel: ["aka", "aka", "ao", "ao", "aka"] }),
     },
     { id: user.id, role: "SUPERADMIN" },
@@ -147,9 +149,9 @@ async function main() {
   check("the flags are stored as the score", saved.akaScore === 3 && saved.aoScore === 2, saved);
   check("the outcome says how it was decided", saved.outcome === "FLAGS", saved.outcome);
   check("AKA's kata is on the bracket payload", saved.akaKata?.name === "Saifa", saved.akaKata);
-  check("AO's kata is on the bracket payload", saved.aoKata?.name === "Seiyunchin", saved.aoKata);
+  check("AO's kata is on the bracket payload", saved.aoKata?.name === "Seinchin", saved.aoKata);
   check("AKA's kata is a queryable row", (await performedKata(boutId, akaId))?.kata.name === "Saifa");
-  check("AO's kata is a queryable row", (await performedKata(boutId, aoId))?.kata.name === "Seiyunchin");
+  check("AO's kata is a queryable row", (await performedKata(boutId, aoId))?.kata.name === "Seinchin");
 
   console.log("\n— the rules this table exists for can be asked —");
   const performedByAka = await prisma.kataPerformance.findMany({
@@ -166,12 +168,12 @@ async function main() {
   draw = await DrawService.setBoutScore(
     draw.id,
     boutId,
-    { winnerEntryId: akaId, outcome: "FLAGS", akaScore: 3, aoScore: 2, akaKataId: tensho.id },
+    { winnerEntryId: akaId, outcome: "FLAGS", akaScore: 3, aoScore: 2, akaKataId: seisan.id },
     { id: user.id, role: "SUPERADMIN" },
   );
   saved = draw.bouts.find((b) => b.id === boutId)!;
-  check("the corrected kata replaces the old one", saved.akaKata?.name === "Tensho", saved.akaKata);
-  check("the other side is left alone when its id is omitted", saved.aoKata?.name === "Seiyunchin", saved.aoKata);
+  check("the corrected kata replaces the old one", saved.akaKata?.name === "Seisan", saved.akaKata);
+  check("the other side is left alone when its id is omitted", saved.aoKata?.name === "Seinchin", saved.aoKata);
   check(
     "correcting does not leave a second row behind",
     (await prisma.kataPerformance.count({ where: { boutId, entryId: akaId } })) === 1,
@@ -186,7 +188,7 @@ async function main() {
   );
   saved = draw.bouts.find((b) => b.id === boutId)!;
   check("null removes it", saved.aoKata === null, saved.aoKata);
-  check("and leaves the other in place", saved.akaKata?.name === "Tensho");
+  check("and leaves the other in place", saved.akaKata?.name === "Seisan");
 
   console.log("\n— an unknown kata is refused, not stored —");
   let rejected: any = null;
@@ -203,7 +205,7 @@ async function main() {
   check("422, with a message the mat can read", rejected?.status === 422, rejected);
   check(
     "the kata already on the bout survives the refusal",
-    (await performedKata(boutId, akaId))?.kata.name === "Tensho",
+    (await performedKata(boutId, akaId))?.kata.name === "Seisan",
   );
 
   console.log("\n— a winner-only capture discards the detail —");
@@ -232,7 +234,7 @@ async function main() {
         akaScore: 3,
         aoScore: 2,
         akaKataId: saifa.id,
-        aoKataId: seiyunchin.id,
+        aoKataId: seinchin.id,
       },
       { id: user.id, role: "SUPERADMIN" },
     );
@@ -247,14 +249,14 @@ async function main() {
       outcome: "FLAGS",
       akaScore: 4,
       aoScore: 1,
-      akaKataId: tensho.id,
+      akaKataId: seisan.id,
       aoKataId: saifa.id,
     },
     { id: user.id, role: "SUPERADMIN" },
   );
   check(
     "the final has its katas",
-    draw.bouts.find((b) => b.id === final.id)?.akaKata?.name === "Tensho",
+    draw.bouts.find((b) => b.id === final.id)?.akaKata?.name === "Seisan",
   );
 
   // Flip the first semi-final: a different competitor now reaches the final.
@@ -284,12 +286,12 @@ async function main() {
   check("the kata is still there", (await KataService.getById(saifa.id)) !== null);
 
   console.log("\n— retiring takes it out of the mat's list without losing it —");
-  await KataService.update(tensho.id, { active: false });
+  await KataService.update(seisan.id, { active: false });
   const choosable = await KataService.getAll();
   const everything = await KataService.getAll(true);
-  check("a retired kata is not choosable", !choosable.some((k) => k.id === tensho.id));
-  check("but the admin screen still sees it", everything.some((k) => k.id === tensho.id));
-  await KataService.update(tensho.id, { active: true });
+  check("a retired kata is not choosable", !choosable.some((k) => k.id === seisan.id));
+  check("but the admin screen still sees it", everything.some((k) => k.id === seisan.id));
+  await KataService.update(seisan.id, { active: true });
 
   console.log("\n— cleaning up —");
   await removeFixtures();

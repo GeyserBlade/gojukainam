@@ -348,7 +348,7 @@ async function main() {
     console.log("\nbut they can read the kata list, because kata cannot be scored without it:");
     const katas = await call("GET", "/katas", asOperator);
     check("reading the allowable katas -> 200", katas.status === 200, katas.status);
-    check("and it is the real syllabus", Array.isArray(katas.body) && katas.body.length >= 20, katas.body?.length);
+    check("and it is the real syllabus", Array.isArray(katas.body) && katas.body.length >= 10, katas.body?.length);
     check(
       "retired katas are not offered to the mat",
       Array.isArray(katas.body) && katas.body.every((k: any) => k.active),
