@@ -145,16 +145,6 @@ export function compareCategories(a: DraftCategory, b: DraftCategory): number {
   );
 }
 
-/**
- * The unit that must not be split across floors: one age range, one gender.
- *
- * Gender is in the key because a boys' and a girls' category never share an
- * athlete, so running them on different floors at the same time is free
- * parallelism. Age range is in it because that is what does share athletes —
- * the same child is in the U12 kata and the U12 kumite.
- */
-export const ageGroupKey = (c: DraftCategory) => `${c.minAge}-${c.maxAge}:${c.gender}`;
-
 /** Do these two categories plausibly draw on the same athletes? */
 function sharesAthletes(a: DraftCategory, b: DraftCategory): boolean {
   // Within one discipline an athlete has exactly one category — one kata
@@ -162,6 +152,66 @@ function sharesAthletes(a: DraftCategory, b: DraftCategory): boolean {
   if (a.isKata === b.isKata) return false;
   if (a.gender !== b.gender) return false;
   return a.minAge <= b.maxAge && b.minAge <= a.maxAge;
+}
+
+/**
+ * How far two age spans may differ and still be treated as the same age group.
+ *
+ * Overlap alone is not enough. A catch-all like "Senior Kata 16+" nominally
+ * overlaps every band above it — cadet, junior, U21, veteran — and pairing on
+ * overlap alone dragged half a tournament onto one floor. Categories that
+ * genuinely pair up cover comparable spans: "Kata Boys 10" (one year) belongs
+ * with "Kumite Boys 10-11" (two), not with an open-ended senior division.
+ */
+export const AGE_SPAN_TOLERANCE = 2;
+
+/**
+ * Must these two run on the same floor? They share athletes *and* cover
+ * comparable age spans.
+ */
+export function pairsWith(a: DraftCategory, b: DraftCategory): boolean {
+  if (!sharesAthletes(a, b)) return false;
+  const spanA = a.maxAge - a.minAge;
+  const spanB = b.maxAge - b.minAge;
+  return Math.abs(spanA - spanB) <= AGE_SPAN_TOLERANCE;
+}
+
+/**
+ * Cluster the categories that have to share a floor, returning drawId -> group
+ * id. Transitive by design: "Kata Boys 10" and "Kata Boys 11" never pair with
+ * each other, but both pair with "Kumite Boys 10-11", so all three — and both
+ * of that division's weight classes — land in one group.
+ *
+ * A category with no partner is its own group, which is what lets a division's
+ * weight classes spread freely when nothing shares athletes with them.
+ */
+export function buildAgeGroups(categories: DraftCategory[]): Map<string, string> {
+  // Union-find over `pairsWith`. n is a few dozen, so the quadratic pass is
+  // cheaper than any structure that avoids it.
+  const parent = new Map<string, string>(categories.map((c) => [c.drawId, c.drawId]));
+  const find = (x: string): string => {
+    let root = x;
+    while (parent.get(root) !== root) root = parent.get(root)!;
+    // Path compression, so repeated lookups stay flat.
+    let cur = x;
+    while (parent.get(cur) !== root) {
+      const next = parent.get(cur)!;
+      parent.set(cur, root);
+      cur = next;
+    }
+    return root;
+  };
+
+  for (let i = 0; i < categories.length; i++) {
+    for (let j = i + 1; j < categories.length; j++) {
+      if (!pairsWith(categories[i], categories[j])) continue;
+      const a = find(categories[i].drawId);
+      const b = find(categories[j].drawId);
+      if (a !== b) parent.set(a, b);
+    }
+  }
+
+  return new Map(categories.map((c) => [c.drawId, find(c.drawId)]));
 }
 
 // ---------------------------------------------------------------------------
@@ -239,9 +289,13 @@ export function draftPlan(input: DraftInput): DraftPlan {
   };
 
   if (options.strategy === "AGE_GROUP_PER_FLOOR") {
+    // Clustered over every category, pinned ones included: a group's foothold
+    // on a floor only counts if the already-fought category is in the group.
+    const groupOf = buildAgeGroups(categories);
+
     const groups = new Map<string, DraftCategory[]>();
     for (const c of queue) {
-      const key = ageGroupKey(c);
+      const key = groupOf.get(c.drawId)!;
       const list = groups.get(key);
       if (list) list.push(c);
       else groups.set(key, [c]);
@@ -253,22 +307,29 @@ export function draftPlan(input: DraftInput): DraftPlan {
     // promises, that nobody is called to two floors at once, is broken by
     // exactly the category that is hardest to fix by hand.
     const pinnedFloorOfGroup = new Map<string, string>();
-    for (const c of pinned) pinnedFloorOfGroup.set(ageGroupKey(c), c.matId!);
+    for (const c of pinned) pinnedFloorOfGroup.set(groupOf.get(c.drawId)!, c.matId!);
 
     const cost = (group: DraftCategory[]) =>
       group.reduce((sum, c) => sum + categoryMinutes(c, timing), 0);
 
-    // Only bind together what actually clashes. Two weight classes of one
-    // division never share an athlete, so a group that is all kumite (or all
-    // kata) can be spread freely — and must be, or six senior weight classes
-    // pile onto one floor and the day is hours longer than it needs to be.
-    // What has to stay together is a group holding *both* disciplines: the
-    // same child is in the U12 kata and the U12 kumite.
+    // Only bind together what actually clashes. A cluster of one is a category
+    // nothing shares athletes with — six senior kumite weight classes with no
+    // kata partner are six independent clusters, and spreading them is what
+    // keeps the day from running hours long. A cluster of more than one holds
+    // both disciplines by construction, because that is the only way two
+    // categories pair, so it has to stay on one floor.
+    const clusterSize = new Map<string, number>();
+    for (const c of categories) {
+      const key = groupOf.get(c.drawId)!;
+      clusterSize.set(key, (clusterSize.get(key) ?? 0) + 1);
+    }
+
     const entries = [...groups.entries()];
     const bound = entries.filter(
-      ([key, g]) => pinnedFloorOfGroup.has(key) || (g.some((c) => c.isKata) && g.some((c) => !c.isKata)),
+      ([key]) => pinnedFloorOfGroup.has(key) || (clusterSize.get(key) ?? 0) > 1,
     );
-    const free = entries.filter(([key, g]) => !bound.some(([k]) => k === key)).flatMap(([, g]) => g);
+    const boundKeys = new Set(bound.map(([key]) => key));
+    const free = entries.filter(([key]) => !boundKeys.has(key)).flatMap(([, g]) => g);
 
     // Biggest first. Assigning in age order instead reads nicely but balances
     // badly: the largest groups land last, when there is no room left to even

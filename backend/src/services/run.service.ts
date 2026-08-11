@@ -131,6 +131,114 @@ export class RunService {
     };
   }
 
+  /**
+   * What one tatami operator sees: only the mats they are assigned to, and only
+   * the bouts on them.
+   *
+   * Scoped from their grants outwards rather than from an event inwards — an
+   * operator never names an event, so there is no event id to get wrong or to
+   * tamper with. An operator with no assignment gets an empty list, not an
+   * error: on the morning of a tournament that is a normal state, and it is the
+   * screen that tells them to find the coordinator.
+   */
+  static async getOperatorBoard(userId: string) {
+    const assignments = await prisma.matOperator.findMany({
+      where: { userId },
+      include: {
+        mat: {
+          include: {
+            event: { select: { id: true, name: true, startDate: true, status: true } },
+          },
+        },
+      },
+      orderBy: [{ mat: { order: "asc" } }],
+    });
+
+    // Only live events. A grant on last month's tournament is not a way in.
+    const active = assignments.filter((a) => a.mat.event.status === "ACTIVE");
+
+    const mats = [];
+    for (const a of active) {
+      const board = await this.getBoard(a.mat.eventId);
+      const mat = board.mats.find((m) => m.id === a.matId);
+      mats.push({
+        matId: a.matId,
+        matName: a.mat.name,
+        event: a.mat.event,
+        queue: mat?.queue ?? [],
+      });
+    }
+    return { mats };
+  }
+
+  // ---- Mat operators ----
+
+  static async listMatOperators(eventId: string) {
+    const rows = await prisma.matOperator.findMany({
+      where: { mat: { eventId } },
+      include: {
+        user: { select: { id: true, name: true, email: true, role: true } },
+        mat: { select: { id: true, name: true } },
+      },
+      orderBy: [{ mat: { order: "asc" } }, { createdAt: "asc" }],
+    });
+    return rows.map((r) => ({
+      id: r.id,
+      matId: r.matId,
+      matName: r.mat.name,
+      user: r.user,
+      createdAt: r.createdAt,
+    }));
+  }
+
+  static async assignMatOperator(matId: string, userId: string, grantedById: string) {
+    const [mat, user] = await Promise.all([
+      prisma.mat.findUnique({ where: { id: matId } }),
+      prisma.user.findUnique({ where: { id: userId }, select: { id: true, role: true } }),
+    ]);
+    if (!mat) throw { status: 404, message: "Mat not found" };
+    if (!user) throw { status: 404, message: "User not found" };
+
+    // Anyone can be handed a tatami — a coach helping out for an hour keeps
+    // their own role. The grant is what confers the power, exactly as with an
+    // event coordinator.
+    const existing = await prisma.matOperator.findUnique({
+      where: { matId_userId: { matId, userId } },
+    });
+    if (existing) throw { status: 409, message: "Already assigned to this mat" };
+
+    const row = await prisma.matOperator.create({
+      data: { matId, userId, grantedById },
+    });
+    await prisma.auditLog.create({
+      data: {
+        userId: grantedById,
+        entityType: "MatOperator",
+        entityId: row.id,
+        action: "ASSIGN",
+        diffJson: JSON.stringify({ matId, userId }),
+      },
+    });
+    return row;
+  }
+
+  static async removeMatOperator(matId: string, userId: string, actingUserId: string) {
+    const row = await prisma.matOperator.findUnique({
+      where: { matId_userId: { matId, userId } },
+    });
+    if (!row) throw { status: 404, message: "Not assigned to this mat" };
+    await prisma.matOperator.delete({ where: { id: row.id } });
+    await prisma.auditLog.create({
+      data: {
+        userId: actingUserId,
+        entityType: "MatOperator",
+        entityId: row.id,
+        action: "UNASSIGN",
+        diffJson: JSON.stringify({ matId, userId }),
+      },
+    });
+  }
+
   // ---- Mats ----
   static async listMats(eventId: string) {
     return prisma.mat.findMany({

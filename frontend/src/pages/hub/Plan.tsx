@@ -60,6 +60,7 @@ import { BlockDialog, type BlockDraft } from "@/components/plan/BlockDialog"
 import { ScheduleTimeline } from "@/components/plan/ScheduleTimeline"
 import { DraftScheduleDialog } from "@/components/plan/DraftScheduleDialog"
 import { VenueBlockChip } from "@/components/plan/PlanCards"
+import { MatOperators } from "@/components/plan/MatOperators"
 
 // ---------------------------------------------------------------------------
 
@@ -673,6 +674,8 @@ export default function PlanPage() {
         onEditBlock={(block) => setBlockDialog({ open: true, matId: block.matId, editing: block })}
         onDeleteBlock={handleDeleteBlock}
       />
+
+      <MatOperators eventId={eventId} mats={board.mats} canManage={canManage} />
 
       {!canManage && (
         <p className="text-xs text-muted-foreground">

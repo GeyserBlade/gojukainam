@@ -246,16 +246,16 @@ function RunTab({ eventId, canManage }: { eventId: string; canManage: boolean })
 
           {canAct && (
             <div className="flex flex-wrap items-center gap-1.5 border-t pt-2">
-              {item.isKumite && (
-                <Button
-                  size="xs"
-                  onClick={() => navigate(`/scoreboard/${item.drawId}/${item.boutId}`)}
-                  disabled={busy}
-                >
-                  <MonitorPlay />
-                  Score
-                </Button>
-              )}
+              <Button
+                size="xs"
+                onClick={() =>
+                  navigate(`${item.isKumite ? "/scoreboard" : "/kata"}/${item.drawId}/${item.boutId}`)
+                }
+                disabled={busy}
+              >
+                <MonitorPlay />
+                Score
+              </Button>
               <Button
                 size="xs"
                 variant="outline"

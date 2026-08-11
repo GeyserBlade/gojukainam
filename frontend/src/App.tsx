@@ -17,6 +17,7 @@ const ResetPasswordPage = lazy(() => import("./pages/ResetPassword"));
 const Dashboard = lazy(() => import("./pages/Dashboard").then(m => ({ default: m.Dashboard })));
 const UsersPage = lazy(() => import("./pages/Users"));
 const BeltsPage = lazy(() => import("./pages/Belts"));
+const KatasPage = lazy(() => import("./pages/Katas"));
 const AthletesListPage = lazy(() => import("./pages/AthletesList"));
 const AthleteFormPage = lazy(() => import("./pages/AthleteForm"));
 const ClubsPage = lazy(() => import("./pages/Clubs"));
@@ -27,6 +28,7 @@ const EventsPage = lazy(() => import("./pages/Events"));
 const EntriesViewPage = lazy(() => import("./pages/EntriesView"));
 const DrawsPage = lazy(() => import("./pages/Draws"));
 const RunPage = lazy(() => import("./pages/Run"));
+const MatOperatorPage = lazy(() => import("./pages/MatOperator"));
 const ResultsPage = lazy(() => import("./pages/Results"));
 const HubOverviewPage = lazy(() => import("./pages/hub/Overview"));
 const HubSetupPage = lazy(() => import("./pages/hub/Setup"));
@@ -34,6 +36,7 @@ const HubEstimatorPage = lazy(() => import("./pages/hub/Estimator"));
 const HubPlanPage = lazy(() => import("./pages/hub/Plan"));
 const HubPracticePage = lazy(() => import("./pages/hub/Practice"));
 const ScoreboardPage = lazy(() => import("./pages/Scoreboard"));
+const KataScoreboardPage = lazy(() => import("./pages/KataScoreboard"));
 const ScoreboardDisplayPage = lazy(() => import("./pages/ScoreboardDisplay"));
 const PublicBoardPage = lazy(() => import("./pages/PublicBoard"));
 
@@ -56,9 +59,12 @@ const AppRoutes: React.FC = () => (
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="/dashboard" element={<Protected><Dashboard /></Protected>} />
+      {/* A tatami operator's only screen. */}
+      <Route path="/mat" element={<Protected><MatOperatorPage /></Protected>} />
       <Route path="/users" element={<Protected><UsersPage /></Protected>} />
       <Route path="/clubs" element={<Protected><ClubsPage /></Protected>} />
       <Route path="/belts" element={<Protected><BeltsPage /></Protected>} />
+      <Route path="/katas" element={<Protected><KatasPage /></Protected>} />
       <Route path="/athletes" element={<Protected><AthletesListPage /></Protected>} />
       <Route path="/athletes/new" element={<Protected><AthleteFormPage /></Protected>} />
       <Route path="/athletes/:id/edit" element={<Protected><AthleteFormPage /></Protected>} />
@@ -89,6 +95,8 @@ const AppRoutes: React.FC = () => (
 
       <Route path="/scoreboard/display" element={<Protected><ScoreboardDisplayPage /></Protected>} />
       <Route path="/scoreboard/:drawId/:boutId" element={<Protected><ScoreboardPage /></Protected>} />
+      {/* Kata is judged by flags, not points — its own board, same projector. */}
+      <Route path="/kata/:drawId/:boutId" element={<Protected><KataScoreboardPage /></Protected>} />
       <Route path="*" element={<Navigate to="/signin" replace />} />
     </Routes>
   </Suspense>

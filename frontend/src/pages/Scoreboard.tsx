@@ -21,7 +21,7 @@ import { BoutScoreboard, type BoutScoreboardSaveResult } from "@/components/scor
 export default function ScoreboardPage() {
   const { drawId, boutId } = useParams<{ drawId: string; boutId: string }>()
   const navigate = useNavigate()
-  const { canManageEvent } = useAuth()
+  const { canManageEvent, role } = useAuth()
   const toast = useToast()
   const apiError = useApiErrorToast()
   const [saving, setSaving] = useState(false)
@@ -35,7 +35,19 @@ export default function ScoreboardPage() {
   // Scored off the draw's own event, not the hub selection: this page is opened
   // by drawId from the Run tab, so a coordinator must be judged against the
   // event that draw belongs to. Mirrors requireEventManager on the score routes.
-  const canManage = canManageEvent(draw?.eventId)
+  //
+  // A tatami operator is allowed too, and the draw fetch above is what proves
+  // it: `requireDrawViewer` only returns a bracket to an operator whose mat is
+  // running some part of it, so reaching this line with a draw in hand already
+  // means they belong here. The per-bout check still happens server-side on
+  // save — a single bout moved to another mat is refused there.
+  const canManage = canManageEvent(draw?.eventId) || role === "TATAMI_OPERATOR"
+
+  // An operator has no access to the draws list, so sending them there after a
+  // save left them staring at a permission error. Their board is the mat.
+  const isOperator = role === "TATAMI_OPERATOR"
+  const backTo = isOperator ? "/mat" : "/draws"
+  const backLabel = isOperator ? "My tatami" : "Draws"
   const bout: DrawBout | undefined = useMemo(
     () => draw?.bouts.find((b) => b.id === boutId),
     [draw, boutId],
@@ -54,7 +66,7 @@ export default function ScoreboardPage() {
   if (!canManage) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-zinc-950 text-white">
-        <p>Only admins and this event's coordinators can operate the scoreboard.</p>
+        <p>Only admins, this event's coordinators, and this tatami's operator can use the scoreboard.</p>
       </div>
     )
   }
@@ -62,8 +74,8 @@ export default function ScoreboardPage() {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-3 bg-zinc-950 text-white">
         <p>Bout not found in this draw.</p>
-        <Button variant="secondary" onClick={() => navigate("/draws")}>
-          <ArrowLeft className="h-4 w-4" /> Back to draws
+        <Button variant="secondary" onClick={() => navigate(backTo)}>
+          <ArrowLeft className="h-4 w-4" /> Back to {backLabel.toLowerCase()}
         </Button>
       </div>
     )
@@ -72,8 +84,8 @@ export default function ScoreboardPage() {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-3 bg-zinc-950 text-white">
         <p>Both fighters must be known before this bout can be scored.</p>
-        <Button variant="secondary" onClick={() => navigate("/draws")}>
-          <ArrowLeft className="h-4 w-4" /> Back to draws
+        <Button variant="secondary" onClick={() => navigate(backTo)}>
+          <ArrowLeft className="h-4 w-4" /> Back to {backLabel.toLowerCase()}
         </Button>
       </div>
     )
@@ -94,7 +106,7 @@ export default function ScoreboardPage() {
         scoreJson: result.scoreJson,
       })
       toast.success("Result saved")
-      navigate("/draws")
+      navigate(backTo)
     } catch (e) {
       apiError(e, "Could not save the result")
       throw e
@@ -108,7 +120,7 @@ export default function ScoreboardPage() {
     try {
       await setBoutWinner(drawId!, boutId!, side === "aka" ? aka.entryId : ao.entryId)
       toast.success("Winner saved")
-      navigate("/draws")
+      navigate(backTo)
     } catch (e) {
       apiError(e, "Could not save the winner")
       throw e
@@ -133,8 +145,8 @@ export default function ScoreboardPage() {
       ao={{ name: ao.name, clubName: ao.clubName }}
       categoryLabel={`${draw.division.name}${draw.weightClass ? ` · ${draw.weightClass.name}` : ""}`}
       roundLabel={bout.phase === "REPECHAGE" ? "Repechage" : `Round ${bout.round}`}
-      backLabel="Draws"
-      onBack={() => navigate("/draws")}
+      backLabel={backLabel}
+      onBack={() => navigate(backTo)}
       persistKey={boutId ?? null}
       saving={saving}
       onSaveResult={handleSaveResult}

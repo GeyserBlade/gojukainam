@@ -170,7 +170,18 @@ async function main() {
   runSeedingChecks();
 
   console.log("— seeding demo data —");
-  const belt = await prisma.belt.create({ data: { name: "Test White", colour: "#fff", order: 999 } });
+  // Clear the previous run first. This script deliberately keeps its demo event
+  // afterwards so there is something to click around in, but it used to keep
+  // *every* run's: sixteen identical events, forty-eight clubs and sixteen
+  // belts had piled up before anyone noticed. One is useful; sixteen is debris.
+  await resetPriorRun();
+  // Find-or-create, never create-blindly: a fresh belt per run left sixteen
+  // "Test White" rows in the belt list, and the tournament seeds pick a belt at
+  // random from every belt that exists — so most of their athletes ended up
+  // graded "Test White".
+  const belt =
+    (await prisma.belt.findFirst({ where: { name: "Test White" } })) ??
+    (await prisma.belt.create({ data: { name: "Test White", colour: "#fff", order: 999 } }));
   const clubs = await Promise.all(
     ["OTJ Test", "WVB Test", "KHD Test"].map((name) =>
       prisma.club.create({ data: { name, contactName: "T", email: `${name.replace(/\s/g, "")}@test.local` } })
@@ -443,7 +454,53 @@ async function main() {
 
   console.log(failures === 0 ? "\nALL CHECKS PASSED" : `\n${failures} CHECK(S) FAILED`);
   console.log(`Demo event kept for UI testing: "${event.name}" (${event.id})`);
+  console.log("The previous run's copy was removed; only this one remains.");
   process.exit(failures === 0 ? 0 : 1);
+}
+
+/**
+ * Delete everything a previous run of this script left behind, matched on the
+ * exact names it creates. Children first — every foreign key here is a plain
+ * restrict.
+ */
+async function resetPriorRun() {
+  const events = await prisma.event.findMany({
+    where: { name: "Draw Engine Demo Event" },
+    select: { id: true },
+  });
+  const eventIds = events.map((e) => e.id);
+  const clubs = await prisma.club.findMany({
+    where: { name: { in: ["OTJ Test", "WVB Test", "KHD Test"] } },
+    select: { id: true },
+  });
+  const clubIds = clubs.map((c) => c.id);
+  if (eventIds.length === 0 && clubIds.length === 0) return;
+
+  await prisma.scheduleBlock.deleteMany({ where: { eventId: { in: eventIds } } });
+  await prisma.drawSlot.deleteMany({ where: { draw: { eventId: { in: eventIds } } } });
+  await prisma.bout.deleteMany({ where: { draw: { eventId: { in: eventIds } } } });
+  await prisma.draw.deleteMany({ where: { eventId: { in: eventIds } } });
+  await prisma.teamMember.deleteMany({ where: { team: { eventId: { in: eventIds } } } });
+  await prisma.entry.deleteMany({
+    where: { OR: [{ eventId: { in: eventIds } }, { clubId: { in: clubIds } }] },
+  });
+  await prisma.team.deleteMany({
+    where: { OR: [{ eventId: { in: eventIds } }, { clubId: { in: clubIds } }] },
+  });
+  await prisma.invoice.deleteMany({
+    where: { OR: [{ eventId: { in: eventIds } }, { clubId: { in: clubIds } }] },
+  });
+  await prisma.mat.deleteMany({ where: { eventId: { in: eventIds } } });
+  await prisma.weightClass.deleteMany({ where: { eventId: { in: eventIds } } });
+  await prisma.division.deleteMany({ where: { eventId: { in: eventIds } } });
+  await prisma.eventCoordinator.deleteMany({ where: { eventId: { in: eventIds } } });
+  await prisma.event.deleteMany({ where: { id: { in: eventIds } } });
+  await prisma.athlete.deleteMany({ where: { clubId: { in: clubIds } } });
+  await prisma.club.deleteMany({ where: { id: { in: clubIds } } });
+  await prisma.auditLog.deleteMany({ where: { user: { email: { startsWith: "draw-tester-" } } } });
+  await prisma.user.deleteMany({ where: { email: { startsWith: "draw-tester-" } } });
+  // The belt is deliberately left alone: it is reused across runs, and other
+  // seeded athletes may be pointing at it.
 }
 
 main().catch((e) => {

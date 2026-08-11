@@ -21,6 +21,10 @@ enum Role {
   CLUB_MANAGER
   COACH
   ATHLETE
+  /// Runs the bouts on one tatami on the day. Sees only the mats they are
+  /// assigned to (see MatOperator) and can record results there — nothing else
+  /// in the system. Default-denied everywhere, like ATHLETE.
+  TATAMI_OPERATOR
 }
 
 enum Gender {
@@ -105,6 +109,8 @@ model User {
 
   coordinatorFor    EventCoordinator[] @relation("CoordinatorUser")
   coordinatorGrants EventCoordinator[] @relation("CoordinatorGrantedBy")
+  operatorFor       MatOperator[]      @relation("OperatorUser")
+  operatorGrants    MatOperator[]      @relation("OperatorGrantedBy")
 }
 
 /// Per-event delegation: grants one user admin-equivalent powers over ONE event
@@ -330,6 +336,62 @@ model Belt {
   Athlete   Athlete[]
 }
 
+/// The katas a competitor may perform, as reference data rather than a
+/// hardcoded list — the point of storing them is the rules that will hang off
+/// them later (which katas a grade or an age band may use, what may not be
+/// repeated between rounds), and none of that can be written against strings
+/// typed on the day.
+///
+/// Global, like Belt, not per-event: the syllabus belongs to the style, and an
+/// event that restricts it is restricting a subset of this list. When per-event
+/// allowances arrive they should be a join off this table, not a copy of it.
+model Kata {
+  id    String @id @default(cuid())
+  name  String @unique
+  /// Style or syllabus the kata belongs to, e.g. "Goju-ryu", "Goju Kai".
+  style String?
+  /// Display order, beginner to advanced. Grouped in tens like Belt.order so
+  /// a kata can be inserted between two others without renumbering.
+  order Int
+  /// Unticked rather than deleted when a kata leaves the syllabus: results
+  /// already recorded against it must keep resolving to a name.
+  active Boolean @default(true)
+  notes  String?
+
+  performances KataPerformance[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([order])
+}
+
+/// What one competitor performed in one kata bout. Separate from the bout's
+/// `scoreJson` on purpose: "which katas has this athlete already used in this
+/// event" is the question every future rule asks, and it has to be a query,
+/// not a JSON scan.
+///
+/// Cleared alongside the rest of a bout's score detail whenever that detail is
+/// invalidated (winner-only override, upstream bracket correction) — a kata
+/// recorded against a matchup that no longer exists is not a fact.
+model KataPerformance {
+  id      String @id @default(cuid())
+  boutId  String
+  bout    Bout   @relation(fields: [boutId], references: [id], onDelete: Cascade)
+  entryId String
+  entry   Entry  @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  kataId  String
+  kata    Kata   @relation(fields: [kataId], references: [id], onDelete: Restrict)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// One kata per competitor per bout.
+  @@unique([boutId, entryId])
+  @@index([entryId])
+  @@index([kataId])
+}
+
 model Athlete {
   id             String    @id @default(cuid())
   clubId         String
@@ -417,6 +479,7 @@ model Entry {
   boutsAsAka Bout[]     @relation("BoutAka")
   boutsAsAo  Bout[]     @relation("BoutAo")
   boutsWon   Bout[]     @relation("BoutWinner")
+  kataPerformances KataPerformance[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -608,6 +671,9 @@ model Bout {
   // Survives recompute like matId; lost only if the bout row is deleted.
   queueOrder Int?
 
+  /// Kata performed by each competitor, for KATA categories. Empty for kumite.
+  kataPerformances KataPerformance[]
+
   @@unique([drawId, phase, round, position])
   @@index([drawId])
   // FK indexes: the three Entry relations all cascade to SetNull on entry
@@ -630,10 +696,36 @@ model Mat {
   draws          Draw[]
   bouts          Bout[]
   scheduleBlocks ScheduleBlock[]
+  operators      MatOperator[]
 
   createdAt DateTime @default(now())
 
   @@index([eventId])
+}
+
+/// Who runs the bouts on one tatami. Many-to-many on purpose: a mat usually has
+/// two people on it (one on the clock, one recording) and they change over
+/// during the day, and one person may cover two mats when a floor is quiet.
+///
+/// Scoped to the mat, not the event: the mat carries the event, so the grant
+/// disappears with the tournament and an operator can never reach last month's.
+/// This is what `requireBoutScorer` checks before letting a result through, and
+/// what `RunService.getOperatorBoard` filters the visible bouts by.
+model MatOperator {
+  id     String @id @default(cuid())
+  matId  String
+  mat    Mat    @relation(fields: [matId], references: [id], onDelete: Cascade)
+  userId String
+  user   User   @relation("OperatorUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Who assigned them. Kept for accountability; null if that user is removed.
+  grantedById String?
+  grantedBy   User?   @relation("OperatorGrantedBy", fields: [grantedById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  @@unique([matId, userId])
+  @@index([userId])
 }
 
 /// A non-competition block in the day's plan: the opening and closing

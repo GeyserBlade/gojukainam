@@ -366,7 +366,44 @@ export interface DisplayPayload {
   podium: PodiumPlacements | null
 }
 
-export type ChannelMessage = DisplayPayload | { type: "hello" } | { type: "closed" }
+/**
+ * What the projector shows for a kata bout. A separate message on the same
+ * channel rather than fields bolted onto `DisplayPayload`: a kata bout has no
+ * clock, no points and no penalties, so half of that payload would be dead
+ * fields the display still has to reason about. One projector window handles
+ * both because the mats only have one screen.
+ */
+export interface KataDisplayPayload {
+  type: "kata"
+  boutId: string
+  categoryLabel: string
+  roundLabel: string
+  aka: { name: string; clubName: string; kataName: string | null }
+  ao: { name: string; clubName: string; kataName: string | null }
+  /**
+   * Judges' flags, in panel order — `null` for a judge whose flag the operator
+   * has not entered. Only meaningful once `revealed`; before that the
+   * projector must not show them, because the operator is typing them in as
+   * the flags go up and a running count would announce the result early.
+   */
+  panel: (Side | null)[]
+  revealed: boolean
+  akaFlags: number
+  aoFlags: number
+  winnerSide: Side | null
+  winnerName: string | null
+  winnerClubName: string | null
+  /** Operator's requested display orientation: true = AKA on right (swapped). */
+  displayFlip: boolean
+  /** Present only when this bout is the final and both bronze are decided. */
+  podium: PodiumPlacements | null
+}
+
+export type ChannelMessage =
+  | DisplayPayload
+  | KataDisplayPayload
+  | { type: "hello" }
+  | { type: "closed" }
 
 // ---------------------------------------------------------------------------
 // Sounds (Web Audio, no assets)

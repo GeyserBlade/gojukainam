@@ -72,6 +72,117 @@ async function resolveEventId(req: Request, source: EventSource): Promise<string
   return typeof value === "string" && value.length > 0 ? value : null;
 }
 
+/** Every mat this user is assigned to run. */
+export async function operatedMatIds(userId: string): Promise<string[]> {
+  const rows = await prisma.matOperator.findMany({ where: { userId }, select: { matId: true } });
+  return rows.map((r) => r.matId);
+}
+
+/**
+ * Which mat is this bout being fought on?
+ *
+ * A bout row may carry its own `matId` (a coordinator moved this one bout), and
+ * otherwise inherits its category's. Same precedence the run board renders by,
+ * so what an operator is allowed to score is exactly what they were shown.
+ */
+async function matForBout(boutId: string): Promise<string | null> {
+  const bout = await prisma.bout.findUnique({
+    where: { id: boutId },
+    select: { matId: true, draw: { select: { matId: true } } },
+  });
+  if (!bout) return null;
+  return bout.matId ?? bout.draw.matId ?? null;
+}
+
+/**
+ * Gate a result-writing route on "event manager, OR the operator running the
+ * mat this bout is on".
+ *
+ * Deliberately keyed on the *bout*, not the draw: a category can be split
+ * across mats bout by bout, and an operator's authority follows the tatami they
+ * are standing at, not the category. An operator with no assignment, or one
+ * assigned to a different mat, is refused exactly like any other user.
+ *
+ * The manager path short-circuits first, so the existing admin/coordinator
+ * behaviour is unchanged and costs no extra query.
+ */
+export function requireBoutScorer(boutIdParam: string) {
+  return async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const user = req.user;
+      if (!user) return res.status(403).json({ error: "Forbidden" });
+      if (GLOBAL_EVENT_ADMINS.includes(user.role)) return next();
+
+      const boutId = (req.params as Record<string, unknown>)[boutIdParam];
+      if (typeof boutId !== "string" || boutId.length === 0)
+        return res.status(404).json({ error: "Not found" });
+
+      const bout = await prisma.bout.findUnique({
+        where: { id: boutId },
+        select: { draw: { select: { eventId: true } } },
+      });
+      if (!bout) return res.status(404).json({ error: "Not found" });
+
+      if (await isEventCoordinator(user.id, bout.draw.eventId)) return next();
+
+      const matId = await matForBout(boutId);
+      if (matId) {
+        const assigned = await prisma.matOperator.findUnique({
+          where: { matId_userId: { matId, userId: user.id } },
+          select: { id: true },
+        });
+        if (assigned) return next();
+      }
+
+      return res.status(403).json({ error: "Forbidden" });
+    } catch (err) {
+      // A database hiccup must fail closed rather than fall through as though
+      // the grant had been evaluated and accepted.
+      return next(err);
+    }
+  };
+}
+
+/**
+ * Read access to one draw for the people who may already see every draw, plus a
+ * tatami operator whose mat is running some part of *this* category.
+ *
+ * The operator needs the bracket to score from — the scoreboard reads the whole
+ * draw for its bronze/podium logic — but "only the bouts allocated to them"
+ * means they must not be able to page through the rest of the tournament by
+ * guessing ids. Hence a scoped check rather than adding the role to VIEW_ROLES.
+ */
+export function requireDrawViewer(viewRoles: readonly AuthUser["role"][], drawIdParam: string) {
+  return async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const user = req.user;
+      if (!user) return res.status(403).json({ error: "Forbidden" });
+      if (viewRoles.includes(user.role)) return next();
+
+      const drawId = (req.params as Record<string, unknown>)[drawIdParam];
+      if (typeof drawId !== "string" || drawId.length === 0)
+        return res.status(404).json({ error: "Not found" });
+
+      const mats = await operatedMatIds(user.id);
+      if (mats.length === 0) return res.status(403).json({ error: "Forbidden" });
+
+      // Either the whole category sits on one of their mats, or an individual
+      // bout of it has been moved there.
+      const reachable = await prisma.draw.count({
+        where: {
+          id: drawId,
+          OR: [{ matId: { in: mats } }, { bouts: { some: { matId: { in: mats } } } }],
+        },
+      });
+      if (reachable === 0) return res.status(403).json({ error: "Forbidden" });
+
+      return next();
+    } catch (err) {
+      return next(err);
+    }
+  };
+}
+
 /** Does this user hold a coordinator grant on this event? */
 export async function isEventCoordinator(userId: string, eventId: string): Promise<boolean> {
   const grant = await prisma.eventCoordinator.findUnique({

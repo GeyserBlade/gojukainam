@@ -8,7 +8,14 @@ export interface DrawEntrySummary {
   seed?: number | null;
 }
 
-export type BoutOutcome = "POINTS" | "GAP" | "SENSHU" | "HANTEI" | "HANSOKU" | "KIKEN";
+/** FLAGS is the kata decision (five judges, majority of flags). */
+export type BoutOutcome = "POINTS" | "GAP" | "SENSHU" | "HANTEI" | "HANSOKU" | "KIKEN" | "FLAGS";
+
+/** A kata as recorded against one competitor in one bout. */
+export interface BoutKata {
+  id: string;
+  name: string;
+}
 
 export interface DrawBout {
   id: string | null;
@@ -34,6 +41,9 @@ export interface DrawBout {
    * itself can't be shown live here.
    */
   startedAt: string | null;
+  /** Kata performed by each side. Always null for kumite. */
+  akaKata: BoutKata | null;
+  aoKata: BoutKata | null;
 }
 
 export type DrawStatus = "DRAWN" | "IN_PROGRESS" | "COMPLETED";
@@ -167,6 +177,9 @@ export async function setBoutScore(
     aoScore: number;
     scoreJson?: string;
     postTime?: boolean;
+    /** Kata ids, for a kata bout. null clears one; omit to leave it alone. */
+    akaKataId?: string | null;
+    aoKataId?: string | null;
   }
 ): Promise<DrawDetail> {
   const res = await api.put(`/draws/${drawId}/bouts/${boutId}/score`, data);

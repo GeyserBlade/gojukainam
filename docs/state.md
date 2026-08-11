@@ -4,7 +4,14 @@ This file is the handoff between coding agents. It describes what is in flight
 right now, not the permanent architecture (that's
 [`architecture.md`](architecture.md)).
 
-**Last updated:** 2026-08-09 — by Claude Code: a new **Plan** tab in the event
+**Last updated:** 2026-08-11 — by Claude Code: **kata scoring** — a five-judge
+flag board with a reveal step, an allowable-kata reference list seeded by
+migration, and `KataPerformance` so the "which katas has this athlete already
+used" rules have something to query. See "In flight" below.
+
+Previously, 2026-08-10: a **TATAMI_OPERATOR** role for running one mat.
+
+Previously, 2026-08-09 — by Claude Code: a new **Plan** tab in the event
 hub — drag-and-drop mat planning with an interactive, to-scale schedule,
 ceremonies and breaks, and floor management that drives the tournament's mat
 count. Replaces the Run page's old "Plan" sub-tab. Now also carries separate
@@ -91,6 +98,166 @@ port; those have since been pushed.) Everything here is verified locally against
 a database, never against production data.
 
 ## In flight (uncommitted)
+
+**Kata scoring: a five-judge flag board, and an allowable kata list
+(2026-08-11).**
+
+Kata had no board at all — it ran as a winner-pick, which the TATAMI_OPERATOR
+work flagged as its own piece of work. This is that piece.
+
+*The decision is flags, not points.* Five judges, one red or blue flag each,
+raised together on the referee's call; three is a majority. `lib/kata-scoring.ts`
+is the whole rule: `decideFlags` reports the tally, whether a majority is held
+(`decided`) and whether every judge is in (`complete`). Those are deliberately
+different — judges' flags come down at slightly different moments, so an
+operator can save on the third flag without waiting for the last two, and the
+score stored is the flags actually entered (3–0, not a padded 3–2). An odd panel
+cannot tie, which is why nothing here has a hantei or draw path the way
+`scoreboard.ts` does; `scripts/test-kata.ts` proves it exhaustively over all 32
+full panels.
+
+*Reveal is a phase, not a flourish.* The operator enters flags as they go up,
+and the projector shows nothing until they press "Show flags" — a board that
+counted along would announce the decision before the referee does. Before the
+reveal the mats see who is on and what they are performing; after it, the five
+flags, the winner and the podium if it was a final.
+
+*The kata list is a table, because the rules the user wants next are queries.*
+`Kata` is global reference data like `Belt` (21 rows, Goju Kai / Goju-ryu, seeded
+**in the migration** — `prisma/seed.ts` refuses to run against a populated
+database, so a seed script would never fire on production). `KataPerformance`
+records what each competitor performed in each bout, as a row rather than a
+field on `scoreJson`: "what has this athlete already used in this event" is the
+question every future rule asks, and it has to be a query. The scoring screen
+already reads it to mark katas the competitor has performed earlier in the
+category — shown, not enforced; the rules are the next piece of work.
+
+*Invalidation follows the score detail.* A kata is detail like points are, so it
+is cleared by a winner-only override and by the recompute that clears
+`scoreJson` when a bout's fighters or winner change. A kata attributed to a
+matchup that no longer exists would still be counted by those future rules.
+
+*Storage reuses the bout.* Outcome `FLAGS` (new, and kept distinct from
+`HANTEI`, which in kumite means the panel breaking a tie the scoreboard could
+not), `akaScore`/`aoScore` = flags taken, `scoreJson` = the panel plus both
+katas. `SetBoutScore` gained optional `akaKataId`/`aoKataId`: absent leaves a
+kata alone, explicit `null` clears it.
+
+Authorization is unchanged — the kata board saves through the same
+`requireBoutScorer` route as the kumite one. Reading `/katas` is open to every
+authenticated role including TATAMI_OPERATOR (a kata cannot be scored without
+it); writing is ADMIN/SUPERADMIN, like belts. A retired kata leaves the mat's
+list but not the admin screen, and a kata that has been performed cannot be
+deleted at all.
+
+Also fixed in passing: the kumite scoreboard sent an operator to `/draws` after
+saving, which they have no access to — it now returns them to `/mat`.
+
+New: `Kata` + `KataPerformance` models and migration
+`20260811090000_add_kata_reference`; `services/kata.service.ts`,
+`routes/katas.ts`; `lib/kata.ts` (API) and `lib/kata-scoring.ts` (pure);
+`pages/KataScoreboard.tsx` (`/kata/:drawId/:boutId`), `pages/Katas.tsx`
+(`/katas`); a `KataDisplayPayload` variant on the projector channel, with
+`ScoreboardDisplay` split into `KumiteBoard`/`KataBoard`.
+
+Verified: `scripts/test-kata.ts` (frontend, 40 checks) and
+`scripts/test-kata-results.ts` (backend, 34 checks — recording, correcting,
+clearing, an unknown kata refused, winner-only and bracket-correction
+invalidation, delete-refused-when-performed, retire). `test-tatami-operator.ts`
+gained the kata-list read and its three write refusals. Driven end to end in the
+browser on the championships fixture: katas picked, 3–1 entered, projector held
+the flags back until reveal, result saved and read back as
+`FLAGS 3–1` with both performances stored; the local fixture was then returned
+to `DRAWN`.
+
+**TATAMI_OPERATOR: a role for running one mat (2026-08-10).**
+
+A `Role` enum value *and* a `MatOperator` grant, not one or the other. The role
+makes them default-denied everywhere (`requireRoles` lists roles explicitly, so
+a new value is refused by construction); the grant — scoped to a mat, which
+carries its event — is what lets them score. Access dies with the tournament
+because the mat does.
+
+**The authorization was the work, not the UI.** Every result route was
+`requireEventManager`, so scoring needed a new path: `requireBoutScorer` admits
+a manager, or an operator assigned to the mat *this bout* is on
+(`bout.matId ?? draw.matId`, the same precedence the run board renders by, so
+what they may score is exactly what they were shown). `requireDrawViewer` does
+the same for reading a bracket — the scoreboard needs the whole draw for its
+podium logic, but an operator must not be able to page through the tournament
+by guessing ids.
+
+**The correction policy.** An operator may overwrite a result only if they wrote
+it last *and* nothing downstream is decided. Both halves matter: without the
+first, one mat undoes another's work when a category is split across tatami;
+without the second, fixing an early round after later rounds are fought
+silently invalidates them, and the operator — who sees one bout at a time — has
+no way to know. Anything else is a coordinator's job, which is a person in the
+same hall.
+
+**Design points raised that were not in the request.** Kata has no scoring UI at
+all (the scoreboard is WKF kumite), so kata runs as a winner-pick with a confirm
+step — a judged flag UI is its own piece of work. Assignment is many-to-many
+because a mat normally has two people on it and they change over. A no-show is a
+*result* (kiken), so it is in scope even though "don't change athletes" is not.
+The upcoming list is deliberately read-only: an operator who could reorder it
+would be planning, not running.
+
+`scripts/test-tatami-operator.ts` — 44 checks, most of them refusals: the entry
+list, draw list, run board, plan board, athletes, clubs and users all 403; so do
+reordering, renaming a mat, checking an athlete in, and appointing another
+operator. Note the dev-auth stub authenticates every request as the same user
+whatever role it claims, so the "someone else wrote this" case reattributes an
+audit row rather than pretending two headers are two people.
+
+
+
+**Kata/kumite age-band pairing, per-category kata timing, and a test-data
+cleanup (2026-08-10).**
+
+*The drafter's grouping was too literal.* `ageGroupKey` keyed on the exact age
+range, so a tournament that grades kata a year at a time (KATA BOYS 10, 11, 12)
+but kumite in two-year bands (KUMITE BOYS 10-11) never paired them — the draft
+reported three clashes it had itself created. Replaced with `buildAgeGroups`, a
+union-find over `pairsWith`: share athletes **and** cover comparable age spans.
+
+The span test is the load-bearing part. Overlap alone merged "Senior Kata 16+"
+with cadet, junior, U21 and veteran kumite — half a tournament on one floor.
+`AGE_SPAN_TOLERANCE = 2` says a one-year kata band belongs with the two-year
+kumite band over it, but not with an open-ended senior division. Clustering is
+transitive, so KATA BOYS 10, KATA BOYS 11 and both weight classes of KUMITE
+BOYS 10-11 land in one group. Measured on the 43-category fixture: clashes 3 ->
+**0**, floors 16/13/14 finishing within 52 minutes.
+
+*Per-category timing now covers kata.* `DivisionTiming` (Setup tab) listed only
+kumite, so a kata category's performance length could not be overridden — the
+feature the user could not find. It now renders one table per discipline: a
+kumite "Bout (sec)" inheriting `defaultBoutDurationSec`, and a kata
+"Performance (sec)" inheriting `kataBoutDurationSec`. Kata shows `n/a` for the
+win gap rather than an input, because kata is judged on flags.
+`inheritedDivisionTiming`/`resolveDivisionTiming` take an optional `isKata`,
+defaulting false so existing callers are unchanged. The card's copy claiming
+"nothing consumes these values yet" was stale — the Plan schedule does.
+
+*The championships fixture now uses real weight classes.* `O38kg`/`U38kg` are
+`WeightClass` rows on one division rather than two unrelated divisions, so the
+kilogram boundary is a stored field and the board reads "KUMITE BOYS 10-11 ·
+U38kg". 36 divisions, 14 weight classes, 43 categories, 150 athletes, 277
+entries, everything drawn and unassigned.
+
+*Test data.* `scripts/clean-test-data.ts` (new) removes the debris the test
+scripts leave: matched on exact names, never a pattern, and it refuses to delete
+a club that has user accounts. It cleared 19 events and 48 clubs.
+
+The root cause is fixed too. `test-draws.ts` kept *every* run's demo event
+rather than one, and created a fresh "Test White" belt each time — sixteen of
+them. That mattered more than it looks: the tournament seeds pick a belt at
+random from every belt that exists, so 103 of 150 seeded athletes had been
+graded "Test White". It now resets its prior run and find-or-creates the belt.
+Cleanup order matters and the script says so: athletes have to be re-seeded
+before their old belts become collectable.
+
+
 
 **The projector now shows the result, not just the operator (2026-08-09).**
 The winner announcement and the podium were only ever on the operator's own

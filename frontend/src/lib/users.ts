@@ -1,6 +1,6 @@
 import { api } from "./api";
 
-export type Role = "SUPERADMIN" | "ADMIN" | "CLUB_MANAGER" | "COACH" | "ATHLETE";
+export type Role = "SUPERADMIN" | "ADMIN" | "CLUB_MANAGER" | "COACH" | "ATHLETE" | "TATAMI_OPERATOR";
 
 export type User = {
   id: string;

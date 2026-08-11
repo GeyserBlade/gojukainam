@@ -12,6 +12,7 @@ import {
   ReorderMatQueue,
   ReorderMatDraws,
   SetCheckIn,
+  AssignMatOperator,
 } from "../utils/validators.js";
 import { getParam } from "../utils/params.js";
 
@@ -23,6 +24,57 @@ const handle = (res: any, next: any, err: any) => {
   if (err?.status && err?.message) return res.status(err.status).json({ error: err.message });
   next(err);
 };
+
+// What a tatami operator sees: their own mats only. Scoped from the caller's
+// own grants, so it takes no parameters and there is no event id to tamper
+// with. Open to any logged-in user — with no grants it returns nothing.
+router.get("/my-mats", async (req, res, next) => {
+  try {
+    if (!req.user) return res.status(403).json({ error: "Forbidden" });
+    res.json(await RunService.getOperatorBoard(req.user.id));
+  } catch (err: any) { handle(res, next, err); }
+});
+
+// ---- Mat operators (who runs which tatami) ----
+router.get(
+  "/mats/operators",
+  requireEventManager({ in: "query", key: "eventId" }),
+  validate(EventIdQuery, "query"),
+  async (req, res, next) => {
+    try {
+      const { eventId } = req.query as { eventId: string };
+      res.json(await RunService.listMatOperators(eventId));
+    } catch (err: any) { handle(res, next, err); }
+  },
+);
+
+router.post(
+  "/mats/:matId/operators",
+  requireEventManager({ in: "lookup", key: "matId", via: "mat" }),
+  validate(AssignMatOperator),
+  async (req, res, next) => {
+    try {
+      res.status(201).json(
+        await RunService.assignMatOperator(getParam(req.params.matId), req.body.userId, req.user!.id),
+      );
+    } catch (err: any) { handle(res, next, err); }
+  },
+);
+
+router.delete(
+  "/mats/:matId/operators/:userId",
+  requireEventManager({ in: "lookup", key: "matId", via: "mat" }),
+  async (req, res, next) => {
+    try {
+      await RunService.removeMatOperator(
+        getParam(req.params.matId),
+        getParam(req.params.userId),
+        req.user!.id,
+      );
+      res.status(204).send();
+    } catch (err: any) { handle(res, next, err); }
+  },
+);
 
 // Per-mat running order of ready bouts for an event
 router.get("/board", requireRoles(...VIEW_ROLES), validate(EventIdQuery, "query"), async (req, res, next) => {

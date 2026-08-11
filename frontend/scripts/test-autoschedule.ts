@@ -6,7 +6,8 @@
  */
 import {
   applyBlockIndexes,
-  ageGroupKey,
+  buildAgeGroups,
+  pairsWith,
   compareCategories,
   draftPlan,
   type DraftCategory,
@@ -107,11 +108,102 @@ console.log("\nOrdering: youngest first, kata before kumite:");
       JSON.stringify([...cats].reverse().sort(compareCategories).map((c) => c.drawId)),
   );
 
+  const kata = (id: string, min: number, max: number, g: "Male" | "Female" = "Male") =>
+    cat(id, { minAge: min, maxAge: max, gender: g, isKata: true });
+  const kumite = (id: string, min: number, max: number, g: "Male" | "Female" = "Male") =>
+    cat(id, { minAge: min, maxAge: max, gender: g, isKata: false });
+
   check(
-    "an age group is one age range and one gender",
-    ageGroupKey(cat("x", { minAge: 10, maxAge: 11, gender: "Male" })) === "10-11:Male" &&
-      ageGroupKey(cat("y", { minAge: 10, maxAge: 11, gender: "Female" })) === "10-11:Female",
+    "a one-year kata band pairs with the two-year kumite band over it",
+    pairsWith(kata("k10", 10, 10), kumite("c10", 10, 11)),
   );
+  check("same discipline never pairs", !pairsWith(kata("k10", 10, 10), kata("k11", 11, 11)));
+  check("different genders never pair", !pairsWith(kata("k", 10, 10, "Male"), kumite("c", 10, 11, "Female")));
+  check("non-overlapping ages never pair", !pairsWith(kata("k", 10, 10), kumite("c", 12, 13)));
+  check(
+    "an open-ended senior kata does NOT pair with a narrow junior kumite",
+    !pairsWith(kata("senior", 16, 99), kumite("junior", 16, 17)),
+    "16-99 overlaps 16-17 but the spans are nothing alike",
+  );
+  check(
+    "but it does pair with the senior kumite beside it",
+    pairsWith(kata("senior", 16, 99), kumite("senior", 18, 99)),
+  );
+}
+
+console.log("\nMismatched kata/kumite age bands still group together:");
+{
+  // The real shape that broke this: kata is graded a year at a time, kumite in
+  // two-year bands, so no two of them share an age range exactly.
+  const cats = [
+    cat("kata-10", { minAge: 10, maxAge: 10, isKata: true }),
+    cat("kata-11", { minAge: 11, maxAge: 11, isKata: true }),
+    cat("kumite-10-11-under", { minAge: 10, maxAge: 11, isKata: false }),
+    cat("kumite-10-11-over", { minAge: 10, maxAge: 11, isKata: false }),
+    cat("kata-12", { minAge: 12, maxAge: 12, isKata: true }),
+    cat("kumite-12-13", { minAge: 12, maxAge: 13, isKata: false }),
+  ];
+  const groups = buildAgeGroups(cats);
+  const g = (id: string) => groups.get(id);
+
+  check(
+    "a one-year kata joins the two-year kumite band over it",
+    g("kata-10") === g("kumite-10-11-under"),
+    [...groups],
+  );
+  check(
+    "and so does the next year up — transitively, through that kumite band",
+    g("kata-11") === g("kata-10"),
+    [...groups],
+  );
+  check(
+    "both weight classes of that band come too",
+    g("kumite-10-11-over") === g("kata-10"),
+    [...groups],
+  );
+  check("a different age band stays its own group", g("kata-12") !== g("kata-10"), [...groups]);
+  check("with its own kumite", g("kata-12") === g("kumite-12-13"), [...groups]);
+
+  const draft = draftPlan(input(cats, { strategy: "AGE_GROUP_PER_FLOOR" }));
+  check("so the draft reports no clashes", draft.conflicts.length === 0, draft.conflicts);
+  const ids = laneIds(draft.lanes);
+  const floorOf = (id: string) => (ids.m1.includes(id) ? "m1" : "m2");
+  check(
+    "and the whole 10-11 group is on one floor",
+    new Set(["kata-10", "kata-11", "kumite-10-11-under", "kumite-10-11-over"].map(floorOf)).size === 1,
+    ids,
+  );
+}
+
+console.log("\nA catch-all senior band does not swallow the tournament:");
+{
+  // Every one of these overlaps "Senior Kata 16+". Pairing on overlap alone put
+  // all of them in one group and half the event on one floor.
+  const cats = [
+    cat("senior-kata", { minAge: 16, maxAge: 99, isKata: true }),
+    cat("senior-kumite", { minAge: 18, maxAge: 99, isKata: false }),
+    cat("junior-kata", { minAge: 16, maxAge: 17, isKata: true }),
+    cat("junior-kumite", { minAge: 16, maxAge: 17, isKata: false }),
+    cat("veteran-kata", { minAge: 35, maxAge: 99, isKata: true }),
+    cat("veteran-kumite", { minAge: 35, maxAge: 99, isKata: false }),
+  ];
+  const groups = buildAgeGroups(cats);
+  const g = (id: string) => groups.get(id);
+
+  check("senior kata pairs with senior kumite", g("senior-kata") === g("senior-kumite"), [...groups]);
+  check("junior kata pairs with junior kumite", g("junior-kata") === g("junior-kumite"), [...groups]);
+  check("veteran kata pairs with veteran kumite", g("veteran-kata") === g("veteran-kumite"), [...groups]);
+  check(
+    "but junior is not dragged into senior by the 16+ overlap",
+    g("junior-kata") !== g("senior-kata"),
+    [...groups],
+  );
+  check(
+    "nor veteran",
+    g("veteran-kata") !== g("senior-kata"),
+    [...groups],
+  );
+  check("three distinct groups, not one", new Set(groups.values()).size === 3, [...groups]);
 }
 
 console.log("\nBALANCE_FLOORS fills whichever floor is free soonest:");

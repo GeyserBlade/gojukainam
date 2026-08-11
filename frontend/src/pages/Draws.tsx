@@ -242,13 +242,16 @@ export default function DrawsPage() {
     winnerMutation.mutate({ boutId: bout.id, winnerEntryId })
   }
 
-  // Full WKF scoring is kumite-only; kata bouts keep click-the-winner
-  const openScoreboard =
-    draw?.division.category === "KUMITE"
-      ? (bout: DrawBout) => {
-          if (bout.id) navigate(`/scoreboard/${draw.id}/${bout.id}`)
-        }
-      : undefined
+  // Each discipline has its own board: WKF points for kumite, the five-judge
+  // flag panel for kata. Clicking a fighter to declare them the winner stays
+  // available on both, for a category called on the mat.
+  const openScoreboard = draw
+    ? (bout: DrawBout) => {
+        if (!bout.id) return
+        const board = draw.division.category === "KUMITE" ? "scoreboard" : "kata"
+        navigate(`/${board}/${draw.id}/${bout.id}`)
+      }
+    : undefined
 
   const handleRegenerate = async () => {
     if (!draw) return

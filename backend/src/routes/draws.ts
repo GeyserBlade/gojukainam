@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { requireRoles } from "../utils/auth.js";
-import { requireEventManager } from "../utils/event-scope.js";
+import { requireBoutScorer, requireDrawViewer, requireEventManager } from "../utils/event-scope.js";
 import { DrawService } from "../services/draw.service.js";
 import { validate, validateMultiple } from "../middleware/validate.js";
 import {
@@ -62,7 +62,7 @@ router.put("/seeds", requireEventManager({ in: "body", key: "eventId" }), valida
 });
 
 // Full bracket for one draw
-router.get("/:id", requireRoles(...VIEW_ROLES), validate(IdParam, "params"), async (req, res, next) => {
+router.get("/:id", requireDrawViewer(VIEW_ROLES, "id"), validate(IdParam, "params"), async (req, res, next) => {
   try {
     res.json(await DrawService.get(getParam(req.params.id)));
   } catch (err: any) {
@@ -105,13 +105,13 @@ router.post("/:id/regenerate", requireEventManager({ in: "lookup", key: "id", vi
 });
 
 // Capture or clear a bout result
-router.put("/:id/bouts/:boutId", requireEventManager({ in: "lookup", key: "id", via: "draw" }), validateMultiple({ params: BoutParams, body: SetBoutWinner }), async (req, res, next) => {
+router.put("/:id/bouts/:boutId", requireBoutScorer("boutId"), validateMultiple({ params: BoutParams, body: SetBoutWinner }), async (req, res, next) => {
   try {
     const row = await DrawService.setBoutWinner(
       getParam(req.params.id),
       getParam(req.params.boutId),
       req.body.winnerEntryId,
-      { id: req.user!.id }
+      { id: req.user!.id, role: req.user!.role }
     );
     res.json(row);
   } catch (err: any) {
@@ -122,7 +122,7 @@ router.put("/:id/bouts/:boutId", requireEventManager({ in: "lookup", key: "id", 
 
 // Best-effort "this bout is being scored now" ping from the mat-side
 // scoreboard — no body, idempotent, unaudited (see DrawService.startBout).
-router.post("/:id/bouts/:boutId/start", requireEventManager({ in: "lookup", key: "id", via: "draw" }), validate(BoutParams, "params"), async (req, res, next) => {
+router.post("/:id/bouts/:boutId/start", requireBoutScorer("boutId"), validate(BoutParams, "params"), async (req, res, next) => {
   try {
     const row = await DrawService.startBout(getParam(req.params.id), getParam(req.params.boutId));
     res.json(row);
@@ -132,14 +132,15 @@ router.post("/:id/bouts/:boutId/start", requireEventManager({ in: "lookup", key:
   }
 });
 
-// Capture a fully scored WKF kumite result (points, outcome, detail)
-router.put("/:id/bouts/:boutId/score", requireEventManager({ in: "lookup", key: "id", via: "draw" }), validateMultiple({ params: BoutParams, body: SetBoutScore }), async (req, res, next) => {
+// Capture a fully scored result: WKF kumite points, or a kata flag decision
+// (outcome FLAGS, plus the kata each competitor performed)
+router.put("/:id/bouts/:boutId/score", requireBoutScorer("boutId"), validateMultiple({ params: BoutParams, body: SetBoutScore }), async (req, res, next) => {
   try {
     const row = await DrawService.setBoutScore(
       getParam(req.params.id),
       getParam(req.params.boutId),
       req.body,
-      { id: req.user!.id }
+      { id: req.user!.id, role: req.user!.role }
     );
     res.json(row);
   } catch (err: any) {

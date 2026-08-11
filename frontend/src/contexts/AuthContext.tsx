@@ -4,7 +4,7 @@ import { api } from "../lib/api";
 /***************************************
  * src/contexts/AuthContext.tsx
  ***************************************/
-export type Role = "SUPERADMIN" | "ADMIN" | "CLUB_MANAGER" | "COACH" | "ATHLETE";
+export type Role = "SUPERADMIN" | "ADMIN" | "CLUB_MANAGER" | "COACH" | "ATHLETE" | "TATAMI_OPERATOR";
 
 export interface User {
   id: string;

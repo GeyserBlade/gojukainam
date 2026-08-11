@@ -89,3 +89,42 @@ export async function setBoutMat(boutId: string, matId: string | null): Promise<
 export async function reorderMatQueue(matId: string, boutIds: string[]): Promise<void> {
   await api.put(`/run/mats/${matId}/order`, { boutIds })
 }
+
+// ---------------------------------------------------------------------------
+// Tatami operator
+//
+// An operator never names an event or a mat — the server answers from their own
+// grants, so there is nothing here to pass and nothing to tamper with.
+
+export interface OperatorMat {
+  matId: string
+  matName: string
+  event: { id: string; name: string; startDate: string; status: string }
+  queue: RunQueueItem[]
+}
+
+export async function getMyMats(): Promise<{ mats: OperatorMat[] }> {
+  const res = await api.get("/run/my-mats")
+  return res.data
+}
+
+export interface MatOperatorRow {
+  id: string
+  matId: string
+  matName: string
+  user: { id: string; name: string | null; email: string; role: string }
+  createdAt: string
+}
+
+export async function listMatOperators(eventId: string): Promise<MatOperatorRow[]> {
+  const res = await api.get("/run/mats/operators", { params: { eventId } })
+  return res.data
+}
+
+export async function assignMatOperator(matId: string, userId: string): Promise<void> {
+  await api.post(`/run/mats/${matId}/operators`, { userId })
+}
+
+export async function removeMatOperator(matId: string, userId: string): Promise<void> {
+  await api.delete(`/run/mats/${matId}/operators/${userId}`)
+}

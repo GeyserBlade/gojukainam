@@ -106,16 +106,29 @@ cd backend && npx prisma migrate deploy && npm run prisma:seed && npm run create
 ```
 
 Then run backend (port 4000) and frontend (5173); `frontend/.env.development.local`
-must point `VITE_API_BASE` at the backend's port. Two suites run against the
-local database and are the only real tests in the repo; both need Postgres:
+must point `VITE_API_BASE` at the backend's port. There is no test framework;
+the suites are `scripts/test-*.ts` in each project, run with `npx tsx`, printing
+PASS/FAIL and exiting non-zero on failure. Backend suites need Postgres:
 
 ```bash
-npx tsx scripts/test-draws.ts            # draw engine (no server needed)
-npx tsx scripts/test-event-scope.ts      # coordinator authorization, over HTTP
+# backend/ — against the local database
+npx tsx scripts/test-draws.ts             # draw engine
+npx tsx scripts/test-kata-results.ts      # kata results + the allowable kata list
+npx tsx scripts/test-plan.ts              # plan board
+npx tsx scripts/test-event-timing.ts      # event/division timing
+npx tsx scripts/test-bout-scoring.ts      # WKF kumite scoring
+npx tsx scripts/test-event-scope.ts       # coordinator authorization, over HTTP
+npx tsx scripts/test-tatami-operator.ts   # mat-operator authorization, over HTTP
+
+# frontend/ — pure, no database, no DOM
+npx tsx scripts/test-kata.ts              # five-judge flag decision
+npx tsx scripts/test-scoreboard.ts scripts/test-schedule.ts scripts/test-autoschedule.ts
+npx tsx scripts/test-timing.ts scripts/test-estimator.ts scripts/test-draws.ts
 ```
 
-`test-event-scope.ts` drives a **running** backend, so start it with
-`ALLOW_DEV_AUTH=true` first; `test-draws.ts` talks to the database directly.
+The two `-scope`/`-operator` suites drive a **running** backend, so start it
+with `ALLOW_DEV_AUTH=true` first; the rest talk to the database directly or are
+pure.
 
 For a realistic tournament to click around in — 8 clubs, 190 athletes, 52
 categories across kata/kumite/team with weight classes, real brackets, and a
@@ -184,10 +197,17 @@ write the SQL into `prisma/migrations/<timestamp>_<name>/migration.sql`, then
   (`DRAFT → SUBMITTED → APPROVED`, or `RETURNED`).
 - **Team / TeamMember** — roster for `TEAM_KATA` / `TEAM_KUMITE` entries.
 - **Belt** — rank reference data, seeded; drives the belt colour ramp in the UI.
+- **Kata / KataPerformance** — the allowable kata list (global reference data,
+  seeded by migration, edited at `/katas`) and what each competitor performed in
+  a given bout. The performance is a row, not a field on the bout's
+  `scoreJson`, because the rules coming next ("this athlete has already used
+  this kata") are queries.
 - **Invoice** — per-club billing for an event's entries.
 - **Document** — an uploaded file attached to an athlete, event, or club.
-- **Roles** — `SUPERADMIN`, `ADMIN`, `CLUB_MANAGER`, `COACH`, `ATHLETE`.
-  Admin roles see everything; the rest see only their own club.
+- **Roles** — `SUPERADMIN`, `ADMIN`, `CLUB_MANAGER`, `COACH`, `ATHLETE`,
+  `TATAMI_OPERATOR`. Admin roles see everything; club roles see only their own
+  club; a tatami operator sees only the mats they hold a `MatOperator` grant on
+  and can record results there, nothing else.
 - **Coordinator** — a per-event delegation (`EventCoordinator`), **not** a
   role. Grants one `CLUB_MANAGER`/`COACH` admin-equivalent power over *one*
   event so the host dojo can run the tournament: entries, divisions, event

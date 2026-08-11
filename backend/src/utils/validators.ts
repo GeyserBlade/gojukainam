@@ -3,7 +3,7 @@
 export const GenderEnum = z.enum(["Male", "Female"]);
 export const EntryTypeEnum = z.enum(["KATA","KUMITE","TEAM_KATA","TEAM_KUMITE"]);
 export const EntryStatusEnum = z.enum(["DRAFT","SUBMITTED","APPROVED","RETURNED"]);
-export const RoleEnum = z.enum(["SUPERADMIN","ADMIN","CLUB_MANAGER","COACH","ATHLETE"]);
+export const RoleEnum = z.enum(["SUPERADMIN","ADMIN","CLUB_MANAGER","COACH","ATHLETE","TATAMI_OPERATOR"]);
 export const EventStatusEnum = z.enum(["DRAFT","ACTIVE","CLOSED","ARCHIVED"]);
 
 const dateSchema = z.preprocess((value) => {
@@ -128,6 +128,22 @@ export const CreateBelt = z.object({
 
 export const UpdateBelt = CreateBelt.partial();
 
+// ---------------- Katas ----------------
+export const CreateKata = z.object({
+  name: z.string().min(1).max(80),
+  style: z.string().max(60).optional().nullable(),
+  order: z.number().int(),
+  active: z.boolean().optional(),
+  notes: z.string().max(2000).optional().nullable(),
+});
+
+export const UpdateKata = CreateKata.partial();
+
+export const KataListQuery = z.object({
+  /** "1" to include retired katas — the admin screen, not the mat. */
+  includeInactive: z.enum(["0", "1"]).optional(),
+});
+
 // ---------------- Clubs ----------------
 export const CreateClub = z.object({
   name: z.string().min(1),
@@ -163,11 +179,16 @@ export const SetBoutWinner = z.object({
   winnerEntryId: z.string().min(1).nullable(),
 });
 
-export const BOUT_OUTCOMES = ["POINTS", "GAP", "SENSHU", "HANTEI", "HANSOKU", "KIKEN"] as const;
+/// FLAGS is the kata decision: five judges, one flag each, majority wins. It is
+/// kept distinct from HANTEI, which in kumite means the referee panel breaking
+/// a tie that the scoreboard could not — reading a kata result back as "hantei"
+/// would say the wrong thing about how it was reached.
+export const BOUT_OUTCOMES = ["POINTS", "GAP", "SENSHU", "HANTEI", "HANSOKU", "KIKEN", "FLAGS"] as const;
 
 export const SetBoutScore = z.object({
   winnerEntryId: z.string().min(1),
   outcome: z.enum(BOUT_OUTCOMES),
+  /// Kumite: points. Kata (FLAGS): the number of flags that side took.
   akaScore: z.number().int().min(0).max(99),
   aoScore: z.number().int().min(0).max(99),
   scoreJson: z.string().max(20000).optional(),
@@ -175,6 +196,12 @@ export const SetBoutScore = z.object({
   /// expired (the mat's post-buzzer awarding window). Audit-trail only — the
   /// route never uses this to accept or reject the write.
   postTime: z.boolean().optional(),
+  /// Kata performed by each side, as Kata ids. Optional throughout: a kata bout
+  /// can be decided before anyone has recorded what was performed, and every
+  /// kumite result omits them entirely. Explicit null clears a previously
+  /// recorded kata; absent leaves it alone.
+  akaKataId: z.string().min(1).nullable().optional(),
+  aoKataId: z.string().min(1).nullable().optional(),
 });
 
 export const BoutParams = z.object({
@@ -245,6 +272,10 @@ export const ReorderMatDraws = z.object({
 
 export const SetPublicAccess = z.object({
   enabled: z.boolean(),
+});
+
+export const AssignMatOperator = z.object({
+  userId: z.string().min(1),
 });
 
 export const SetCheckIn = z.object({

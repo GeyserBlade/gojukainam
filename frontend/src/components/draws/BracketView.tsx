@@ -21,6 +21,7 @@ const OUTCOME_LABEL: Record<string, string> = {
   HANTEI: "hantei",
   HANSOKU: "hansoku",
   KIKEN: "kiken",
+  FLAGS: "flags",
 }
 
 function roundLabel(round: number, totalRounds: number, size: number): string {
@@ -145,6 +146,23 @@ const BoutCard = ({ bout, isRound1, canManage, busy, onSetWinner, onOpenScoreboa
         clickable={clickableFor(bout.ao)}
         onClick={() => handleClick(bout.ao)}
       />
+      {/* What was performed, for a kata bout. Sits above the score line
+          because on a kata bracket it is the more informative of the two —
+          "3 – 1 flags" says who won, the katas say what happened. */}
+      {(bout.akaKata || bout.aoKata) && (
+        <div className="flex flex-col gap-0.5 bg-muted/25 px-2 py-0.5 text-[10px] text-muted-foreground">
+          {bout.akaKata && (
+            <span className="truncate">
+              <span className="text-flag-red">AKA</span> {bout.akaKata.name}
+            </span>
+          )}
+          {bout.aoKata && (
+            <span className="truncate">
+              <span className="text-belt-blue">AO</span> {bout.aoKata.name}
+            </span>
+          )}
+        </div>
+      )}
       {(hasScore || scoreable) && (
         <div className="flex items-center justify-between gap-1 bg-muted/40 px-2 py-0.5">
           {hasScore ? (

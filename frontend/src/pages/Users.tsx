@@ -55,7 +55,7 @@ import {
 } from "@/lib/users"
 import { listClubs, type Club } from "@/lib/clubs"
 
-const ROLE_OPTIONS: Role[] = ["ADMIN", "CLUB_MANAGER", "COACH", "ATHLETE"]
+const ROLE_OPTIONS: Role[] = ["ADMIN", "CLUB_MANAGER", "COACH", "ATHLETE", "TATAMI_OPERATOR"]
 
 const roleStyles: Record<Role, string> = {
   SUPERADMIN: "bg-flag-red/15 text-flag-red border-flag-red/30",
@@ -63,6 +63,7 @@ const roleStyles: Record<Role, string> = {
   CLUB_MANAGER: "bg-belt-blue/15 text-belt-blue border-belt-blue/30",
   COACH: "bg-belt-orange/15 text-belt-orange border-belt-orange/30",
   ATHLETE: "bg-muted text-muted-foreground border-border",
+  TATAMI_OPERATOR: "bg-flag-green/15 text-flag-green border-flag-green/30",
 }
 
 const formatDate = (value?: string | null) =>

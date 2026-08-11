@@ -59,7 +59,8 @@ function DivisionTimingRow({
     bufferPct: division.bufferPct ?? null,
     winByGap: division.winByGap ?? null,
   }
-  const resolved = resolveDivisionTiming({ ...division, ...overrides }, timing)
+  const isKata = division.category === "KATA"
+  const resolved = resolveDivisionTiming({ ...division, ...overrides, isKata }, timing)
 
   const asText = (v: number | null) => (v === null ? "" : String(v))
   const [draft, setDraft] = useState({
@@ -120,19 +121,36 @@ function DivisionTimingRow({
     </div>
   )
 
-  const hasOverride = Object.values(resolved.inherited).some((v) => !v)
+  const hasOverride = isKata
+    ? !resolved.inherited.boutDurationSec || !resolved.inherited.bufferPct
+    : Object.values(resolved.inherited).some((v) => !v)
 
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md border px-3 py-2">
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm">{division.name}</p>
         <p className="text-xs text-muted-foreground">
-          {division.gender} · Ages {division.minAge}-{division.maxAge}
+          {isKata ? "Kata" : "Kumite"} · {division.gender} · Ages {division.minAge}-
+          {division.maxAge}
         </p>
       </div>
-      {field("boutDurationSec", "bout duration in seconds", String(timing.defaultBoutDurationSec))}
+      {field(
+        "boutDurationSec",
+        isKata ? "kata performance length in seconds" : "bout duration in seconds",
+        String(isKata ? timing.kataBoutDurationSec : timing.defaultBoutDurationSec),
+      )}
       {field("bufferPct", "injury/stoppage buffer percent", String(timing.defaultBufferPct))}
-      {field("winByGap", "win by points gap", String(resolved.winByGap))}
+      {isKata ? (
+        // Kata is judged on flags, not points — there is no gap to win by.
+        <div
+          className="w-24 text-center text-xs text-muted-foreground"
+          title="Kata is decided by flags, so a win-by-points gap does not apply."
+        >
+          n/a
+        </div>
+      ) : (
+        field("winByGap", "win by points gap", String(resolved.winByGap))
+      )}
       <Button
         variant="ghost"
         size="icon-sm"
@@ -140,7 +158,11 @@ function DivisionTimingRow({
         title="Clear all three overrides for this category"
         disabled={!canManage || saving || !hasOverride}
         onClick={() =>
-          onSave(division.id, { boutDurationSec: null, bufferPct: null, winByGap: null })
+          onSave(division.id, {
+            boutDurationSec: null,
+            bufferPct: null,
+            ...(isKata ? {} : { winByGap: null }),
+          })
         }
       >
         <RotateCcw />
@@ -151,11 +173,16 @@ function DivisionTimingRow({
 
 /**
  * Per-category timing under the event hub's Setup tab: bout duration,
- * injury/stoppage buffer and win-by-points gap for each kumite category.
+ * injury/stoppage buffer and win-by-points gap, for every category.
  *
- * Duration and buffer inherit the tournament defaults set under Overview; the
- * win gap inherits the age rule (6 at 13 and under, 8 above). Nothing consumes
- * these values yet — this captures and stores them.
+ * Kumite and kata are both listed but mean different things by "duration" — a
+ * match clock against the length of one performance — so they inherit from
+ * different event defaults and are shown in separate tables rather than one
+ * list with a column that changes meaning halfway down. Kata has no
+ * win-by-points gap at all; it is judged on flags.
+ *
+ * These values are consumed: the Plan tab's schedule times every category from
+ * them (frontend/src/lib/schedule.ts).
  */
 export function DivisionTiming({ eventId, canManage }: { eventId: string; canManage: boolean }) {
   const qc = useQueryClient()
@@ -183,57 +210,79 @@ export function DivisionTiming({ eventId, canManage }: { eventId: string; canMan
     onError: (e) => apiError(e, "Could not save the category timing"),
   })
 
-  // Kumite only: a bout clock and a win-by-points gap have no meaning for a
-  // kata category, and the estimator these feed is kumite-only too.
   const kumite = divisions.filter((d) => d.category === "KUMITE")
+  const kata = divisions.filter((d) => d.category === "KATA")
 
   if (loadingDivisions || loadingTiming) return <Skeleton className="h-48 w-full" />
+
+  const table = (rows: Division[], heading: string, durationLabel: string, note: string) => (
+    <div className="space-y-1.5">
+      <div className="flex items-baseline gap-2">
+        <h4 className="text-sm font-medium">{heading}</h4>
+        <span className="text-[11px] text-muted-foreground">{note}</span>
+      </div>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 text-[11px] text-muted-foreground">
+        <span className="min-w-0 flex-1">Category</span>
+        <span className="w-24">{durationLabel}</span>
+        <span className="w-24">Buffer (%)</span>
+        <span className="w-24">Win gap</span>
+        <span className="w-8" />
+      </div>
+      {rows.map((d) => (
+        <DivisionTimingRow
+          key={d.id}
+          division={d}
+          timing={timing}
+          canManage={canManage}
+          saving={mutation.isPending && mutation.variables?.id === d.id}
+          onSave={(id, data) => mutation.mutate({ id, data })}
+        />
+      ))}
+    </div>
+  )
 
   return (
     <section className="space-y-3">
       <div>
         <h3 className="font-medium">Category timing</h3>
         <p className="mt-0.5 text-sm text-muted-foreground">
-          Bout duration and injury/stoppage buffer are inherited from the tournament defaults set
-          under Overview — leave a box empty to inherit, or type a value to override it for that
-          category.
+          Everything here is inherited from the tournament defaults under Overview — leave a box
+          empty to inherit, or type a value to override it for that one category. The Plan tab's
+          schedule times every category from these.
         </p>
       </div>
 
-      {kumite.length === 0 ? (
+      {divisions.length === 0 ? (
         <Card>
           <CardContent className="py-8 text-center text-sm text-muted-foreground">
-            No kumite categories on this event yet.
+            No categories on this event yet.
           </CardContent>
         </Card>
       ) : (
         <>
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 text-[11px] text-muted-foreground">
-            <span className="min-w-0 flex-1">Category</span>
-            <span className="w-24">Bout (sec)</span>
-            <span className="w-24">Buffer (%)</span>
-            <span className="w-24">Win gap</span>
-            <span className="w-8" />
-          </div>
-          <div className="space-y-1.5">
-            {kumite.map((d) => (
-              <DivisionTimingRow
-                key={d.id}
-                division={d}
-                timing={timing}
-                canManage={canManage}
-                saving={mutation.isPending && mutation.variables?.id === d.id}
-                onSave={(id, data) => mutation.mutate({ id, data })}
-              />
-            ))}
-          </div>
+          {kumite.length > 0 &&
+            table(
+              kumite,
+              "Kumite",
+              "Bout (sec)",
+              `match clock, default ${formatBoutDuration(timing.defaultBoutDurationSec)}`,
+            )}
+          {kata.length > 0 &&
+            table(
+              kata,
+              "Kata",
+              "Performance (sec)",
+              `one performance, default ${formatBoutDuration(timing.kataBoutDurationSec)}`,
+            )}
+
           <p className="flex items-start gap-1.5 text-[11px] text-muted-foreground">
             <Info className="mt-0.5 size-3 shrink-0" />
-            Defaults: {formatBoutDuration(timing.defaultBoutDurationSec)} bout and{" "}
-            {timing.defaultBufferPct}% buffer from the tournament settings; a win gap of{" "}
-            {WIN_GAP_YOUTH} for categories aged {WIN_GAP_AGE_THRESHOLD} and below, {WIN_GAP_SENIOR}{" "}
-            above that. Kata categories aren't listed — a bout clock and a points gap don't apply
-            to them.
+            Defaults come from the tournament settings:{" "}
+            {formatBoutDuration(timing.defaultBoutDurationSec)} kumite bout,{" "}
+            {formatBoutDuration(timing.kataBoutDurationSec)} kata performance, and{" "}
+            {timing.defaultBufferPct}% buffer. The win gap follows the age rule — {WIN_GAP_YOUTH}{" "}
+            for categories aged {WIN_GAP_AGE_THRESHOLD} and below, {WIN_GAP_SENIOR} above that —
+            and does not apply to kata, which is judged on flags.
           </p>
           <div className="flex flex-wrap gap-1.5">
             <Badge variant="outline" className="font-normal text-[10px]">

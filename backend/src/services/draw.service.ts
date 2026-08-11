@@ -1,5 +1,6 @@
 import { randomInt } from "crypto";
 import { prisma } from "../lib/prisma.js";
+import type { BoutPhase } from "@prisma/client";
 
 // Entry statuses that take part in a draw. Only approved entries are drawn —
 // submission alone is not enough; an admin must approve first.
@@ -408,6 +409,10 @@ async function recompute(tx: Tx, drawId: string) {
           startedAt: null,
         },
       });
+      // Recorded katas are score detail too — a kata attributed to a matchup
+      // that no longer exists would still be counted by the "already performed"
+      // rules this table exists for.
+      await tx.kataPerformance.deleteMany({ where: { boutId: existing.id } });
     }
   }
 
@@ -488,6 +493,73 @@ async function createDrawRecords(
   });
   await recompute(tx, draw.id);
   return draw.id;
+}
+
+/** Who is writing a result. The role decides whether the correction policy applies. */
+export type ActingUser = { id: string; role?: string };
+
+/**
+ * A tatami operator may record a result on their mat, and may correct the one
+ * they just recorded — but they may not rewrite history.
+ *
+ * The rule: an operator can only overwrite a bout that *they* last wrote, and
+ * only while nothing downstream of it has been decided. Both halves matter.
+ * Without the first, one mat can undo another's work when a category is split
+ * across tatami. Without the second, correcting an early round after later
+ * rounds are fought silently invalidates everything built on it — and the
+ * operator, who sees one bout at a time, has no way to know that.
+ *
+ * Anything they cannot fix themselves is a coordinator's job, which is a person
+ * standing in the same hall, not a support ticket.
+ *
+ * Admins and coordinators are unaffected: they are the ones who repair brackets.
+ */
+async function assertOperatorMayWrite(
+  bout: {
+    id: string;
+    drawId: string;
+    winnerEntryId: string | null;
+    round: number;
+    phase: BoutPhase;
+  },
+  user: ActingUser,
+) {
+  if (user.role !== "TATAMI_OPERATOR") return;
+
+  // Recording a fresh result is always fine.
+  if (!bout.winnerEntryId) return;
+
+  const lastWrite = await prisma.auditLog.findFirst({
+    where: { entityType: "Bout", entityId: bout.id, action: { in: ["RESULT", "SCORE"] } },
+    orderBy: { createdAt: "desc" },
+    select: { userId: true },
+  });
+  if (lastWrite && lastWrite.userId !== user.id)
+    throw {
+      status: 409,
+      message: "Someone else recorded this result — ask the tournament coordinator to change it",
+    };
+
+  // Anything decided in a later round of the same bracket was built on this
+  // result. MAIN rounds ascend; a repechage bout is always downstream of the
+  // main-bracket round it draws its losers from.
+  const downstream = await prisma.bout.count({
+    where: {
+      drawId: bout.drawId,
+      winnerEntryId: { not: null },
+      id: { not: bout.id },
+      OR: [
+        { phase: bout.phase, round: { gt: bout.round } },
+        ...(bout.phase === "MAIN" ? [{ phase: "REPECHAGE" as BoutPhase }] : []),
+      ],
+    },
+  });
+  if (downstream > 0)
+    throw {
+      status: 409,
+      message:
+        "Later bouts in this category have already been fought — ask the tournament coordinator to correct this one",
+    };
 }
 
 export class DrawService {
@@ -854,10 +926,11 @@ export class DrawService {
     drawId: string,
     boutId: string,
     winnerEntryId: string | null,
-    user: { id: string }
+    user: ActingUser
   ) {
     const bout = await prisma.bout.findUnique({ where: { id: boutId } });
     if (!bout || bout.drawId !== drawId) throw { status: 404, message: "Bout not found" };
+    await assertOperatorMayWrite(bout, user);
     if (winnerEntryId) {
       if (!bout.akaEntryId || !bout.aoEntryId)
         throw { status: 409, message: "Both fighters must be known before capturing a result" };
@@ -882,6 +955,9 @@ export class DrawService {
           ...(winnerEntryId ? {} : { startedAt: null }),
         },
       });
+      // Same reasoning as the score fields above: a winner-only capture says
+      // "never mind the detail", and the kata performed is detail.
+      await tx.kataPerformance.deleteMany({ where: { boutId } });
       await recompute(tx, drawId);
       await tx.auditLog.create({
         data: {
@@ -915,8 +991,11 @@ export class DrawService {
   }
 
   /**
-   * Capture a fully scored WKF kumite result: points, outcome and detail,
-   * plus the winner, cascading the bracket exactly like setBoutWinner.
+   * Capture a fully scored result — points, outcome and detail, plus the
+   * winner — cascading the bracket exactly like setBoutWinner. Used by both
+   * mat-side boards: WKF kumite (points, outcome POINTS/GAP/…) and the kata
+   * flag panel (outcome FLAGS, scores = flags taken, plus the kata each
+   * competitor performed).
    */
   static async setBoutScore(
     drawId: string,
@@ -928,17 +1007,33 @@ export class DrawService {
       aoScore: number;
       scoreJson?: string;
       postTime?: boolean;
+      akaKataId?: string | null;
+      aoKataId?: string | null;
     },
-    user: { id: string }
+    user: ActingUser
   ) {
     const bout = await prisma.bout.findUnique({ where: { id: boutId } });
     if (!bout || bout.drawId !== drawId) throw { status: 404, message: "Bout not found" };
+    await assertOperatorMayWrite(bout, user);
     if (!bout.akaEntryId || !bout.aoEntryId)
       throw { status: 409, message: "Both fighters must be known before capturing a result" };
     if (data.winnerEntryId !== bout.akaEntryId && data.winnerEntryId !== bout.aoEntryId)
       throw { status: 422, message: "Winner must be one of the bout's fighters" };
 
     const postTime = data.postTime ?? false;
+
+    // Which kata each side performed, resolved to (entryId, kataId) pairs.
+    // Checked here rather than left to the foreign key so a mistyped id comes
+    // back as a 422 the mat can read, not a 500.
+    const katas: { entryId: string; kataId: string | null }[] = [];
+    if (data.akaKataId !== undefined) katas.push({ entryId: bout.akaEntryId, kataId: data.akaKataId });
+    if (data.aoKataId !== undefined) katas.push({ entryId: bout.aoEntryId, kataId: data.aoKataId });
+    const kataIds = katas.map((k) => k.kataId).filter((id): id is string => !!id);
+    if (kataIds.length > 0) {
+      const found = await prisma.kata.count({ where: { id: { in: kataIds } } });
+      if (found !== new Set(kataIds).size)
+        throw { status: 422, message: "Unknown kata" };
+    }
 
     await prisma.$transaction(async (tx) => {
       await tx.bout.update({
@@ -953,6 +1048,22 @@ export class DrawService {
         },
       });
       await recompute(tx, drawId);
+
+      // After the recompute, which is what invalidates stale performances —
+      // writing first would mean re-deleting our own rows in the case where
+      // the bracket shifts under this bout.
+      for (const { entryId, kataId } of katas) {
+        if (kataId === null) {
+          await tx.kataPerformance.deleteMany({ where: { boutId, entryId } });
+        } else {
+          await tx.kataPerformance.upsert({
+            where: { boutId_entryId: { boutId, entryId } },
+            create: { boutId, entryId, kataId },
+            update: { kataId },
+          });
+        }
+      }
+
       await tx.auditLog.create({
         data: {
           userId: user.id,
@@ -966,6 +1077,9 @@ export class DrawService {
             akaScore: data.akaScore,
             aoScore: data.aoScore,
             postTime,
+            ...(katas.length > 0
+              ? { katas: Object.fromEntries(katas.map((k) => [k.entryId, k.kataId])) }
+              : {}),
           }),
         },
       });
@@ -981,7 +1095,10 @@ export class DrawService {
         division: true,
         weightClass: true,
         slots: { include: { entry: { include: ENTRY_INCLUDE } }, orderBy: { position: "asc" } },
-        bouts: { orderBy: [{ phase: "asc" }, { round: "asc" }, { position: "asc" }] },
+        bouts: {
+          orderBy: [{ phase: "asc" }, { round: "asc" }, { position: "asc" }],
+          include: { kataPerformances: { include: { kata: { select: { id: true, name: true } } } } },
+        },
       },
     });
     if (!draw) throw { status: 404, message: "Draw not found" };
@@ -1034,6 +1151,12 @@ export class DrawService {
         const stored = draw.bouts.find(
           (row) => row.phase === b.phase && row.round === b.round && row.position === b.position
         );
+        // Keyed by entry rather than by side: the performance belongs to the
+        // competitor, and which corner they stood in is a property of the bout.
+        const kataFor = (entryId: string | null) =>
+          entryId
+            ? stored?.kataPerformances.find((p) => p.entryId === entryId)?.kata ?? null
+            : null;
         return {
           id: stored?.id ?? null,
           phase: b.phase,
@@ -1049,6 +1172,8 @@ export class DrawService {
           scoreJson: stored?.scoreJson ?? null,
           postTime: stored?.postTime ?? false,
           startedAt: stored?.startedAt?.toISOString() ?? null,
+          akaKata: kataFor(b.akaEntryId),
+          aoKata: kataFor(b.aoEntryId),
         };
       }),
       placements: {

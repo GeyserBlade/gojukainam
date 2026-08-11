@@ -5,7 +5,7 @@ import { verifyApiKey } from "./agent-auth.js";
 
 export type AuthUser = {
   id: string;
-  role: "SUPERADMIN"|"ADMIN"|"CLUB_MANAGER"|"COACH"|"ATHLETE";
+  role: "SUPERADMIN"|"ADMIN"|"CLUB_MANAGER"|"COACH"|"ATHLETE"|"TATAMI_OPERATOR";
   clubId?: string | null;
 };
 

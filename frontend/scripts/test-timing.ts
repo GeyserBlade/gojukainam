@@ -162,6 +162,36 @@ console.log("\ninheritedDivisionTiming states the fallback without any override 
   );
 }
 
+console.log("\nA kata category inherits the kata performance length, not the kumite clock:");
+{
+  const t = timing({ defaultBoutDurationSec: 120, kataBoutDurationSec: 75 });
+  check(
+    "kumite inherits the match clock",
+    inheritedDivisionTiming({ maxAge: 20 }, t).boutDurationSec === 120,
+  );
+  check(
+    "kata inherits the performance length",
+    inheritedDivisionTiming({ maxAge: 20, isKata: true }, t).boutDurationSec === 75,
+  );
+  check(
+    "resolve agrees, and still reports it as inherited",
+    resolveDivisionTiming({ maxAge: 20, isKata: true, boutDurationSec: null }, t)
+      .boutDurationSec === 75 &&
+      resolveDivisionTiming({ maxAge: 20, isKata: true, boutDurationSec: null }, t).inherited
+        .boutDurationSec,
+  );
+  check(
+    "an override still beats it",
+    resolveDivisionTiming({ maxAge: 20, isKata: true, boutDurationSec: 100 }, t)
+      .boutDurationSec === 100,
+  );
+  check(
+    "omitting isKata reads as kumite, so existing callers are unchanged",
+    inheritedDivisionTiming({ maxAge: 20 }, t).boutDurationSec ===
+      inheritedDivisionTiming({ maxAge: 20, isKata: false }, t).boutDurationSec,
+  );
+}
+
 console.log("\nformatBoutDuration reads like a bout clock:");
 {
   check("120 -> 2:00", formatBoutDuration(120) === "2:00", formatBoutDuration(120));

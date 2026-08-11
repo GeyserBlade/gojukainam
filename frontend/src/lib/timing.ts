@@ -209,13 +209,18 @@ export interface ResolvedDivisionTiming extends InheritedDivisionTiming {
 /**
  * What this category would use with every override cleared — the event's
  * defaults for bout duration and buffer, the age rule for the win gap.
+ *
+ * A kata category inherits `kataBoutDurationSec`, not the kumite clock: for
+ * kata the field means "how long one performance takes", and the two numbers
+ * are unrelated. `isKata` defaults to false so existing kumite-only callers
+ * read the same as before.
  */
 export function inheritedDivisionTiming(
-  division: { maxAge: number },
+  division: { maxAge: number; isKata?: boolean },
   timing: EventTiming,
 ): InheritedDivisionTiming {
   return {
-    boutDurationSec: timing.defaultBoutDurationSec,
+    boutDurationSec: division.isKata ? timing.kataBoutDurationSec : timing.defaultBoutDurationSec,
     bufferPct: timing.defaultBufferPct,
     winByGap: defaultWinByGap(division),
   };
@@ -223,10 +228,12 @@ export function inheritedDivisionTiming(
 
 /** The effective timing for one category, plus where each value came from. */
 export function resolveDivisionTiming(
-  division: { maxAge: number } & Partial<DivisionTimingOverrides>,
+  division: { maxAge: number; isKata?: boolean } & Partial<DivisionTimingOverrides>,
   timing: EventTiming,
 ): ResolvedDivisionTiming {
   const fallback = inheritedDivisionTiming(division, timing);
+  // A kata category has no win-by-points gap — the field is carried so the
+  // shape stays uniform, but nothing should present it as meaningful.
   const has = (v: number | null | undefined): v is number => typeof v === "number" && Number.isFinite(v);
   return {
     boutDurationSec: has(division.boutDurationSec) ? division.boutDurationSec : fallback.boutDurationSec,
