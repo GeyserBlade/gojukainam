@@ -72,13 +72,19 @@ export function EventHubLayout() {
     <AppShell title="Event Hub">
       {/* Event picker + status */}
       <div className="mb-4 flex flex-wrap items-end gap-3 print:hidden">
-        <div className="w-full max-w-xs">
+        {/* min-w-0 so the picker can actually shrink: a flex item's floor is its
+            content, and a long tournament name would otherwise push it wider
+            than max-w-xs and out under the status badge. */}
+        <div className="w-full min-w-0 max-w-sm">
           <Label className="mb-1.5 block text-xs text-muted-foreground">Event</Label>
           {loading ? (
             <Skeleton className="h-9 w-full" />
           ) : (
             <Select value={eventId} onValueChange={setEventId}>
-              <SelectTrigger>
+              {/* SelectTrigger is w-fit by default, which for a long event name
+                  means "wider than the box you put me in". The name truncates
+                  instead — the full one is in the open list. */}
+              <SelectTrigger className="w-full">
                 <SelectValue placeholder="Select an event" />
               </SelectTrigger>
               <SelectContent>
@@ -92,7 +98,10 @@ export function EventHubLayout() {
           )}
         </div>
         {event && (
-          <Badge variant="outline" className={cn("mb-1.5 font-normal", STATUS_STYLES[event.status])}>
+          <Badge
+            variant="outline"
+            className={cn("mb-1.5 shrink-0 font-normal", STATUS_STYLES[event.status])}
+          >
             {event.status}
           </Badge>
         )}

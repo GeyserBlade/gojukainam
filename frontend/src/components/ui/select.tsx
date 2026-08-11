@@ -50,10 +50,24 @@ function SelectTrigger({
   )
 }
 
+/**
+ * `popper`, not Radix's `item-aligned`.
+ *
+ * Under item-aligned, Radix owns the scrolling: the list is scrolled by hovering
+ * chevrons at its edges rather than by the list itself, and the up chevron only
+ * appears once a scroll event has moved the viewport. On a list long enough to
+ * overflow, that came out as a dropdown you could scroll down and then not back
+ * up. A popper content is an ordinary `overflow-y-auto` box, so wheel, trackpad
+ * and touch-drag all work in both directions and the chevrons are a garnish
+ * rather than the only way through.
+ *
+ * The trade is where the list opens: below the trigger, instead of on top of it
+ * with the selected item over the closed value.
+ */
 function SelectContent({
   className,
   children,
-  position = "item-aligned",
+  position = "popper",
   align = "center",
   ...props
 }: React.ComponentProps<typeof SelectPrimitive.Content>) {

@@ -131,15 +131,24 @@ romanisation (Seiyunchin → **Seinchin**, Sanseru → **Sanseiru**, Suparinpei 
 keeps any `KataPerformance` pointing at the right row. Everything dropped is
 deleted only when nothing has been performed against it, and retired otherwise.
 
-*The kata picker uses `position="popper"`.* The app's shared `SelectContent`
-defaults to `item-aligned`, where Radix drives scrolling through hover-only
-chevrons; on a long list that meant the dropdown could be scrolled down and then
-not back up, because no scroll-up chevron ever appeared. A popper content is an
-ordinary `overflow-y-auto` container, so wheel, trackpad and touch-drag all work
-in both directions. **Only the kata pickers were changed** — the same latent
-problem applies to every long dropdown in the app, but fixing the shared default
-changes where every dropdown in the app opens, and that is not something to
-change unverified.
+*Every dropdown in the app now uses `position="popper"`.* The shared
+`SelectContent` defaulted to Radix's `item-aligned`, where Radix owns the
+scrolling: the list moves only when you hover chevrons at its edges, and the up
+chevron appears only once a scroll event has moved the viewport. On any list long
+enough to overflow that came out as a dropdown you could scroll down and then not
+back up. A popper content is an ordinary `overflow-y-auto` box, so wheel,
+trackpad and touch-drag all work both ways. The trade is where the list opens —
+below the trigger, rather than on top of it with the selected item over the
+closed value. Verified on the event picker, the kata pickers (15 options, and it
+was the report that found this), all three athlete-form pickers (16 options,
+scrollable), and a select inside a dialog, which is the case popper positioning
+most often breaks.
+
+*The event-hub picker no longer runs out under the status badge.* `SelectTrigger`
+is `w-fit`, so a long tournament name sized the trigger to 350px inside a 320px
+`max-w-xs` box and overlapped the ACTIVE chip. The trigger is `w-full`, the box
+gained `min-w-0` so it can actually shrink, the badge is `shrink-0`, and the box
+went to `max-w-sm` so a name of this length fits without truncating at all.
 
 *The kata list is a table, because the rules the user wants next are queries.*
 `Kata` is global reference data like `Belt` (21 rows, Goju Kai / Goju-ryu, seeded
