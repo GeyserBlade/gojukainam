@@ -26,6 +26,7 @@ const AthleteExtractPage = lazy(() => import("./pages/AthleteExtract"));
 const EventManagementPage = lazy(() => import("./pages/EventManagement"));
 const EventsPage = lazy(() => import("./pages/Events"));
 const EntriesViewPage = lazy(() => import("./pages/EntriesView"));
+const EntrySheetPage = lazy(() => import("./pages/EntrySheet"));
 const DrawsPage = lazy(() => import("./pages/Draws"));
 const RunPage = lazy(() => import("./pages/Run"));
 const MatOperatorPage = lazy(() => import("./pages/MatOperator"));
@@ -85,6 +86,13 @@ const AppRoutes: React.FC = () => (
         <Route path="run" element={<RunPage />} />
         <Route path="results" element={<ResultsPage />} />
       </Route>
+
+      {/* A club's entry-confirmation sheet — a printable document, so it sits
+          outside the hub's chrome rather than inside a tab. */}
+      <Route
+        path="/entry-sheet/:eventId/:clubId"
+        element={<Protected><EntrySheetPage /></Protected>}
+      />
 
       {/* Legacy paths → hub tabs */}
       <Route path="/events" element={<Navigate to="/hub/entries" replace />} />

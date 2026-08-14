@@ -4,7 +4,12 @@ This file is the handoff between coding agents. It describes what is in flight
 right now, not the permanent architecture (that's
 [`architecture.md`](architecture.md)).
 
-**Last updated:** 2026-08-11 — by Claude Code: **kata scoring** — a five-judge
+**Last updated:** 2026-08-13 — by Claude Code: **club entry-confirmation
+sheets** — export one club's entries from the event hub as a printable document
+(Save as PDF) or an Excel workbook, so clubs with no login can validate and sign
+off their roster. See "In flight" below.
+
+Previously, 2026-08-11 — by Claude Code: **kata scoring** — a five-judge
 flag board with a reveal step, an allowable-kata reference list seeded by
 migration, and `KataPerformance` so the "which katas has this athlete already
 used" rules have something to query. See "In flight" below.
@@ -98,6 +103,117 @@ port; those have since been pushed.) Everything here is verified locally against
 a database, never against production data.
 
 ## In flight (uncommitted)
+
+**Club entry-confirmation sheets — export a club's entries as PDF or Excel
+(2026-08-13).**
+
+Request: from the event hub, extract one club's entries to a PDF or Excel file
+that can be emailed to a club with no access to the system, in a readable format
+they can validate against.
+
+*The document is athlete-first, then category-first, because those are two
+different checks.* A club validating a roster asks "did we enter Jandre in the
+right categories" and, separately, "who do we have in U12 Girls Kata". One view
+cannot answer both, so the sheet carries the same entries twice: a table with one
+row per athlete (DOB, age, weight, and every category under them with its
+status), then the same entries grouped by (division, weight class) — the exact
+grouping a draw is made from, so what the club confirms matches the brackets that
+come out of it. Teams get their own section with members and reserves named.
+
+*RETURNED is reported but never part of the roster.* Those entries are out of the
+draw-eligible pool, so listing them alongside the rest would have a club
+confirming people who are not entered. They sit in their own section at the end
+with the organizer's reason, under a line saying they must be resubmitted to
+count. DRAFT and SUBMITTED **are** in the roster, each labelled — a club needs to
+see the entry nobody submitted, which is exactly the mistake this sheet exists to
+catch. The export dialog says so up front ("2 entries have not been submitted
+yet") before anything is sent. **Fees are deliberately absent**: this is an entry
+check, and billing already has invoices. **Belt/grade is absent too** — dropped
+on request after the first pass; it is not what a club is confirming here, and
+losing it made every roster row single-height (the "Nth Kyu — Colour" names were
+the only thing wrapping) and gave the categories column its width back.
+
+*PDF is the browser's, not a library's.* There is no PDF dependency in this repo
+and adding one was not worth it: `/entry-sheet/:eventId/:clubId` is a printable
+React page with a Print button, and "Save as PDF" in the print dialog produces
+the file. It also prints on paper, which a check-in desk actually wants. The
+trade is one extra step in the print dialog versus a one-click download.
+
+*The sheet is a document, so it is on white even though the app is dark.*
+`.paper` in `index.css` re-declares the light palette's raw tokens on a
+container; custom properties inherit from the nearest element that sets them, so
+everything inside re-themes without touching `<html>`, and the light values stay
+in one place (the rule is shared with `html.light`). A `@media print` block plus
+`.print-keep` stops a person's row, a category block or the sign-off straddling a
+page break. The roster table sits at 12px with tight fixed columns because a
+division name, a weight class and a status have to fit on one line inside an A4
+column — measured at the print width (703px), where nothing wraps.
+
+*One payload, two formats.* `GET /reports/club-entries` returns the whole
+document as JSON and the printable page renders it; `GET
+/reports/club-entries.xlsx` builds the workbook from the *same* `build()` result
+(ExcelJS, already a dependency for athlete import). The emailed PDF and the
+emailed spreadsheet therefore cannot disagree. The workbook is two sheets — "Entry
+sheet" (header block, one flat row per entry with the athlete repeated so the
+column can be filtered and sorted, teams, returned, and a sign-off block) and "By
+category" — both with autofilter and frozen headers.
+
+*Authorization has three doors, and they are not the same check.* An admin
+exports any club. **The event's coordinator exports any club of that event** —
+they are the person chasing confirmations and are usually a CLUB_MANAGER, so role
+alone would have scoped them to their own dojo. Everyone else gets their own club
+only, and may omit `clubId` entirely. `GET /reports/club-entries/clubs` (which
+clubs have entries, with counts, to populate the picker) is scoped the same way:
+a plain club user is told about their own club and nothing else, or the list would
+name every club that has entered. Deliberately *not* `GET /clubs`, which is
+admin-only and so unreadable to the coordinator who needs it most.
+
+*Also fixed, and needed for this to work in production:* the CORS config never
+set `exposedHeaders`, so `Content-Disposition` was invisible to script. The
+frontend and API are separate origins on Railway, so every blob download — this
+workbook and the existing `entries.csv` — would have saved under a generic
+filename. Confirmed in the browser before and after.
+
+The download goes through axios as a blob rather than an `<a href>` at the API:
+a top-level navigation to the backend origin is cross-site in production and
+carries neither the session cookie reliably nor the dev-auth headers.
+
+Entry point: an **Export for club** button in the hub's **Review** tab (that page
+is already "check these entries", and already has the club filter), opening
+`ClubEntrySheetDialog` with the club picker, live counts, and the two buttons.
+The sheet opens in a new tab, not a navigation — an organizer working through a
+list of clubs should not lose their place.
+
+New: `services/entry-sheet.service.ts`, three routes on `routes/reports.ts`,
+`scripts/test-entry-sheet.ts`; `frontend/src/lib/entry-sheet.ts`,
+`pages/EntrySheet.tsx` (`/entry-sheet/:eventId/:clubId`),
+`components/entries/ClubEntrySheetDialog.tsx`; `.paper` + the print block in
+`index.css`. Touched: `server.ts` (CORS), `pages/EntriesView.tsx`, `App.tsx`.
+
+Verified: `npx tsx scripts/test-entry-sheet.ts` — 47 checks over real HTTP
+(document shape and sort order, age computed on the *event's* start date
+including both sides of the birthday boundary, RETURNED excluded from both views
+and reported with its reason, team rosters with reserves separated and a reserve
+not promoted into the athlete roster, totals adding up, all three authorization
+doors including a coordinator grant being granted and revoked mid-run, the club
+list's scoping, four bad-request cases, and the workbook being a real xlsx with
+both sheets, the right filename and none of the other club's athletes in it). All
+other suites re-run clean; both projects `tsc --noEmit` and `npm run build` clean.
+
+Driven in the browser against the 277-entry championships fixture with six
+entries temporarily varied to Draft/Pending/Returned (restored afterwards, and
+the DB re-checked): the dialog's counts, the club-scoped picker showing a club
+manager only their own dojo, another club's sheet refused with the error state,
+the roster and category views rendering on white inside the dark app, the
+returned section with its reason, the sign-off block, and the workbook parsed
+back row by row.
+
+**Not verified: the actual print output.** The Print button was not taken through
+a real print dialog in this environment, so pagination across pages (whether
+`.print-keep` holds, where the roster table breaks) has been reasoned about and
+measured in the DOM at A4 width, not seen on a page. **Team entries were not seen
+rendered** either — the local database has no `Team` rows at all, so that section
+is covered by the test suite's fixture and by the workbook, but never by eye.
 
 **Kata scoring: a five-judge flag board, and an allowable kata list
 (2026-08-11).**

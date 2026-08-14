@@ -115,7 +115,12 @@ app.use(cors({
       callback(new Error('Not allowed by CORS'));
     }
   },
-  credentials: true
+  credentials: true,
+  // File exports (the club entry sheet, entries.csv) put their filename in
+  // Content-Disposition. The frontend and the API are separate origins, and a
+  // cross-origin response header is unreadable to script unless it is exposed
+  // here — without this the browser saves every export under a generic name.
+  exposedHeaders: ["Content-Disposition"]
 }));
 app.use(express.json());
 app.use(cookieParser());

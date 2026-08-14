@@ -5,6 +5,7 @@ import {
   AlertTriangle,
   Check,
   ChevronRight,
+  FileDown,
   Search,
   Send,
   Undo2,
@@ -53,6 +54,7 @@ import {
 } from "@/components/ui/table"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
+import { ClubEntrySheetDialog } from "@/components/entries/ClubEntrySheetDialog"
 import { cn } from "@/lib/utils"
 import {
   EntryService,
@@ -342,6 +344,9 @@ const EntriesView = () => {
   // through a different endpoint and the reason is optional, not required.
   const [withdrawTarget, setWithdrawTarget] = useState<Entry | null>(null)
   const [withdrawReason, setWithdrawReason] = useState("")
+
+  // Export a club's entries as a confirmation sheet (print/PDF or Excel).
+  const [exportOpen, setExportOpen] = useState(false)
 
   const { data: clubs = [] } = useQuery({
     queryKey: ["clubs"],
@@ -652,13 +657,21 @@ const EntriesView = () => {
 
   return (
     <>
-      <div className="mb-4">
-        <h2 className="font-display text-xl tracking-wide sm:text-2xl">Review entries</h2>
-        <p className="text-sm text-muted-foreground mt-1">
-          {canReviewEvent
-            ? "Review, approve or return entries across all clubs."
-            : "Review and submit your club's entries for approval."}
-        </p>
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="font-display text-xl tracking-wide sm:text-2xl">Review entries</h2>
+          <p className="text-sm text-muted-foreground mt-1">
+            {canReviewEvent
+              ? "Review, approve or return entries across all clubs."
+              : "Review and submit your club's entries for approval."}
+          </p>
+        </div>
+        {selectedEventId && (
+          <Button variant="outline" size="sm" onClick={() => setExportOpen(true)}>
+            <FileDown />
+            Export for club
+          </Button>
+        )}
       </div>
 
       {selectedEventId && submitBlocked && reg.message && (
@@ -1264,6 +1277,15 @@ const EntriesView = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Entry-confirmation sheet — for clubs that have no access to the system
+          and confirm their roster by email. */}
+      <ClubEntrySheetDialog
+        open={exportOpen}
+        onOpenChange={setExportOpen}
+        eventId={selectedEventId}
+        defaultClubId={isAdmin ? filterClubId || undefined : clubId || undefined}
+      />
     </>
   )
 }

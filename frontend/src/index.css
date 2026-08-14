@@ -99,8 +99,13 @@
   --flag-green: #009a44;
 }
 
-/* ===== Light mode — applied via `.light` (legacy) or `.dark` not present ===== */
-html.light {
+/* ===== Light mode — applied via `.light` (legacy) or `.dark` not present =====
+   `.paper` shares this palette: a document that gets printed and emailed is on
+   white whatever theme the operator runs the app in. Custom properties inherit
+   from the nearest element that sets them, so redefining them on the container
+   re-themes everything inside it without touching <html>. */
+html.light,
+.paper {
   color-scheme: light;
 
   --background: oklch(1 0 0);
@@ -254,5 +259,42 @@ input, textarea, [contenteditable] {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+  }
+}
+
+/* ===== Print =====
+   Only the entry-confirmation sheet is designed to be printed; everything else
+   that lands on paper does so incidentally. The rules below make the page
+   itself white (the app's own background is dark and would otherwise be
+   painted or dropped depending on the browser), and stop tables from being
+   sliced through a row. */
+@page {
+  size: A4;
+  margin: 14mm 12mm;
+}
+
+@media print {
+  html,
+  body,
+  #root {
+    background: #fff;
+    min-height: 0;
+  }
+  #root {
+    padding: 0;
+  }
+  /* Backgrounds and fills are meaning here — the section bands and the status
+     chips — not decoration, so keep them rather than letting the browser
+     helpfully strip them. */
+  .paper {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  /* A person's row, a category block or the sign-off must not straddle a page. */
+  .print-keep {
+    break-inside: avoid;
+  }
+  thead {
+    display: table-header-group;
   }
 }

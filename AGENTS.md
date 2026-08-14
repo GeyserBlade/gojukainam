@@ -119,6 +119,7 @@ npx tsx scripts/test-event-timing.ts      # event/division timing
 npx tsx scripts/test-bout-scoring.ts      # WKF kumite scoring
 npx tsx scripts/test-event-scope.ts       # coordinator authorization, over HTTP
 npx tsx scripts/test-tatami-operator.ts   # mat-operator authorization, over HTTP
+npx tsx scripts/test-entry-sheet.ts       # club entry-confirmation sheet + xlsx, over HTTP
 
 # frontend/ — pure, no database, no DOM
 npx tsx scripts/test-kata.ts              # five-judge flag decision
@@ -126,9 +127,9 @@ npx tsx scripts/test-scoreboard.ts scripts/test-schedule.ts scripts/test-autosch
 npx tsx scripts/test-timing.ts scripts/test-estimator.ts scripts/test-draws.ts
 ```
 
-The two `-scope`/`-operator` suites drive a **running** backend, so start it
-with `ALLOW_DEV_AUTH=true` first; the rest talk to the database directly or are
-pure.
+The `-scope`, `-operator` and `-entry-sheet` suites drive a **running** backend,
+so start it with `ALLOW_DEV_AUTH=true` first; the rest talk to the database
+directly or are pure.
 
 For a realistic tournament to click around in — 8 clubs, 190 athletes, 52
 categories across kata/kumite/team with weight classes, real brackets, and a
