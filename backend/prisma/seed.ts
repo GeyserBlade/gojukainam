@@ -19,8 +19,8 @@ function yearsBetween(a: Date, b: Date) {
   return age;
 }
 
-// Goju Kai progression, ordered white → black. Athlete.beltId is required, so
-// these must exist before any athlete is created.
+// Goju Kai progression, ordered white → black. Athlete.beltId is optional, but
+// the seeded athletes below all carry a grade, so these must exist first.
 const BELTS = [
   { name: "10th Kyu — White", colour: "#f8fafc", order: 10 },
   { name: "9th Kyu — Yellow", colour: "#f5c518", order: 20 },

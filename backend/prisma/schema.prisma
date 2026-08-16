@@ -404,8 +404,14 @@ model Athlete {
   nationality    String
   idType         String?
   idNumber       String?
-  beltId         String
-  belt           Belt      @relation(fields: [beltId], references: [id])
+  // Optional: a club may register an athlete before their grade is known or
+  // confirmed. Null means "not recorded", never "no grade held".
+  // onDelete is pinned to Restrict because Prisma defaults an *optional*
+  // relation to SetNull: deleting a belt would silently regrade every athlete
+  // holding it. BeltService.delete already refuses that with a 409; this keeps
+  // the same promise at the database.
+  beltId         String?
+  belt           Belt?     @relation(fields: [beltId], references: [id], onDelete: Restrict)
   weightKg       Float?
   joinDate       DateTime?
   lastGraded     DateTime?

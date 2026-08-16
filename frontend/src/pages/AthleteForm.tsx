@@ -30,6 +30,12 @@ import { listBelts, type Belt } from "@/lib/belts"
 
 type Mode = "create" | "edit"
 
+// Radix Select has no representation for an empty value, so "no grade" needs a
+// sentinel option. It maps to an explicit `null` on the way out — an empty
+// string would be scrubbed to `undefined` server-side and leave the existing
+// belt in place, which is the opposite of clearing it.
+const NO_BELT = "__none__"
+
 const formatApiError = (err: unknown) => {
   const data = (err as { response?: { data?: { error?: string; details?: Array<{ path?: string; message: string }> } } })?.response?.data
   if (data?.details && Array.isArray(data.details) && data.details.length) {
@@ -324,16 +330,19 @@ const AthleteFormPage = () => {
           </CardHeader>
           <CardContent className="space-y-4">
             <div>
-              <FieldLabel htmlFor="belt" required>Belt</FieldLabel>
+              <FieldLabel htmlFor="belt">Belt</FieldLabel>
               <Select
                 key={form.beltId || "no-belt"}
-                value={form.beltId || ""}
-                onValueChange={(v) => setForm({ ...form, beltId: v })}
+                value={form.beltId || NO_BELT}
+                onValueChange={(v) =>
+                  setForm({ ...form, beltId: v === NO_BELT ? null : v })
+                }
               >
                 <SelectTrigger id="belt" className="w-full">
                   <SelectValue placeholder="Select a belt" />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value={NO_BELT}>Not recorded</SelectItem>
                   {belts.map((b) => (
                     <SelectItem key={b.id} value={b.id}>
                       {b.name || b.colour || b.id}
@@ -341,6 +350,10 @@ const AthleteFormPage = () => {
                   ))}
                 </SelectContent>
               </Select>
+              <p className="mt-1.5 text-xs text-muted-foreground">
+                Optional — leave as "Not recorded" if the athlete's grade isn't
+                known yet.
+              </p>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>

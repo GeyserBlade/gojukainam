@@ -114,6 +114,7 @@ PASS/FAIL and exiting non-zero on failure. Backend suites need Postgres:
 # backend/ — against the local database
 npx tsx scripts/test-draws.ts             # draw engine
 npx tsx scripts/test-kata-results.ts      # kata results + the allowable kata list
+npx tsx scripts/test-athlete-belt.ts      # optional athlete grade: create/edit/import
 npx tsx scripts/test-plan.ts              # plan board
 npx tsx scripts/test-event-timing.ts      # event/division timing
 npx tsx scripts/test-bout-scoring.ts      # WKF kumite scoring
@@ -201,7 +202,9 @@ write the SQL into `prisma/migrations/<timestamp>_<name>/migration.sql`, then
 - **Division** — an age/gender category inside an event (`U8`, `U10`, … plus
   `CategoryType` and optional `WeightClass`).
 - **Club** — a dojo; owns athletes and users. Non-admin users are scoped to one club.
-- **Athlete** — a competitor, has `dob`, `gender`, `beltId`, optional `weightKg`.
+- **Athlete** — a competitor, has `dob`, `gender`, and optional `beltId` and
+  `weightKg`. A null `beltId` means the grade has not been recorded, not that
+  the athlete holds none.
 - **Entry** — one athlete (or team) in one division, with an `EntryStatus`
   (`DRAFT → SUBMITTED → APPROVED`, or `RETURNED`).
 - **Team / TeamMember** — roster for `TEAM_KATA` / `TEAM_KUMITE` entries.

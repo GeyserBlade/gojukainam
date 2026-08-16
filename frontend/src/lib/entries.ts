@@ -11,11 +11,12 @@ export interface Athlete {
     id: string;
     name: string;
   };
-  belt: {
+  // Null when no grade has been recorded for this athlete.
+  belt?: {
     id: string;
     name: string;
     colour?: string | null;
-  };
+  } | null;
 }
 
 export interface Team {

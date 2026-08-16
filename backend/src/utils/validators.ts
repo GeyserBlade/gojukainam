@@ -23,7 +23,9 @@ export const CreateAthlete = z.object({
   nationality: z.string().min(1),
   idType: z.string().optional().nullable(),
   idNumber: z.string().optional().nullable(),
-  beltId: z.string().min(1),
+  // Optional — an athlete may be registered before their grade is known.
+  // Explicit null clears it; an absent key on update leaves it alone.
+  beltId: z.string().min(1).optional().nullable(),
   weightKg: z.number().optional().nullable(),
   joinDate: dateSchema.optional().nullable(),
   lastGraded: dateSchema.optional().nullable(),

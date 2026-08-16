@@ -4,7 +4,10 @@ This file is the handoff between coding agents. It describes what is in flight
 right now, not the permanent architecture (that's
 [`architecture.md`](architecture.md)).
 
-**Last updated:** 2026-08-13 — by Claude Code: **club entry-confirmation
+**Last updated:** 2026-08-16 — by Claude Code: **grade (belt) is now optional
+on an athlete** — on create, on edit, and on import. See "In flight" below.
+
+Previously, 2026-08-13 — by Claude Code: **club entry-confirmation
 sheets** — export one club's entries from the event hub as a printable document
 (Save as PDF) or an Excel workbook, so clubs with no login can validate and sign
 off their roster. See "In flight" below.
@@ -103,6 +106,79 @@ port; those have since been pushed.) Everything here is verified locally against
 a database, never against production data.
 
 ## In flight (uncommitted)
+
+**Grade (belt) is optional on an athlete (2026-08-16).**
+
+Request: make `beltId` optional for athletes, on creation, on editing, and on
+import.
+
+*Null means "not recorded", not "no grade held".* `Athlete.beltId` is nullable
+(`20260816120000_athlete_belt_optional`, a bare `DROP NOT NULL` — every existing
+athlete keeps the belt they have). A club registering someone before their grade
+is known or confirmed no longer has to invent one, which is the thing that made
+the field a lie in the first place.
+
+*The foreign key is pinned to `onDelete: Restrict` in the schema.* Prisma
+defaults an **optional** relation to `SetNull`, so simply relaxing the column
+would have quietly changed what deleting a belt does: instead of being refused,
+it would have regraded every athlete holding it to "not recorded". `BeltService.delete`
+already returns 409 in that case, but that guard is a service, not the database.
+Pinning Restrict means the migration carries no FK statement at all — the
+generated diff dropping and re-adding the constraint was the tell.
+
+*The form sends `null`, never `""`.* Radix `Select` has no empty value, so "no
+grade" is a sentinel option ("Not recorded") that maps to an explicit `null` on
+submit. This matters: `AthleteService`'s `scrubEmptyStrings` turns `""` into
+`undefined`, and Prisma reads `undefined` as "leave this column alone" — an
+empty string would therefore *fail to clear* an existing belt while looking like
+it worked. Both behaviours are asserted, so the mapping can't be simplified back
+into the bug.
+
+*Import treats a missing grade and a wrong one differently.* A blank `beltId`
+cell, or no `beltId` column at all, imports the athlete with no grade recorded;
+a value that is present but doesn't resolve to a belt still fails that row with
+`Belt ID "…" not found`, as before. Silently dropping an unrecognised grade
+would turn a typo into data loss the importer never reports.
+
+Nothing downstream needed changing: every belt render site already went through
+`BeltBadge` or `a.belt?.name`, so a missing grade shows as "—". The frontend
+types (`Athlete.beltId`, and the `belt` shapes on `lib/entries.ts` /
+`lib/events.ts`) were widened to nullable to match the API.
+
+Files: `backend/prisma/schema.prisma`,
+`backend/prisma/migrations/20260816120000_athlete_belt_optional/`,
+`backend/prisma/seed.ts` (a stale comment), `backend/src/utils/validators.ts`,
+`backend/src/services/athlete.service.ts`,
+`backend/scripts/test-athlete-belt.ts` (new); `frontend/src/lib/athletes.ts`,
+`frontend/src/lib/entries.ts`, `frontend/src/lib/events.ts`,
+`frontend/src/pages/AthleteForm.tsx`, `frontend/src/pages/AthleteImport.tsx`.
+
+Verified: `npx tsx scripts/test-athlete-belt.ts` — 29 checks across all three
+doors (create with/without/null/empty belt and an unresolvable one; the read
+paths returning `belt: null`; update clearing with null, setting from none,
+omitting the key, and the empty-string case that must *not* clear; import with a
+belt, a blank cell, no column, an unknown id, and a blank **xlsx** cell, which is
+`undefined` rather than `""` and so is its own path), plus the belt-deletion
+guard at both the service (409) and the database (FK refuses rather than
+nulling). Every other suite re-run clean — backend `test-draws`,
+`test-kata-results`, `test-plan`, `test-event-timing`, `test-bout-scoring`, and
+over HTTP `test-event-scope`, `test-tatami-operator`, `test-entry-sheet`;
+frontend `test-kata`, `test-scoreboard`, `test-schedule`, `test-autoschedule`,
+`test-timing`, `test-estimator`, `test-draws`. Both projects `tsc --noEmit` and
+`npm run build` clean.
+
+Driven in the browser against the local fixture: an athlete created through the
+form with the belt left at "Not recorded" (201, and the row's `beltId` null in
+Postgres), rendering as "—" in the athletes table and in the event hub's entry
+pool; then edited to 6th Kyu — Blue and saved; then cleared back to "Not
+recorded" and saved, with the column confirmed null again. Console clean apart
+from the already-documented benign pre-login `/auth/me` 401s. The test athlete
+was deleted afterwards and the database re-checked (no null-belt rows remain).
+
+**Not verified: screenshots.** The browser pane in this session would not
+composite — screenshots came back blank or stale — so the belt field's new
+"Not recorded" option and its helper line were confirmed through the DOM and the
+network log, not seen rendered.
 
 **Club entry-confirmation sheets — export a club's entries as PDF or Excel
 (2026-08-13).**

@@ -81,7 +81,7 @@ export interface EligibleAthlete {
   belt: {
     name: string | null;
     colour: string | null;
-  };
+  } | null;
 }
 
 /**
@@ -106,7 +106,7 @@ export interface PoolAthlete {
   belt: {
     name: string | null;
     colour: string | null;
-  };
+  } | null;
 }
 
 export interface CreateEventDto {

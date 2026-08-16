@@ -214,7 +214,9 @@ export class AthleteService {
         const data = this.mapImportRow(raw, clubId);
         const parsed = CreateAthlete.parse(data);
         
-        if (!validBeltIds.has(parsed.beltId)) {
+        // A blank beltId column imports as an athlete with no grade recorded;
+        // only a value that was actually supplied has to resolve to a belt.
+        if (parsed.beltId != null && !validBeltIds.has(parsed.beltId)) {
           failures.push({ rowNumber, reason: `Belt ID "${parsed.beltId}" not found` });
           continue;
         }

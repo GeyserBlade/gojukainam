@@ -13,7 +13,7 @@ export type Athlete = {
   nationality: string;
   idType?: string | null;
   idNumber?: string | null;
-  beltId: string;
+  beltId?: string | null;
   weightKg?: number | null;
   joinDate?: string | null;
   lastGraded?: string | null;
@@ -28,7 +28,7 @@ export type Athlete = {
   guardianPhone2?: string | null;
   photoUrl?: string | null;
   club?: { id: string; name: string };
-  belt?: { id: string; name?: string | null; colour?: string | null };
+  belt?: { id: string; name?: string | null; colour?: string | null } | null;
 };
 
 export async function listAthletes(clubId: string, includeInactive = false): Promise<Athlete[]> {

@@ -142,7 +142,9 @@ const AthleteImportPage = () => {
           <p className="text-sm text-muted-foreground mt-2">
             Upload a CSV or Excel file with column headers matching the athlete
             schema (firstName, lastName, dob, gender, beltId, etc.). Invalid rows
-            are skipped and reported below.
+            are skipped and reported below. Grade is optional — leave{" "}
+            <code className="text-foreground">beltId</code> blank, or drop the
+            column entirely, and the athlete imports with no grade recorded.
           </p>
         </div>
 
