@@ -182,6 +182,14 @@ write the SQL into `prisma/migrations/<timestamp>_<name>/migration.sql`, then
 7. **Migrations, seeds and production data**: never run destructive Prisma
    commands (`migrate reset`, `db push --force-reset`) against a database whose
    `DATABASE_URL` you did not personally confirm is local.
+
+   Deleting a whole tournament is the one destructive job that legitimately
+   comes up (an organizer wants to rebuild an event from scratch), and
+   `DELETE /events/:id` refuses any event with entries. Use
+   `scripts/delete-event.ts` — dry run by default, JSON backup first, one
+   transaction, and it never touches athletes, clubs, users, belts or katas.
+   Point `DATABASE_URL` at the target **for that command only**; editing `.env`
+   leaves the next local command aimed at Railway.
 8. **Git**: commit only when the user asks. `main` is the working branch and
    deploys to Railway on push — treat pushes as production releases.
 

@@ -69,3 +69,9 @@ coverage/
 
 # Docker volumes (optional, if you generate data locally)
 docker-data/
+
+# Backups written by scripts/delete-event.ts. These hold real competitor data —
+# names, dates of birth, clubs — and this repo is public. Prefer writing them
+# outside the repo entirely (--backup ~/somewhere/file.json); this rule is the
+# second line of defence, not the first.
+event-backup-*.json
