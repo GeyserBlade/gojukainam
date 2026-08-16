@@ -531,7 +531,8 @@ export const CoordinatorCandidatesQuery = z.object({
 
 // ---------------- Event Templates ----------------
 export const ApplyTemplate = z.object({
-  template: z.enum(["GK_SMALL_NO_WEIGHTS", "NKF_FULL_2026", "NKF_INDIVIDUAL_2026", "NKF_TEAM_2026", "WKF_2024"]),
+  // Keep in step with TEMPLATES in data/wkf-template.ts.
+  template: z.enum(["GK_NAM_2026", "GK_SMALL_NO_WEIGHTS", "NKF_FULL_2026", "NKF_INDIVIDUAL_2026", "NKF_TEAM_2026", "WKF_2024"]),
 });
 
 // ---------------------------------------------------------------------------

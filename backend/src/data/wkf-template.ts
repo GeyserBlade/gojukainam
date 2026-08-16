@@ -263,10 +263,107 @@ const GK_SMALL_NO_WEIGHTS_DIVISIONS: DivisionDef[] = GK_SMALL_AGES.flatMap((age)
 );
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Goju Kai Namibia 2026
+// ═══════════════════════════════════════════════════════════════════════════
+// The federation's own category list, written the way it publishes it. Two
+// things about the shape:
+//
+//   - A weight split is its own category here, not two `WeightClass` rows on a
+//     shared division: "KUMITE BOYS 12-13 U48kg" and "…O48kg" are two
+//     divisions. That is how the list is published, and it is also the only
+//     shape the hub can enrol into today — nothing in the entry UI picks a
+//     weight class, so a division carrying weight classes can't take entries.
+//     If a weight-class picker lands, these pairs are the first thing to fold
+//     back into single divisions.
+//   - Para categories run on their own; nobody competes in both.
+//
+// Cadet/Junior/Senior are the same age bands the rest of this file uses.
+
+const GKN_CADET = { minAge: 14, maxAge: 15 };
+const GKN_JUNIOR = { minAge: 16, maxAge: 17 };
+const GKN_SENIOR = { minAge: 18, maxAge: 99 };
+
+/** A single year unless a second age is given. */
+const gknAges = (minAge: number, maxAge = minAge) => ({ minAge, maxAge });
+
+/** Keys are derived from the name, so the two can't drift apart. */
+const gkn = (
+  category: "KATA" | "KUMITE",
+  gender: "Male" | "Female",
+  name: string,
+  ages: { minAge: number; maxAge: number },
+  notes?: string,
+): DivisionDef => ({
+  key: `GKN_${name.toUpperCase().replace(/[^A-Z0-9]+/g, "_").replace(/^_+|_+$/g, "")}`,
+  name,
+  minAge: ages.minAge,
+  maxAge: ages.maxAge,
+  gender,
+  category,
+  ...(notes ? { notes } : {}),
+});
+
+const GK_NAM_2026_DIVISIONS: DivisionDef[] = [
+  // ── Kumite, boys ──────────────────────────────────────────────────────────
+  gkn("KUMITE", "Male", "KUMITE BOYS 4-6", gknAges(4, 6)),
+  gkn("KUMITE", "Male", "KUMITE BOYS 7", gknAges(7)),
+  gkn("KUMITE", "Male", "KUMITE BOYS 8", gknAges(8)),
+  gkn("KUMITE", "Male", "KUMITE BOYS 9", gknAges(9)),
+  gkn("KUMITE", "Male", "KUMITE BOYS 10", gknAges(10)),
+  gkn("KUMITE", "Male", "KUMITE BOYS 11", gknAges(11)),
+  gkn("KUMITE", "Male", "KUMITE BOYS 12-13 U48kg", gknAges(12, 13), "Under 48kg"),
+  gkn("KUMITE", "Male", "KUMITE BOYS 12-13 O48kg", gknAges(12, 13), "Over 48kg"),
+
+  // ── Kumite, girls ─────────────────────────────────────────────────────────
+  gkn("KUMITE", "Female", "KUMITE GIRLS 4-7", gknAges(4, 7)),
+  gkn("KUMITE", "Female", "KUMITE GIRLS 8-9", gknAges(8, 9)),
+  gkn("KUMITE", "Female", "KUMITE GIRLS 10-11 U42kg", gknAges(10, 11), "Under 42kg"),
+  gkn("KUMITE", "Female", "KUMITE GIRLS 10-11 O42kg", gknAges(10, 11), "Over 42kg"),
+  gkn("KUMITE", "Female", "KUMITE GIRLS 12-13", gknAges(12, 13)),
+
+  // ── Kumite, cadet / junior / senior ───────────────────────────────────────
+  gkn("KUMITE", "Male", "KUMITE MALE CADET U50kg", GKN_CADET, "Under 50kg"),
+  gkn("KUMITE", "Male", "KUMITE MALE CADET O50kg", GKN_CADET, "Over 50kg"),
+  gkn("KUMITE", "Male", "KUMITE MALE CADET (PARA)", GKN_CADET, "Para category — its own athletes"),
+  gkn("KUMITE", "Male", "KUMITE MALE JUNIOR U60kg", GKN_JUNIOR, "Under 60kg"),
+  gkn("KUMITE", "Male", "KUMITE MALE JUNIOR O60kg", GKN_JUNIOR, "Over 60kg"),
+  gkn("KUMITE", "Male", "KUMITE MALE SENIOR", GKN_SENIOR),
+  gkn("KUMITE", "Female", "KUMITE FEMALE CADET U56kg", GKN_CADET, "Under 56kg"),
+  gkn("KUMITE", "Female", "KUMITE FEMALE CADET O56kg", GKN_CADET, "Over 56kg"),
+  gkn("KUMITE", "Female", "KUMITE FEMALE JUNIOR", GKN_JUNIOR),
+  gkn("KUMITE", "Female", "KUMITE FEMALE SENIOR", GKN_SENIOR),
+
+  // ── Kata, boys ────────────────────────────────────────────────────────────
+  gkn("KATA", "Male", "KATA BOYS 4-6", gknAges(4, 6)),
+  gkn("KATA", "Male", "KATA BOYS 7", gknAges(7)),
+  gkn("KATA", "Male", "KATA BOYS 8", gknAges(8)),
+  gkn("KATA", "Male", "KATA BOYS 9", gknAges(9)),
+  gkn("KATA", "Male", "KATA BOYS 10", gknAges(10)),
+  gkn("KATA", "Male", "KATA BOYS 11", gknAges(11)),
+  gkn("KATA", "Male", "KATA BOYS 12-13", gknAges(12, 13)),
+
+  // ── Kata, girls ───────────────────────────────────────────────────────────
+  gkn("KATA", "Female", "KATA GIRLS 4-7", gknAges(4, 7)),
+  gkn("KATA", "Female", "KATA GIRLS 8-9", gknAges(8, 9)),
+  gkn("KATA", "Female", "KATA GIRLS 10-11", gknAges(10, 11)),
+  gkn("KATA", "Female", "KATA GIRLS 12-13", gknAges(12, 13)),
+
+  // ── Kata, cadet / junior / senior ─────────────────────────────────────────
+  gkn("KATA", "Male", "KATA MALE CADET", GKN_CADET),
+  gkn("KATA", "Male", "KATA MALE CADET (PARA)", GKN_CADET, "Para category — its own athletes"),
+  gkn("KATA", "Male", "KATA MALE JUNIOR", GKN_JUNIOR),
+  gkn("KATA", "Male", "KATA MALE SENIOR", GKN_SENIOR),
+  gkn("KATA", "Female", "KATA FEMALE CADET", GKN_CADET),
+  gkn("KATA", "Female", "KATA FEMALE JUNIOR", GKN_JUNIOR),
+  gkn("KATA", "Female", "KATA FEMALE SENIOR", GKN_SENIOR),
+];
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Exports
 // ═══════════════════════════════════════════════════════════════════════════
 
 export const TEMPLATES = {
+  GK_NAM_2026: GK_NAM_2026_DIVISIONS,
   GK_SMALL_NO_WEIGHTS: GK_SMALL_NO_WEIGHTS_DIVISIONS,
   NKF_FULL_2026: NKF_FULL_2026_DIVISIONS,
   NKF_INDIVIDUAL_2026: NKF_INDIVIDUAL_DIVISIONS,
@@ -288,6 +385,13 @@ const countWeights = (divs: readonly DivisionDef[]) =>
   divs.reduce((sum, d) => sum + (d.weightClasses?.length ?? 0), 0);
 
 export const TEMPLATE_META: TemplateMeta[] = [
+  {
+    id: "GK_NAM_2026",
+    name: "Goju Kai Namibia 2026",
+    description: "The federation's 2026 category list — kata & kumite from age 4 to senior, para events, weight splits as separate categories",
+    divisionCount: GK_NAM_2026_DIVISIONS.length,
+    weightClassCount: countWeights(GK_NAM_2026_DIVISIONS),
+  },
   {
     id: "GK_SMALL_NO_WEIGHTS",
     name: "Goju Kai Small No-weights",

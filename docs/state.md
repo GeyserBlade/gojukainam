@@ -4,7 +4,11 @@ This file is the handoff between coding agents. It describes what is in flight
 right now, not the permanent architecture (that's
 [`architecture.md`](architecture.md)).
 
-**Last updated:** 2026-08-16 — by Claude Code: **grade (belt) is now optional
+**Last updated:** 2026-08-16 — by Claude Code: **a `GK_NAM_2026` division
+template** — the federation's own 41-category list, applyable to any event from
+the event hub. See "In flight" below.
+
+Previously, same day — by Claude Code: **grade (belt) is now optional
 on an athlete** — on create, on edit, and on import. See "In flight" below.
 
 Previously, 2026-08-13 — by Claude Code: **club entry-confirmation
@@ -106,6 +110,45 @@ port; those have since been pushed.) Everything here is verified locally against
 a database, never against production data.
 
 ## In flight (uncommitted)
+
+**`GK_NAM_2026` division template (2026-08-16).**
+
+Request: put the federation's own category list on production as a template, so
+an organizer can stand up the real tournament from the event hub instead of
+typing 41 divisions by hand.
+
+*41 categories: 23 kumite, 18 kata, ages 4 to senior, two para events.*
+Cadet/Junior/Senior take the same age bands the rest of `data/wkf-template.ts`
+uses (14-15 / 16-17 / 18-99). Everything else is a literal age band off the
+published list, single-year where the list names one year.
+
+*A weight split is its own division here, not a `WeightClass` row.* "KUMITE BOYS
+12-13 U48kg" and "…O48kg" are two divisions with no weight classes between
+them. Two reasons, and only one of them is taste: the federation publishes them
+as separate category names, **and** a division carrying weight classes still
+can't be enrolled from the hub — nothing in the entry UI picks a class, so
+`EntryService.create` 400s (see "Known rough edges" in `AGENTS.md`, still open).
+Modelling them as `WeightClass` rows the way `seed-championships-tournament.ts`
+does would have produced a template that looks right and takes no entries. When
+a weight-class picker lands, these six pairs are the first thing to fold back
+into single divisions; the comment above the list says so.
+
+*Division keys are derived from the name* (`GKN_KUMITE_BOYS_12_13_U48KG`), so
+the two can't drift. `applyTemplate` dedupes on `key:gender`, which makes a
+re-apply a no-op rather than a second set of 41.
+
+The template enum in `validators.ts` is hand-maintained and separate from
+`TEMPLATES` — adding a template means editing both, or the API rejects the name
+it advertises. Carries a comment now.
+
+Files: `backend/src/data/wkf-template.ts`, `backend/src/utils/validators.ts`.
+No frontend change — the picker on `/events` renders whatever
+`GET /events/templates` returns.
+
+Verified: `npx tsc --noEmit` clean in `backend/`. Against the local database, a
+throwaway event applied the template twice: 41 divisions / 0 weight classes
+created, then 41 skipped and 0 created; 41 rows in the database, all keys
+unique; event deleted afterwards. Not verified in the browser.
 
 **Grade (belt) is optional on an athlete (2026-08-16).**
 
