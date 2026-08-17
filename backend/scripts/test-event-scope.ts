@@ -315,6 +315,16 @@ async function main() {
     const stillThere = await prisma.event.findUnique({ where: { id: granted.id } });
     check("a blocked delete doesn't partially clean anything up — event still exists", !!stillThere);
 
+    // Invoice.eventId is ON DELETE RESTRICT same as Entry/Team/Division/
+    // WeightClass, missed in the first pass of this fix (nothing in the app
+    // creates one today, so it never showed up in a real event, but the
+    // constraint is real and scripts/delete-event.ts already knew to clear
+    // it). Create one here so a regression shows up as a failing delete,
+    // not a silent gap.
+    const invoice = await prisma.invoice.create({
+      data: { eventId: granted.id, clubId: clubA.id, totalCents: 5000 },
+    });
+
     // Withdraw the remaining active entries — only RETURNED should be left.
     const withdrawRestStatus = await call("POST", "/review/bulk-status", asAdmin, {
       eventId: granted.id,
@@ -333,15 +343,17 @@ async function main() {
       status: allowedRes.status,
     });
 
-    const [eventGone, entriesGone, divisionGone, drawGone] = await Promise.all([
+    const [eventGone, entriesGone, divisionGone, drawGone, invoiceGone] = await Promise.all([
       prisma.event.findUnique({ where: { id: granted.id } }),
       prisma.entry.count({ where: { eventId: granted.id } }),
       prisma.division.findUnique({ where: { id: division.id } }),
       drawBody ? prisma.draw.findUnique({ where: { id: drawBody.id } }) : Promise.resolve(null),
+      prisma.invoice.findUnique({ where: { id: invoice.id } }),
     ]);
     check("event row gone", eventGone === null, eventGone);
     check("the RETURNED entries cascaded away too, not left orphaned", entriesGone === 0, { entriesGone });
     check("division (RESTRICT-guarded, no schema cascade) cleaned up explicitly", divisionGone === null, divisionGone);
+    check("invoice (RESTRICT-guarded, the FK the first pass of this fix missed) cleaned up too", invoiceGone === null, invoiceGone);
     if (drawBody) {
       check("the draw made earlier (with its slots/bouts) cascaded away via Division", drawGone === null, drawGone);
     }
@@ -357,6 +369,7 @@ async function main() {
     for (const id of [granted.id, other.id]) {
       await prisma.eventCoordinator.deleteMany({ where: { eventId: id } });
       await prisma.mat.deleteMany({ where: { eventId: id } });
+      await prisma.invoice.deleteMany({ where: { eventId: id } });
       await prisma.weightClass.deleteMany({ where: { eventId: id } });
       await prisma.division.deleteMany({ where: { eventId: id } });
       await prisma.event.deleteMany({ where: { id } });

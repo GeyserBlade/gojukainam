@@ -27,6 +27,27 @@ import {
 
 export const router = Router();
 
+// Mirrors routes/entries.ts's logExpectedError: handlers below that catch an
+// expected {status, message} error respond directly rather than calling
+// next(err), so the global errorHandler's console.error never sees them and
+// Railway logs stay empty. Delete is the one route on this file where that
+// silence has actually cost investigation time (see docs/state.md), so it
+// gets its own logging for both the expected block and any raw failure that
+// still reaches the generic 500 path — full Prisma error code + stack, so a
+// missed FK cascade shows up immediately instead of as a bare 500.
+function logEventDeleteFailure(eventId: string, userId: string | undefined, err: any) {
+  if (err?.status && err?.message) {
+    console.warn(`[events:delete] ${err.status} ${err.message} — eventId=${eventId} user=${userId ?? "?"}`);
+    return;
+  }
+  console.error(
+    `[events:delete] unexpected failure — eventId=${eventId} user=${userId ?? "?"} ` +
+      `code=${err?.code ?? "?"} message=${err?.message ?? String(err)}` +
+      (err?.meta ? ` meta=${JSON.stringify(err.meta)}` : ""),
+  );
+  console.error(err?.stack ?? err);
+}
+
 // ============ Events CRUD ============
 
 // list events (any logged user)
@@ -111,10 +132,12 @@ router.post("/:id/public-token", requireEventManager({ in: "params", key: "id" }
 
 // delete event (admin only)
 router.delete("/:id", requireRoles("SUPERADMIN", "ADMIN"), validate(IdParam, "params"), async (req, res, next) => {
+  const eventId = getParam(req.params.id);
   try {
-    await EventService.delete(getParam(req.params.id));
+    await EventService.delete(eventId);
     res.status(204).send();
   } catch (err: any) {
+    logEventDeleteFailure(eventId, req.user?.id, err);
     if (err.status && err.message) {
       return res.status(err.status).json({ error: err.message });
     }

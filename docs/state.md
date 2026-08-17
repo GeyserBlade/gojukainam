@@ -4,10 +4,15 @@ This file is the handoff between coding agents. It describes what is in flight
 right now, not the permanent architecture (that's
 [`architecture.md`](architecture.md)).
 
-**Last updated:** 2026-08-16 — by Claude Code: **event deletion no longer
+**Last updated:** 2026-08-17 — by Claude Code: follow-up on the event-delete
+fix below — a **second, missed FK** (`Invoice.eventId`, also RESTRICT) was
+still capable of blocking a real event's delete after the first pass, plus a
+transaction-timeout risk over Railway's DB proxy. Both fixed; the delete
+route now logs verbosely on any failure. See "In flight" below.
+
+Previously, 2026-08-16 — by Claude Code: **event deletion no longer
 blocked by RETURNED (withdrawn) entries** — only active entries
 (DRAFT/SUBMITTED/APPROVED) block delete now, and the error names which ones.
-See "In flight" below.
 
 Previously, same day — by Claude Code: **a `GK_NAM_2026` division
 template** — the federation's own 41-category list, applyable to any event from
@@ -115,6 +120,106 @@ port; those have since been pushed.) Everything here is verified locally against
 a database, never against production data.
 
 ## In flight (uncommitted)
+
+**Event delete follow-up: a second missed FK, plus verbose failure logging
+(2026-08-17).**
+
+User still hit an error deleting an event with 4 RETURNED entries after the
+2026-08-16 fix below. Investigated in order:
+
+1. **Was the fix even deployed?** `git log origin/main -3` at the time:
+   `5270514` (the fix) *is* the tip of `origin/main`, pushed 2026-08-17
+   11:54:35. Can't check Railway's deploy status directly from here — no API
+   access — so this stays a real possibility if the report came in before a
+   deploy finished, but the commit is on `main` and nothing since has
+   touched this code.
+2. **Re-audited every FK in the applied migration SQL** (not just
+   `schema.prisma`) for anything rooted at Event, Division, WeightClass,
+   Team, Entry, Draw, Invoice, KataPerformance. Found it:
+   `Invoice.eventId → Event` is `ON DELETE RESTRICT`, exactly like
+   Entry/Team/Division/WeightClass, and the first pass of this fix left it
+   alone on purpose ("financial records should keep blocking deletion").
+   That reasoning doesn't actually hold up: this `Invoice` model is
+   event-scoped per-club billing (`eventId` + `clubId` + `totalCents`), not
+   the club-membership `MemberInvoice` ledger — there's no other event for
+   an event-scoped invoice to outlive, so it belongs to the event's own
+   cleanup, not a separate financial safeguard. (Also found: nothing in
+   `backend/src` currently creates a row in this `Invoice` model — the whole
+   thing may be vestigial — but the constraint is real regardless of
+   whether it's populated today, and this repo already had one other place
+   that knew this: `scripts/delete-event.ts`, added 2026-08-16 as an
+   out-of-band CLI workaround specifically because the API guard was known
+   broken. Its commit message names the exact same gap — divisions, weight
+   classes, teams, *and* invoices — that the first pass of the API fix only
+   partially closed. Should have read that script before writing the first
+   pass; didn't.)
+3. **Traced the cleanup order for edge cases** (a Team with no TeamMembers,
+   an event with no Teams at all): `deleteMany` is always safe on zero
+   matches in Prisma, so an absent relation was never the issue — the gap
+   was specifically the one RESTRICT-guarded table the transaction never
+   touched.
+4. **No error text was available**, so verbose logging was added rather than
+   guessed at — see below.
+
+**Fixes:**
+- `EventService.delete`'s transaction now also does
+  `tx.invoice.deleteMany({ where: { eventId: id } })`, positioned to mirror
+  `scripts/delete-event.ts`'s order (no RESTRICT-guarded children of its
+  own, so placement otherwise doesn't matter).
+- **Timeout, a second real risk surfaced by re-reading that same script's
+  commit message**: Prisma's interactive-transaction default is 5 seconds,
+  and this transaction is six separate round trips over Railway's DB proxy.
+  `delete-event.ts`'s commit documents hitting P2028 on exactly that default
+  for a real tournament and gives itself a 10-minute budget as a CLI tool.
+  The API route can't reasonably hang an HTTP request that long, so it gets
+  `{ timeout: 20_000, maxWait: 10_000 }` instead — generous for a typical
+  event's handful of rows, still bounded. Not confirmed as *the* cause this
+  time (no error text to check against), but a real, previously-undocumented
+  gap in the API path that the CLI sibling had already identified and
+  the API fix hadn't inherited.
+- **Logging** (`routes/events.ts`): a new `logEventDeleteFailure` mirrors
+  `routes/entries.ts`'s `logExpectedError` pattern (that file's own comment
+  explains why: routes that catch `{status, message}` and respond directly
+  never reach the global `errorHandler`'s `console.error`, so Railway logs
+  stayed empty for exactly this kind of failure). Logs the expected 400
+  block too (previously silent), and for anything unexpected — a raw Prisma
+  error — logs `err.code`, `err.message`, `err.meta`, and the full stack,
+  labeled `[events:delete]` so it's easy to find. Verified this actually
+  works by deliberately breaking the fix locally (removed the new
+  `invoice.deleteMany` line) and confirming the log line read
+  `code=P2003` — see Verification.
+
+Files: `backend/src/services/event.service.ts`, `backend/src/routes/
+events.ts`, `backend/scripts/test-event-scope.ts`. No schema change — same
+conclusion as the first pass: the RESTRICT constraints are correct, the fix
+is cleanup completeness and transaction budget in the service.
+
+### Verification (run 2026-08-17)
+
+`backend` / `frontend`: `npx tsc --noEmit` both clean.
+
+`npx tsx scripts/test-event-scope.ts`, extended with one more check (now 41
+total, up from 40): creates a real `Invoice` row against the same `granted`
+event used by the existing entries-based checks, confirms it survives a
+blocked delete untouched (same as the division/entries checks already did),
+then confirms it's gone after the delete succeeds. Deliberately verified
+this check is load-bearing, not just passing by construction: temporarily
+removed the `tx.invoice.deleteMany` line, re-ran against a live local
+server, watched it fail exactly as the user must have — `500`, `P2003` on
+`Invoice_eventId_fkey` (then transitively on `Invoice_clubId_fkey` when the
+test's own cleanup tried to remove the now-orphaned club) — confirmed the
+`[events:delete] unexpected failure … code=P2003` log line appeared, then
+restored the fix and re-ran clean. `test-draws.ts` and `test-bout-scoring.ts`
+re-run clean (0 failures) as regressions.
+
+**Not verified in-browser** — same as the first pass, and still true here:
+this was chased down and fixed via the test script and a deliberate local
+break-and-restore, not through the Events admin UI. Also still unconfirmed:
+whether Railway had actually finished deploying `5270514` at the moment the
+user hit the error (possibility 1 above) — worth checking the Railway
+dashboard's deploy log against the 11:54:35 push time before assuming this
+follow-up was strictly necessary versus just a deploy-lag false alarm. Both
+can be true at once and both are now fixed either way.
 
 **Event delete: RETURNED entries no longer block it (2026-08-16).**
 

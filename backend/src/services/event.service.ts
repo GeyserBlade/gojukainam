@@ -144,27 +144,45 @@ export class EventService {
 
     // Nothing active remains — any entries left are RETURNED and, along with
     // the event's own setup data, are cleared out here rather than relying on
-    // schema cascade: Entry/Team/WeightClass/Division all reference Event (or
-    // each other) with ON DELETE RESTRICT, not CASCADE, so `event.delete`
-    // would otherwise fail with a foreign-key error the moment any of them
-    // still exists. Draw/DrawSlot/Bout/KataPerformance are left untouched —
-    // they cascade automatically once Division/Event goes. Invoice is
-    // deliberately left alone too: it's also RESTRICT, and financial records
-    // should keep blocking deletion rather than being silently wiped.
+    // schema cascade: Entry/Team/WeightClass/Division/Invoice all reference
+    // Event (or each other) with ON DELETE RESTRICT, not CASCADE — confirmed
+    // against every applied migration's FK, not just schema.prisma, since
+    // Prisma omits `onDelete` from the generated SQL when it's the default,
+    // which for a required relation is RESTRICT — so `event.delete` would
+    // otherwise fail with a foreign-key error the moment any of them still
+    // exists. (`Invoice` here is the event-scoped per-club billing row, not
+    // `MemberInvoice` — nothing in the app currently creates one, but the
+    // constraint is real, so it's cleared same as the rest rather than left
+    // as a latent gap. `MemberInvoice` is untouched: club membership billing
+    // outlives any one event.) Draw/DrawSlot/Bout/KataPerformance are left
+    // untouched — they cascade automatically once Division/Event goes.
     //
     // Order matters, each step clears the FK the next step's delete needs
     // gone: TeamMember -> Team (TeamMember.teamId is RESTRICT), then Entry
     // and WeightClass -> Division (Entry.divisionId and Team.divisionId are
     // RESTRICT; WeightClass.divisionId is SET NULL so order vs. Division
-    // doesn't matter, but it's grouped here for clarity).
-    await prisma.$transaction(async (tx) => {
-      await tx.teamMember.deleteMany({ where: { team: { eventId: id } } });
-      await tx.team.deleteMany({ where: { eventId: id } });
-      await tx.entry.deleteMany({ where: { eventId: id } });
-      await tx.weightClass.deleteMany({ where: { eventId: id } });
-      await tx.division.deleteMany({ where: { eventId: id } });
-      await tx.event.delete({ where: { id } });
-    });
+    // doesn't matter, but it's grouped here for clarity). Invoice has no
+    // RESTRICT-guarded children of its own, so it can go anywhere before the
+    // event itself; placed here to mirror scripts/delete-event.ts's order.
+    //
+    // Explicit timeout: Prisma's interactive-transaction default is 5s, and
+    // this is six separate round trips over Railway's DB proxy — the CLI
+    // sibling of this cleanup (scripts/delete-event.ts) documents hitting
+    // P2028 on exactly that default for a real event. 20s comfortably covers
+    // a typical event's handful of rows without leaving an HTTP request that
+    // will never succeed hanging indefinitely.
+    await prisma.$transaction(
+      async (tx) => {
+        await tx.teamMember.deleteMany({ where: { team: { eventId: id } } });
+        await tx.team.deleteMany({ where: { eventId: id } });
+        await tx.invoice.deleteMany({ where: { eventId: id } });
+        await tx.entry.deleteMany({ where: { eventId: id } });
+        await tx.weightClass.deleteMany({ where: { eventId: id } });
+        await tx.division.deleteMany({ where: { eventId: id } });
+        await tx.event.delete({ where: { id } });
+      },
+      { timeout: 20_000, maxWait: 10_000 },
+    );
   }
 
   // ============ Divisions ============
