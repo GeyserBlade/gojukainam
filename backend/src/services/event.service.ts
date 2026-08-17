@@ -114,14 +114,57 @@ export class EventService {
     });
   }
 
+  /**
+   * RETURNED is an audit-trail state, not an active one — it doesn't block
+   * draws elsewhere in the app, so it shouldn't block event deletion either.
+   * Only DRAFT/SUBMITTED/APPROVED entries represent something a coordinator
+   * could still be mid-workflow on.
+   */
   static async delete(id: string) {
-    // Check if event has entries
-    const count = await prisma.entry.count({ where: { eventId: id } });
-    if (count > 0) {
-      throw { status: 400, message: `Cannot delete event with ${count} existing entries` };
+    const activeGroups = await prisma.entry.groupBy({
+      by: ["status"],
+      where: { eventId: id, status: { in: ["DRAFT", "SUBMITTED", "APPROVED"] } },
+      _count: true,
+    });
+    const total = activeGroups.reduce((sum, g) => sum + g._count, 0);
+    if (total > 0) {
+      const STATUS_LABEL: Record<string, string> = {
+        DRAFT: "draft",
+        SUBMITTED: "submitted",
+        APPROVED: "approved",
+      };
+      const breakdown = activeGroups
+        .map((g) => `${g._count} ${STATUS_LABEL[g.status] ?? g.status.toLowerCase()}`)
+        .join(", ");
+      throw {
+        status: 400,
+        message: `Cannot delete event: ${total} ${total === 1 ? "entry is" : "entries are"} still active (${breakdown}). Withdraw or return them first.`,
+      };
     }
 
-    return prisma.event.delete({ where: { id } });
+    // Nothing active remains — any entries left are RETURNED and, along with
+    // the event's own setup data, are cleared out here rather than relying on
+    // schema cascade: Entry/Team/WeightClass/Division all reference Event (or
+    // each other) with ON DELETE RESTRICT, not CASCADE, so `event.delete`
+    // would otherwise fail with a foreign-key error the moment any of them
+    // still exists. Draw/DrawSlot/Bout/KataPerformance are left untouched —
+    // they cascade automatically once Division/Event goes. Invoice is
+    // deliberately left alone too: it's also RESTRICT, and financial records
+    // should keep blocking deletion rather than being silently wiped.
+    //
+    // Order matters, each step clears the FK the next step's delete needs
+    // gone: TeamMember -> Team (TeamMember.teamId is RESTRICT), then Entry
+    // and WeightClass -> Division (Entry.divisionId and Team.divisionId are
+    // RESTRICT; WeightClass.divisionId is SET NULL so order vs. Division
+    // doesn't matter, but it's grouped here for clarity).
+    await prisma.$transaction(async (tx) => {
+      await tx.teamMember.deleteMany({ where: { team: { eventId: id } } });
+      await tx.team.deleteMany({ where: { eventId: id } });
+      await tx.entry.deleteMany({ where: { eventId: id } });
+      await tx.weightClass.deleteMany({ where: { eventId: id } });
+      await tx.division.deleteMany({ where: { eventId: id } });
+      await tx.event.delete({ where: { id } });
+    });
   }
 
   // ============ Divisions ============

@@ -293,6 +293,58 @@ async function main() {
     await prisma.eventCoordinator.deleteMany({ where: { eventId: granted.id, userId: devUser.id } });
     console.log("\nAfter revocation:");
     check("review queue on A     -> 403", (await call("GET", `/review?eventId=${granted.id}`, asCoordinator)) === 403);
+
+    // ── Event delete: RETURNED entries don't block, active ones do ─────────
+    // `granted` currently holds entryA (APPROVED), entryC (APPROVED), and
+    // entryB (RETURNED, withdrawn earlier) — exactly the mixed state the
+    // bug report was about: some active, one returned, delete refused.
+    console.log("\nEvent delete: RETURNED doesn't block, active entries do:");
+    const blockedRes = await fetch(`${BASE}/events/${granted.id}`, { method: "DELETE", headers: asAdmin });
+    const blockedBody = blockedRes.ok ? null : await blockedRes.json().catch(() => null);
+    check("delete blocked while active entries remain -> 400", blockedRes.status === 400, {
+      status: blockedRes.status,
+      blockedBody,
+    });
+    check(
+      "message breaks down the active entries by status, not just a count",
+      typeof blockedBody?.error === "string" &&
+        blockedBody.error.includes("2 approved") &&
+        blockedBody.error.toLowerCase().includes("active"),
+      blockedBody,
+    );
+    const stillThere = await prisma.event.findUnique({ where: { id: granted.id } });
+    check("a blocked delete doesn't partially clean anything up — event still exists", !!stillThere);
+
+    // Withdraw the remaining active entries — only RETURNED should be left.
+    const withdrawRestStatus = await call("POST", "/review/bulk-status", asAdmin, {
+      eventId: granted.id,
+      ids: [entryA.id, entryC.id],
+      status: "RETURNED",
+      reason: "Test cleanup",
+    });
+    check("withdraw the remaining active entries -> 200", withdrawRestStatus === 200, { withdrawRestStatus });
+    const stillActive = await prisma.entry.count({
+      where: { eventId: granted.id, status: { in: ["DRAFT", "SUBMITTED", "APPROVED"] } },
+    });
+    check("no active entries remain (all three now RETURNED)", stillActive === 0, { stillActive });
+
+    const allowedRes = await fetch(`${BASE}/events/${granted.id}`, { method: "DELETE", headers: asAdmin });
+    check("delete now succeeds with only RETURNED entries -> 2xx", [200, 204].includes(allowedRes.status), {
+      status: allowedRes.status,
+    });
+
+    const [eventGone, entriesGone, divisionGone, drawGone] = await Promise.all([
+      prisma.event.findUnique({ where: { id: granted.id } }),
+      prisma.entry.count({ where: { eventId: granted.id } }),
+      prisma.division.findUnique({ where: { id: division.id } }),
+      drawBody ? prisma.draw.findUnique({ where: { id: drawBody.id } }) : Promise.resolve(null),
+    ]);
+    check("event row gone", eventGone === null, eventGone);
+    check("the RETURNED entries cascaded away too, not left orphaned", entriesGone === 0, { entriesGone });
+    check("division (RESTRICT-guarded, no schema cascade) cleaned up explicitly", divisionGone === null, divisionGone);
+    if (drawBody) {
+      check("the draw made earlier (with its slots/bouts) cascaded away via Division", drawGone === null, drawGone);
+    }
   } finally {
     // Entries have no cascade from Division/Club, so they must go before the
     // division/event cleanup below or those deletes hit a live FK reference.

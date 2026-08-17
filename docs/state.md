@@ -4,9 +4,14 @@ This file is the handoff between coding agents. It describes what is in flight
 right now, not the permanent architecture (that's
 [`architecture.md`](architecture.md)).
 
-**Last updated:** 2026-08-16 — by Claude Code: **a `GK_NAM_2026` division
+**Last updated:** 2026-08-16 — by Claude Code: **event deletion no longer
+blocked by RETURNED (withdrawn) entries** — only active entries
+(DRAFT/SUBMITTED/APPROVED) block delete now, and the error names which ones.
+See "In flight" below.
+
+Previously, same day — by Claude Code: **a `GK_NAM_2026` division
 template** — the federation's own 41-category list, applyable to any event from
-the event hub. See "In flight" below.
+the event hub.
 
 Previously, same day — by Claude Code: **grade (belt) is now optional
 on an athlete** — on create, on edit, and on import. See "In flight" below.
@@ -110,6 +115,89 @@ port; those have since been pushed.) Everything here is verified locally against
 a database, never against production data.
 
 ## In flight (uncommitted)
+
+**Event delete: RETURNED entries no longer block it (2026-08-16).**
+
+Report: a coordinator had an event whose entries were all RETURNED
+(withdrawn) — nothing active — but delete still refused with "Cannot delete
+event with N existing entries".
+
+**Root cause, exactly as reported.** `EventService.delete` (`backend/src/
+services/event.service.ts`) did `prisma.entry.count({ where: { eventId } })`
+and blocked on any count > 0 — RETURNED counted the same as APPROVED. Nothing
+else in the app treats RETURNED that way: it doesn't block draws, doesn't
+block regenerating a bracket, doesn't block anything — it's the audit-trail
+state for "used to be here, isn't now" (see the withdrawal feature,
+`docs/state.md` history). The delete guard was the one place still treating
+it as live.
+
+**A second, deeper problem the fix had to also solve, or the guard fix alone
+would just trade one error for an uglier one.** Checked every FK a real event
+actually has once entries are cleared: `Entry.eventId`, `Division.eventId`,
+`WeightClass.eventId`, and `Team.eventId` are all `ON DELETE RESTRICT` in the
+schema (confirmed against the applied migration SQL, not just
+`schema.prisma` — Prisma omits `onDelete` entirely when it's the default,
+which for a required relation is RESTRICT, not CASCADE). So even a real event
+with zero *active* entries still has divisions/weight classes from setup, and
+`prisma.event.delete()` would have failed on those with a raw, uncaught
+Prisma FK error the moment the entries check was loosened. Draw/DrawSlot/Bout/
+KataPerformance were already safe (cascade from Division/Draw/Entry), and
+Invoice is also RESTRICT but deliberately left alone — financial records
+should keep blocking deletion, not get silently wiped alongside a returned
+entry.
+
+**Fix:** `EventService.delete` now:
+1. Counts active entries via `groupBy(["status"])` filtered to `DRAFT`/
+   `SUBMITTED`/`APPROVED`. Zero → proceed. Otherwise throws `{status: 400,
+   message: "Cannot delete event: N entries are still active (X approved, Y
+   submitted). Withdraw or return them first."}` — a breakdown, not just a
+   count, so the coordinator knows what to go withdraw/decline.
+2. In a `prisma.$transaction`: deletes `TeamMember` → `Team` → `Entry` →
+   `WeightClass` → `Division` → `Event`, in that order because each step
+   clears the RESTRICT-guarded FK the next step's delete needs gone
+   (`TeamMember.teamId`, `Team.divisionId`, `Entry.divisionId` are all
+   RESTRICT). Draw and everything under it cascade automatically once
+   Division goes; nothing explicit needed there. The transaction means a
+   failure partway (e.g., an Invoice still present) leaves the event exactly
+   as it was — no partial cleanup — rather than a half-deleted event.
+
+**Frontend:** no code change needed. `showApiError` (`components/Toast.tsx`)
+already prefers `err.response.data.error` over its fallback string, so the
+backend's new breakdown message reaches the coordinator as-is; verified by
+reading the call site (`pages/Events.tsx`'s delete mutation) rather than
+assuming.
+
+**Permission unchanged** — still `requireRoles("SUPERADMIN", "ADMIN")` on
+`DELETE /events/:id`, untouched.
+
+Files: `backend/src/services/event.service.ts`,
+`backend/scripts/test-event-scope.ts`. No schema/migration change — the
+RESTRICT constraints are correct as they are and stay; the fix is cleanup
+order in the service, not looser FKs.
+
+### Verification (run 2026-08-16)
+
+`backend` / `frontend`: `npx tsc --noEmit` both clean.
+
+`npx tsx scripts/test-event-scope.ts`, extended with 10 new checks, run live
+against a local dev server on an isolated port — reusing that file's existing
+`granted` event, which by the time these checks run already holds a realistic
+mix (2 APPROVED entries, 1 RETURNED from an earlier withdrawal check in the
+same file, plus a real Draw with slots/bouts from an earlier regenerate):
+delete is blocked with a breakdown-formatted 400 while the 2 APPROVED entries
+remain, the event is confirmed *not* partially cleaned up by the blocked
+attempt, then both are withdrawn to RETURNED and the delete is retried and
+succeeds (2xx) — followed by explicit checks that the event row, the RETURNED
+entries, the division, and the earlier draw (slots/bouts) are all actually
+gone, not left orphaned. `test-draws.ts` and `test-bout-scoring.ts` re-run
+clean (0 failures) as regression checks, since both create/delete events and
+divisions along the way.
+
+**Not verified in-browser** — the user asked for a quick, targeted fix and
+this wasn't exercised through the actual Events admin UI. In particular
+unverified: the toast the coordinator actually sees on a blocked delete, and
+that a real event deletion from the UI (not the raw API) completes without a
+spinner hang or stale cache issue on the events list.
 
 **`GK_NAM_2026` division template (2026-08-16).**
 
