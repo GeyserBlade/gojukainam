@@ -3,7 +3,44 @@ import { prisma } from "../lib/prisma.js";
 import { CreateEvent, UpdateEvent, CreateDivision, UpdateDivision, CreateWeightClass, UpdateWeightClass, EventTimingConfig } from "../utils/validators.js";
 import { ageOn } from "../utils/eligibility.js";
 import { TEMPLATES, TEMPLATE_META, type TemplateName } from "../data/wkf-template.js";
-import type { Gender } from "@prisma/client";
+import type { Gender, Prisma, EntryStatus } from "@prisma/client";
+
+const ACTIVE_ENTRY_STATUSES: EntryStatus[] = ["DRAFT", "SUBMITTED", "APPROVED"];
+const ENTRY_STATUS_LABEL: Record<string, string> = {
+  DRAFT: "draft",
+  SUBMITTED: "submitted",
+  APPROVED: "approved",
+};
+
+/**
+ * Throws a 400 naming the active entries blocking a delete, or resolves if
+ * there are none. Shared by event/division/weight-class delete: all three
+ * had the same bug independently (counting every entry, RETURNED included)
+ * because each rolled its own count-and-throw instead of sharing this. Only
+ * DRAFT/SUBMITTED/APPROVED block — RETURNED is an audit-trail state, not an
+ * active one, and doesn't block anything else in the app either.
+ */
+async function assertNoActiveEntries(where: Prisma.EntryWhereInput, noun: string) {
+  // Three small indexed counts rather than one groupBy: groupBy's return type
+  // is inferred from the exact literal shape of its argument, which doesn't
+  // play well with a `where` built from a spread of a generically-typed
+  // parameter — the counts are cheap enough on this scale (an admin delete,
+  // not a hot path) that it isn't worth fighting the typing for one query.
+  const counts = await Promise.all(
+    ACTIVE_ENTRY_STATUSES.map((status) => prisma.entry.count({ where: { ...where, status } })),
+  );
+  const total = counts.reduce((sum, c) => sum + c, 0);
+  if (total > 0) {
+    const breakdown = ACTIVE_ENTRY_STATUSES.map((status, i) => ({ status, count: counts[i] }))
+      .filter((s) => s.count > 0)
+      .map((s) => `${s.count} ${ENTRY_STATUS_LABEL[s.status]}`)
+      .join(", ");
+    throw {
+      status: 400,
+      message: `Cannot delete ${noun}: ${total} ${total === 1 ? "entry is" : "entries are"} still active (${breakdown}). Withdraw or return them first.`,
+    };
+  }
+}
 
 export class EventService {
   // ============ Events ============
@@ -114,33 +151,8 @@ export class EventService {
     });
   }
 
-  /**
-   * RETURNED is an audit-trail state, not an active one — it doesn't block
-   * draws elsewhere in the app, so it shouldn't block event deletion either.
-   * Only DRAFT/SUBMITTED/APPROVED entries represent something a coordinator
-   * could still be mid-workflow on.
-   */
   static async delete(id: string) {
-    const activeGroups = await prisma.entry.groupBy({
-      by: ["status"],
-      where: { eventId: id, status: { in: ["DRAFT", "SUBMITTED", "APPROVED"] } },
-      _count: true,
-    });
-    const total = activeGroups.reduce((sum, g) => sum + g._count, 0);
-    if (total > 0) {
-      const STATUS_LABEL: Record<string, string> = {
-        DRAFT: "draft",
-        SUBMITTED: "submitted",
-        APPROVED: "approved",
-      };
-      const breakdown = activeGroups
-        .map((g) => `${g._count} ${STATUS_LABEL[g.status] ?? g.status.toLowerCase()}`)
-        .join(", ");
-      throw {
-        status: 400,
-        message: `Cannot delete event: ${total} ${total === 1 ? "entry is" : "entries are"} still active (${breakdown}). Withdraw or return them first.`,
-      };
-    }
+    await assertNoActiveEntries({ eventId: id }, "event");
 
     // Nothing active remains — any entries left are RETURNED and, along with
     // the event's own setup data, are cleared out here rather than relying on
@@ -212,12 +224,24 @@ export class EventService {
   }
 
   static async deleteDivision(id: string) {
-    const count = await prisma.entry.count({ where: { divisionId: id } });
-    if (count > 0) {
-      throw { status: 400, message: `Cannot delete division with ${count} existing entries` };
-    }
+    await assertNoActiveEntries({ divisionId: id }, "division");
 
-    return prisma.division.delete({ where: { id } });
+    // Same reasoning and same RESTRICT constraints as EventService.delete,
+    // scoped to just this division: Entry.divisionId is required (not
+    // nullable), so a RETURNED entry can't simply lose the tag the way it
+    // can for a weight class below — it has to go with the division.
+    // Team.divisionId is also RESTRICT. WeightClass.divisionId is SET NULL
+    // (a weight class outlives the division it was under, just loses the
+    // link) and Draw.divisionId cascades — neither needs handling here.
+    await prisma.$transaction(
+      async (tx) => {
+        await tx.teamMember.deleteMany({ where: { team: { divisionId: id } } });
+        await tx.team.deleteMany({ where: { divisionId: id } });
+        await tx.entry.deleteMany({ where: { divisionId: id } });
+        await tx.division.delete({ where: { id } });
+      },
+      { timeout: 20_000, maxWait: 10_000 },
+    );
   }
 
   // ============ Weight Classes ============
@@ -248,11 +272,13 @@ export class EventService {
   }
 
   static async deleteWeightClass(id: string) {
-    const count = await prisma.entry.count({ where: { weightClassId: id } });
-    if (count > 0) {
-      throw { status: 400, message: `Cannot delete weight class with ${count} existing entries` };
-    }
+    await assertNoActiveEntries({ weightClassId: id }, "weight class");
 
+    // Unlike division, no cascade cleanup needed: Entry.weightClassId is
+    // optional and ON DELETE SET NULL, so any RETURNED entries just lose
+    // this tag rather than being deleted — deleting one weight class is a
+    // narrower move than deleting the whole division, and shouldn't destroy
+    // entries that still belong to it, just re-categorized.
     return prisma.weightClass.delete({ where: { id } });
   }
 

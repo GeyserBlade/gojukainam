@@ -4,11 +4,18 @@ This file is the handoff between coding agents. It describes what is in flight
 right now, not the permanent architecture (that's
 [`architecture.md`](architecture.md)).
 
-**Last updated:** 2026-08-17 — by Claude Code: follow-up on the event-delete
+**Last updated:** 2026-08-17 — by Claude Code: found the user's actual
+error ("Cannot delete division with 4 existing entries") — **the exact same
+bug, independently, in `deleteDivision` and `deleteWeightClass`**, reachable
+only by deleting a division/weight class directly (not through the whole
+event delete, which never called either). Both fixed with the same pattern,
+now shared via one helper. See "In flight" below.
+
+Previously, same day — by Claude Code: follow-up on the event-delete
 fix below — a **second, missed FK** (`Invoice.eventId`, also RESTRICT) was
 still capable of blocking a real event's delete after the first pass, plus a
 transaction-timeout risk over Railway's DB proxy. Both fixed; the delete
-route now logs verbosely on any failure. See "In flight" below.
+route now logs verbosely on any failure.
 
 Previously, 2026-08-16 — by Claude Code: **event deletion no longer
 blocked by RETURNED (withdrawn) entries** — only active entries
@@ -120,6 +127,91 @@ port; those have since been pushed.) Everything here is verified locally against
 a database, never against production data.
 
 ## In flight (uncommitted)
+
+**Event delete, round three: the same bug, independently, one layer down
+(2026-08-17).**
+
+The user's exact error, once the Invoice-gap follow-up shipped:
+**"Cannot delete division with 4 existing entries."** This did *not* come
+from the whole-event delete cascade — `EventService.delete`'s transaction
+calls `tx.division.deleteMany` directly, never `deleteDivision` — so a
+coordinator must have tried deleting the blocking division directly (a
+natural next move once whole-event delete failed) and hit a **third, wholly
+separate copy of the original bug**: `deleteDivision` and `deleteWeightClass`
+(`event.service.ts`) each had their own `prisma.entry.count({ where:
+{divisionId/weightClassId} })` guard, counting every entry regardless of
+status, same as the very first version of `EventService.delete` did. Three
+independent copies of one rule is exactly how this kept resurfacing —
+fixing the rule in one place never touched the other two.
+
+**Fix: one shared helper, not a third copy.** `assertNoActiveEntries(where,
+noun)` (module-level in `event.service.ts`) does the active-status count and
+throws the breakdown message once; `delete`, `deleteDivision`, and
+`deleteWeightClass` all call it now instead of rolling their own. Division
+and weight class differ in what happens *after* the guard passes, for a real
+schema reason, not an oversight:
+- **`deleteDivision`**: `Entry.divisionId` is required and RESTRICT (an
+  entry cannot exist without a division), so any RETURNED entries are
+  deleted along with the division — same reasoning, same
+  TeamMember → Team → Entry ordering, same 20s/10s transaction budget as
+  `EventService.delete`, just scoped to one division instead of the whole
+  event.
+- **`deleteWeightClass`**: `Entry.weightClassId` is optional and
+  `ON DELETE SET NULL` — RETURNED entries just lose that one tag, they're
+  not deleted. Deleting one weight class is a narrower move than deleting
+  the division it lives under, and shouldn't destroy entries that still
+  belong there, just re-categorize them. No transaction needed — nothing
+  else references `WeightClass` with RESTRICT.
+
+**Audited `Team.delete` too, per the brief.** There is no such thing —
+`TeamService` has no `delete` method and no route exposes one (confirmed by
+grepping every `router.delete` across `routes/`). Teams are create/list-only
+today. Nothing to fix; noted so this doesn't get re-investigated later
+wondering if it was missed.
+
+**Logging** extended to match: `routes/events.ts`'s delete-failure logger
+(added in the Invoice follow-up) is now `logDeleteFailure(route, id, ...)`,
+parameterized instead of event-only, and wired into all three delete routes
+— `[events:delete]`, `[events:deleteDivision]`, `[events:deleteWeightClass]`
+in Railway's logs from here on.
+
+Files: `backend/src/services/event.service.ts`, `backend/src/routes/
+events.ts`, `backend/scripts/test-event-scope.ts`. No schema change.
+
+### Verification (run 2026-08-17)
+
+`backend` / `frontend`: `npx tsc --noEmit` both clean.
+
+`npx tsx scripts/test-event-scope.ts`, extended with 16 more checks (57
+total): a dedicated `__SCOPE_TEST_DIVWEIGHT__` fixture calls
+`DELETE /events/divisions/:id` and `DELETE /events/weights/:id` **directly**
+— the actual route the report came from, which the earlier whole-event-delete
+checks structurally could not exercise — confirming each blocks on the one
+active entry with a breakdown message, then succeeds once it's withdrawn,
+with the division/weight-class asymmetry checked explicitly (weight-class
+delete leaves both entries alive with the tag cleared; division delete
+removes the RETURNED entry along with it). A second fixture,
+`__SCOPE_TEST_SCATTERED__`, covers "RETURNED entries scattered across more
+than one division" for the whole-event path specifically, since the first
+pass's single-division `granted` fixture never exercised that shape.
+Deliberately verified the division check is load-bearing, not just passing
+by construction: reverted `deleteDivision` to its pre-fix form, re-ran live,
+watched it fail with **`Cannot delete division with 2 existing entries`** —
+reproducing the user's report almost verbatim — confirmed the
+`[events:deleteDivision]` log line captured it, restored the fix, re-ran
+clean. `test-draws.ts` and `test-bout-scoring.ts` re-run clean (0 failures).
+The `finally` cleanup was also rewritten from a fixed `[granted.id,
+other.id]` list to a `"__SCOPE_TEST_"` name-prefix match, since this file now
+creates several throwaway events and a fixed list silently stops covering
+new ones the next time it grows — exactly the kind of small thing that would
+otherwise leave dangling rows in the local dev DB after a partial failure.
+
+**Not verified in-browser** — chased down via the test script and a
+deliberate local revert-and-restore, not the Events/Setup admin UI. If this
+resurfaces a *fourth* time, the next place to look is whatever specific
+click path the coordinator is actually using — the exact button/flow that
+produces "Cannot delete division" hasn't been confirmed from the frontend
+side, only inferred from which backend method can produce that string.
 
 **Event delete follow-up: a second missed FK, plus verbose failure logging
 (2026-08-17).**

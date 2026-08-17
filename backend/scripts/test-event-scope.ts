@@ -357,23 +357,206 @@ async function main() {
     if (drawBody) {
       check("the draw made earlier (with its slots/bouts) cascaded away via Division", drawGone === null, drawGone);
     }
-  } finally {
-    // Entries have no cascade from Division/Club, so they must go before the
-    // division/event cleanup below or those deletes hit a live FK reference.
-    await prisma.entry.deleteMany({
-      where: { club: { name: { startsWith: "__SCOPE_TEST_CLUB_" } } },
+
+    // ── The bug the user's exact report ("Cannot delete division with 4
+    // existing entries") actually came from. The whole-event delete above
+    // never routes through EventService.deleteDivision — its own
+    // transaction calls tx.division.deleteMany directly — so that section
+    // couldn't have caught this even with entries present: deleteDivision
+    // (and deleteWeightClass) had the identical "counts every entry, not
+    // just active" bug, independently, reachable only by deleting a
+    // division/weight class directly (DELETE /events/divisions/:id or
+    // /events/weights/:id) — which is exactly what a coordinator would try
+    // next after a whole-event delete failed.
+    console.log("\nDivision / weight-class delete, called directly (the route the report came from):");
+    const dwEvent = await mkEvent("__SCOPE_TEST_DIVWEIGHT__");
+    const dwDivision = await prisma.division.create({
+      data: {
+        eventId: dwEvent.id, key: "DW_TEST_DIV", name: "Div/Weight Test Division",
+        minAge: 18, maxAge: 99, gender: "Male", category: "KUMITE",
+      },
     });
+    const dwWeightClass = await prisma.weightClass.create({
+      data: { eventId: dwEvent.id, divisionId: dwDivision.id, gender: "Male", name: "-70kg" },
+    });
+    const dwClub = await prisma.club.create({
+      data: { name: "__SCOPE_TEST_CLUB_DW__", contactName: "n/a", email: "dw@example.test" },
+    });
+    const dwAthleteActive = await prisma.athlete.create({
+      data: {
+        clubId: dwClub.id, firstName: "DW", lastName: "Active",
+        dob: new Date("2000-01-01"), gender: "Male", nationality: "NA", beltId: belt.id,
+      },
+    });
+    const dwAthleteReturned = await prisma.athlete.create({
+      data: {
+        clubId: dwClub.id, firstName: "DW", lastName: "Returned",
+        dob: new Date("2000-01-01"), gender: "Male", nationality: "NA", beltId: belt.id,
+      },
+    });
+    const dwEntryActive = await prisma.entry.create({
+      data: {
+        eventId: dwEvent.id, clubId: dwClub.id, athleteId: dwAthleteActive.id,
+        divisionId: dwDivision.id, weightClassId: dwWeightClass.id, entryType: "KUMITE", status: "APPROVED",
+      },
+    });
+    const dwEntryReturned = await prisma.entry.create({
+      data: {
+        eventId: dwEvent.id, clubId: dwClub.id, athleteId: dwAthleteReturned.id,
+        divisionId: dwDivision.id, weightClassId: dwWeightClass.id, entryType: "KUMITE", status: "RETURNED",
+      },
+    });
+
+    const divBlockedRes = await fetch(`${BASE}/events/divisions/${dwDivision.id}`, { method: "DELETE", headers: asAdmin });
+    const divBlockedBody = divBlockedRes.ok ? null : await divBlockedRes.json().catch(() => null);
+    check("division delete blocked while the one active entry remains -> 400", divBlockedRes.status === 400, {
+      status: divBlockedRes.status,
+      divBlockedBody,
+    });
+    check(
+      "division message names the active entry, not a raw total",
+      typeof divBlockedBody?.error === "string" && divBlockedBody.error.includes("1 approved"),
+      divBlockedBody,
+    );
+
+    const wcBlockedRes = await fetch(`${BASE}/events/weights/${dwWeightClass.id}`, { method: "DELETE", headers: asAdmin });
+    const wcBlockedBody = wcBlockedRes.ok ? null : await wcBlockedRes.json().catch(() => null);
+    check("weight class delete blocked while the one active entry remains -> 400", wcBlockedRes.status === 400, {
+      status: wcBlockedRes.status,
+      wcBlockedBody,
+    });
+    check(
+      "weight class message names the active entry too",
+      typeof wcBlockedBody?.error === "string" && wcBlockedBody.error.includes("1 approved"),
+      wcBlockedBody,
+    );
+
+    const dwWithdrawStatus = await call("POST", "/review/bulk-status", asAdmin, {
+      eventId: dwEvent.id,
+      ids: [dwEntryActive.id],
+      status: "RETURNED",
+      reason: "Test cleanup",
+    });
+    check("withdraw the one active entry -> 200", dwWithdrawStatus === 200, { dwWithdrawStatus });
+
+    // Weight class first: Entry.weightClassId is nullable (SET NULL), so
+    // both entries should survive with the tag cleared, not be deleted.
+    const wcAllowedRes = await fetch(`${BASE}/events/weights/${dwWeightClass.id}`, { method: "DELETE", headers: asAdmin });
+    check("weight class delete now succeeds with only RETURNED left -> 2xx", [200, 204].includes(wcAllowedRes.status), {
+      status: wcAllowedRes.status,
+    });
+    const [wcGone, entriesStillTagged, bothEntriesSurvive] = await Promise.all([
+      prisma.weightClass.findUnique({ where: { id: dwWeightClass.id } }),
+      prisma.entry.count({
+        where: { id: { in: [dwEntryActive.id, dwEntryReturned.id] }, weightClassId: dwWeightClass.id },
+      }),
+      prisma.entry.count({ where: { id: { in: [dwEntryActive.id, dwEntryReturned.id] } } }),
+    ]);
+    check("weight class row gone", wcGone === null, wcGone);
+    check("neither entry still points at the deleted weight class", entriesStillTagged === 0, { entriesStillTagged });
+    check("both entries survive the weight-class delete — only re-tagged, not deleted", bothEntriesSurvive === 2, {
+      bothEntriesSurvive,
+    });
+
+    // Division next: Entry.divisionId is required and RESTRICT, so this
+    // time the surviving RETURNED entry is expected to go with it.
+    const divAllowedRes = await fetch(`${BASE}/events/divisions/${dwDivision.id}`, { method: "DELETE", headers: asAdmin });
+    check("division delete now succeeds with only a RETURNED entry left -> 2xx", [200, 204].includes(divAllowedRes.status), {
+      status: divAllowedRes.status,
+    });
+    const [divGone, dwEntriesGone] = await Promise.all([
+      prisma.division.findUnique({ where: { id: dwDivision.id } }),
+      prisma.entry.count({ where: { divisionId: dwDivision.id } }),
+    ]);
+    check("division row gone", divGone === null, divGone);
+    check("the RETURNED entry cascaded away with its division (no null option, unlike weight class)", dwEntriesGone === 0, {
+      dwEntriesGone,
+    });
+
+    // ── Whole-event delete with RETURNED entries scattered across more than
+    // one division — the first pass's `granted` fixture only ever had one
+    // division, so this shape specifically was never exercised end-to-end.
+    console.log("\nWhole-event delete with RETURNED entries scattered across two divisions:");
+    const scatteredEvent = await mkEvent("__SCOPE_TEST_SCATTERED__");
+    const scatteredDivisions = await Promise.all([
+      prisma.division.create({
+        data: {
+          eventId: scatteredEvent.id, key: "SCAT_DIV_1", name: "Scattered Division 1",
+          minAge: 18, maxAge: 99, gender: "Male", category: "KATA",
+        },
+      }),
+      prisma.division.create({
+        data: {
+          eventId: scatteredEvent.id, key: "SCAT_DIV_2", name: "Scattered Division 2",
+          minAge: 18, maxAge: 99, gender: "Female", category: "KATA",
+        },
+      }),
+    ]);
+    const scatteredClub = await prisma.club.create({
+      data: { name: "__SCOPE_TEST_CLUB_SCATTERED__", contactName: "n/a", email: "scattered@example.test" },
+    });
+    const scatteredAthletes = await Promise.all(
+      scatteredDivisions.map((_, i) =>
+        prisma.athlete.create({
+          data: {
+            clubId: scatteredClub.id, firstName: "Scattered", lastName: `Athlete${i}`,
+            dob: new Date("2000-01-01"), gender: i === 0 ? "Male" : "Female", nationality: "NA", beltId: belt.id,
+          },
+        }),
+      ),
+    );
+    await Promise.all(
+      scatteredDivisions.map((div, i) =>
+        prisma.entry.create({
+          data: {
+            eventId: scatteredEvent.id, clubId: scatteredClub.id, athleteId: scatteredAthletes[i].id,
+            divisionId: div.id, entryType: "KATA", status: "RETURNED",
+          },
+        }),
+      ),
+    );
+
+    const scatteredDeleteRes = await fetch(`${BASE}/events/${scatteredEvent.id}`, { method: "DELETE", headers: asAdmin });
+    check(
+      "whole-event delete succeeds with RETURNED entries spread across two divisions -> 2xx",
+      [200, 204].includes(scatteredDeleteRes.status),
+      { status: scatteredDeleteRes.status },
+    );
+    const [scatteredEventGone, scatteredEntriesGone, scatteredDivisionsGone] = await Promise.all([
+      prisma.event.findUnique({ where: { id: scatteredEvent.id } }),
+      prisma.entry.count({ where: { eventId: scatteredEvent.id } }),
+      prisma.division.count({ where: { eventId: scatteredEvent.id } }),
+    ]);
+    check("scattered event row gone", scatteredEventGone === null, scatteredEventGone);
+    check("all scattered RETURNED entries gone", scatteredEntriesGone === 0, { scatteredEntriesGone });
+    check("both scattered divisions gone", scatteredDivisionsGone === 0, { scatteredDivisionsGone });
+  } finally {
+    // Matched by name prefix rather than a fixed id list — this file now
+    // creates several throwaway events (granted, other, dwEvent,
+    // scatteredEvent) and a fixed list silently stops covering new ones the
+    // next time this file grows. Every one of them (and every one of their
+    // clubs) uses the same "__SCOPE_TEST_" / "__SCOPE_TEST_CLUB_" prefix.
+    // Order matters for the same reason it always has: clear the
+    // RESTRICT-guarded children before their parents.
+    await prisma.teamMember.deleteMany({ where: { team: { event: { name: { startsWith: "__SCOPE_TEST_" } } } } });
+    await prisma.team.deleteMany({ where: { event: { name: { startsWith: "__SCOPE_TEST_" } } } });
+    await prisma.invoice.deleteMany({ where: { event: { name: { startsWith: "__SCOPE_TEST_" } } } });
+    await prisma.entry.deleteMany({
+      where: {
+        OR: [
+          { event: { name: { startsWith: "__SCOPE_TEST_" } } },
+          { club: { name: { startsWith: "__SCOPE_TEST_CLUB_" } } },
+        ],
+      },
+    });
+    await prisma.weightClass.deleteMany({ where: { event: { name: { startsWith: "__SCOPE_TEST_" } } } });
+    await prisma.division.deleteMany({ where: { event: { name: { startsWith: "__SCOPE_TEST_" } } } });
+    await prisma.eventCoordinator.deleteMany({ where: { event: { name: { startsWith: "__SCOPE_TEST_" } } } });
+    await prisma.mat.deleteMany({ where: { event: { name: { startsWith: "__SCOPE_TEST_" } } } });
+    await prisma.event.deleteMany({ where: { name: { startsWith: "__SCOPE_TEST_" } } });
+
     await prisma.athlete.deleteMany({ where: { club: { name: { startsWith: "__SCOPE_TEST_CLUB_" } } } });
     await prisma.club.deleteMany({ where: { name: { startsWith: "__SCOPE_TEST_CLUB_" } } });
-
-    for (const id of [granted.id, other.id]) {
-      await prisma.eventCoordinator.deleteMany({ where: { eventId: id } });
-      await prisma.mat.deleteMany({ where: { eventId: id } });
-      await prisma.invoice.deleteMany({ where: { eventId: id } });
-      await prisma.weightClass.deleteMany({ where: { eventId: id } });
-      await prisma.division.deleteMany({ where: { eventId: id } });
-      await prisma.event.deleteMany({ where: { id } });
-    }
     await prisma.$disconnect();
   }
 

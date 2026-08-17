@@ -30,18 +30,20 @@ export const router = Router();
 // Mirrors routes/entries.ts's logExpectedError: handlers below that catch an
 // expected {status, message} error respond directly rather than calling
 // next(err), so the global errorHandler's console.error never sees them and
-// Railway logs stay empty. Delete is the one route on this file where that
-// silence has actually cost investigation time (see docs/state.md), so it
-// gets its own logging for both the expected block and any raw failure that
-// still reaches the generic 500 path — full Prisma error code + stack, so a
-// missed FK cascade shows up immediately instead of as a bare 500.
-function logEventDeleteFailure(eventId: string, userId: string | undefined, err: any) {
+// Railway logs stay empty. Delete is where this file's silence has actually
+// cost investigation time (see docs/state.md — the division/weight-class
+// guards hid the exact same "counts every entry, not just active ones" bug
+// this now covers), so all three delete routes get their own logging for
+// both the expected block and any raw failure that still reaches the
+// generic 500 path — full Prisma error code + stack, so a missed FK cascade
+// shows up immediately instead of as a bare 500.
+function logDeleteFailure(route: string, id: string, userId: string | undefined, err: any) {
   if (err?.status && err?.message) {
-    console.warn(`[events:delete] ${err.status} ${err.message} — eventId=${eventId} user=${userId ?? "?"}`);
+    console.warn(`[events:${route}] ${err.status} ${err.message} — id=${id} user=${userId ?? "?"}`);
     return;
   }
   console.error(
-    `[events:delete] unexpected failure — eventId=${eventId} user=${userId ?? "?"} ` +
+    `[events:${route}] unexpected failure — id=${id} user=${userId ?? "?"} ` +
       `code=${err?.code ?? "?"} message=${err?.message ?? String(err)}` +
       (err?.meta ? ` meta=${JSON.stringify(err.meta)}` : ""),
   );
@@ -137,7 +139,7 @@ router.delete("/:id", requireRoles("SUPERADMIN", "ADMIN"), validate(IdParam, "pa
     await EventService.delete(eventId);
     res.status(204).send();
   } catch (err: any) {
-    logEventDeleteFailure(eventId, req.user?.id, err);
+    logDeleteFailure("delete", eventId, req.user?.id, err);
     if (err.status && err.message) {
       return res.status(err.status).json({ error: err.message });
     }
@@ -182,10 +184,12 @@ router.put("/divisions/:divisionId", requireEventManager({ in: "lookup", key: "d
 
 // delete division (admins, or the coordinator of the division's event)
 router.delete("/divisions/:divisionId", requireEventManager({ in: "lookup", key: "divisionId", via: "division" }), validate(DivisionIdParam, "params"), async (req, res, next) => {
+  const divisionId = getParam(req.params.divisionId);
   try {
-    await EventService.deleteDivision(getParam(req.params.divisionId));
+    await EventService.deleteDivision(divisionId);
     res.status(204).send();
   } catch (err: any) {
+    logDeleteFailure("deleteDivision", divisionId, req.user?.id, err);
     if (err.status && err.message) {
       return res.status(err.status).json({ error: err.message });
     }
@@ -228,10 +232,12 @@ router.put("/weights/:weightClassId", requireEventManager({ in: "lookup", key: "
 
 // delete weight class (admins, or the coordinator of the class's event)
 router.delete("/weights/:weightClassId", requireEventManager({ in: "lookup", key: "weightClassId", via: "weightClass" }), validate(WeightClassIdParam, "params"), async (req, res, next) => {
+  const weightClassId = getParam(req.params.weightClassId);
   try {
-    await EventService.deleteWeightClass(getParam(req.params.weightClassId));
+    await EventService.deleteWeightClass(weightClassId);
     res.status(204).send();
   } catch (err: any) {
+    logDeleteFailure("deleteWeightClass", weightClassId, req.user?.id, err);
     if (err.status && err.message) {
       return res.status(err.status).json({ error: err.message });
     }
