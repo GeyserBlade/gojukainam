@@ -116,7 +116,7 @@ export interface ClubEntrySheet {
 }
 
 /** Age on a given day — whole years, birthday-aware. */
-function ageOn(dob: Date, on: Date): number {
+export function ageOn(dob: Date, on: Date): number {
   let age = on.getUTCFullYear() - dob.getUTCFullYear();
   const beforeBirthday =
     on.getUTCMonth() < dob.getUTCMonth() ||
@@ -126,6 +126,19 @@ function ageOn(dob: Date, on: Date): number {
 }
 
 const isTeamType = (t: string) => t === "TEAM_KATA" || t === "TEAM_KUMITE";
+
+/** A club or event name, safe to put in a Content-Disposition filename. */
+export function fileSlug(s: string): string {
+  return (
+    s
+      .normalize("NFKD")
+      .replace(/[^\w\s-]/g, "")
+      .trim()
+      .replace(/\s+/g, "-")
+      .toLowerCase()
+      .slice(0, 40) || "export"
+  );
+}
 
 /**
  * Category ordering, shared by both views so the sheet reads the same way
@@ -553,14 +566,6 @@ export class EntrySheetService {
 
   /** Filename stem shared by both formats: `<club>-entries-<event>`. */
   static fileStem(sheet: ClubEntrySheet): string {
-    const slug = (s: string) =>
-      s
-        .normalize("NFKD")
-        .replace(/[^\w\s-]/g, "")
-        .trim()
-        .replace(/\s+/g, "-")
-        .toLowerCase()
-        .slice(0, 40) || "export";
-    return `${slug(sheet.club.name)}-entries-${slug(sheet.event.name)}`;
+    return `${fileSlug(sheet.club.name)}-entries-${fileSlug(sheet.event.name)}`;
   }
 }

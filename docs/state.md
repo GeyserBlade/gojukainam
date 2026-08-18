@@ -4,7 +4,12 @@ This file is the handoff between coding agents. It describes what is in flight
 right now, not the permanent architecture (that's
 [`architecture.md`](architecture.md)).
 
-**Last updated:** 2026-08-17 — by Claude Code: found the user's actual
+**Last updated:** 2026-08-18 — by Claude Code: **the whole event's
+entry list, all clubs, as a printable document and a workbook** — the
+counterpart of the per-club entry sheet, laid out the way the hub's Entries
+board lays it out on screen. See "In flight" below.
+
+Previously, 2026-08-17 — by Claude Code: found the user's actual
 error ("Cannot delete division with 4 existing entries") — **the exact same
 bug, independently, in `deleteDivision` and `deleteWeightClass`**, reachable
 only by deleting a division/weight class directly (not through the whole
@@ -127,6 +132,122 @@ port; those have since been pushed.) Everything here is verified locally against
 a database, never against production data.
 
 ## In flight (uncommitted)
+
+**Event entry list — every club, laid out like the Entries board
+(2026-08-18).**
+
+Request: print or extract the *whole* entry list, the way the Review tab already
+extracts one club's — and specifically with the look of the hub's **Entries**
+screen, minus the athlete pool.
+
+*So it is that screen, on paper.* The document renders the stats strip, the
+age-band sections and the division cards, competitor by competitor: belt swatch,
+name, club, age, weight, weight class, status chip, and the per-card fee total.
+An organizer reading the printout and an organizer reading the glass are looking
+at the same thing in the same order. What is deliberately absent is the half of
+that screen that cannot be printed — the athlete pool, the drag-and-drop, and
+the eligibility ghosting, which only mean something while you are pointing at
+someone.
+
+*Two rules differ from the club sheet next door, both on purpose.* **RETURNED
+entries stay on their card, marked, with the organizer's reason under the
+name** — the club sheet excludes them because a club must not confirm a roster
+containing withdrawn people, but chasing them is exactly the organizer's job, so
+hiding them here would remove the reason to print it. The card footer says how
+many are returned, so the "09 entered" figure can still be read against what is
+actually in the draw. **Fees are included** (with a toolbar toggle): the board
+already shows a per-division total and an event total, and dropping a column the
+screen has would be a worse printout, not a cleaner one. They are priced from
+the event's `configJson` exactly as the screen prices them — `Entry.feeCents` is
+still 0 on every row the entry screens create, so pricing from the column would
+have printed a table of zeros.
+
+*Empty categories are cards too*, with a toggle (default on) to hide them: "nobody
+entered U8 Girls Kumite" is a fact worth seeing before the draw, but not worth
+eight pages of it.
+
+*One repair, made in both places.* Age-band headings come from the division
+name via the board's own rule (strip the parenthetical, the gender, the
+discipline — "Under 12 Boys Kata" → "Under 12"). The federation's own template
+names categories the other way round — `KATA BOYS 5-6` — which leaves the
+discipline as the label, so the sections were headed "KATA" and "KUMITE" over
+bands that hold both. When nothing but a discipline word survives (or nothing
+at all), the band is now named by its ages instead ("Ages 5–6", "Age 7"). The
+rule lives in `ageBandLabel` on both sides — `entry-list.service.ts` for the
+printable list and `event-management/eligibility.ts` for the **Entries screen
+itself**, which had the same wrong headings and now reads "AGES 5–6" where it
+read "KUMITE". They are a deliberate mirror (separate npm projects, no shared
+package), so each is unit-checked with the same cases and the comment on each
+points at the other. Note the strip only fires on a *following* word, so a name
+like "BOYS 5-6" keeps its ages and is left alone.
+
+*One payload, two formats*, as with the club sheet: `GET
+/reports/event-entries` returns the whole document as JSON and the printable
+page renders it; `GET /reports/event-entries.xlsx` builds the workbook from the
+same `build()` result. Three sheets — **Summary** (the stats strip plus the
+per-club table with a TOTAL row), **Entries** (one flat, filterable row per
+entry, athlete details repeated so the column sorts), **Divisions** (one row per
+category with its counts, which is what draw and timetable planning reads).
+
+*Authorization is a different question from the club sheet's, and gets a
+different guard.* This is the one export that crosses club boundaries by design,
+so both routes are `requireEventManager({ in: "query", key: "eventId" })` —
+admins plus **this** event's coordinator, nobody else. A club user still exports
+their own roster through `/club-entries`, which is scoped to them. The dialog
+offers the whole-event option only when `canManageEvent(eventId)` says the API
+would serve it.
+
+Entry point: the same **Export entries** button in the hub's **Review** tab
+(renamed from "Export for club"), whose dialog now picks between "All clubs —
+full entry list" and any single club. One button, because "export the entries"
+is one thought; the dialog shows the real counts for whichever is chosen before
+anything is sent.
+
+New: `services/entry-list.service.ts`, two routes on `routes/reports.ts`,
+`scripts/test-event-entry-list.ts`; `frontend/src/lib/entry-list.ts`,
+`pages/EventEntryList.tsx` (`/entry-list/:eventId`),
+`frontend/scripts/test-eligibility.ts` (the screen's band labels and the
+eligibility rule, which had no suite of their own). Renamed:
+`components/entries/ClubEntrySheetDialog.tsx` →
+`EntryExportDialog.tsx` (it now covers both documents). Touched:
+`services/entry-sheet.service.ts` (exports `ageOn` and a new `fileSlug`, which
+its own `fileStem` now uses — no behaviour change),
+`pages/event-management/eligibility.ts` (the band-label fix above),
+`pages/EntriesView.tsx`, `App.tsx`.
+
+Verified: `npx tsx scripts/test-event-entry-list.ts` — 48 checks over real HTTP
+(board order, age bands including the discipline-first fallback, empty divisions
+kept as zero cards, RETURNED in place with its reason and counted apart, teams
+with members and reserves, belts/ages/weights/weight classes/seeds on the
+competitor, fees priced from the event's own config and adding up card → club →
+event, the per-club summary, and the authorization: club manager, coach, athlete
+and operator all 403, coordinator 200 on both routes, a coordinator of *another*
+event 403, plus the workbook's three sheets and its contents). `npx tsx scripts/test-eligibility.ts` — 16 checks on the
+frontend copy of the band rule plus the eligibility helper. Every other suite
+re-run clean — `test-entry-sheet` (47) included, since it shares the refactored
+helpers — and both projects `tsc --noEmit` and `npm run build` clean.
+
+Driven in the browser as ADMIN against the 277-entry championships fixture: the
+Review tab's dialog defaulting to the whole-event option with its real counts (7
+clubs · 150 athletes · 277 entries, 36/36 categories), the picker listing the
+option above all seven clubs, switching to a single club restoring the club
+sheet's wording and counts, the workbook route returning 200 through the app,
+and the document itself rendering on white inside the dark app. Four entries
+were temporarily varied to Draft/Pending/Returned/seeded to see every chip
+render (restored afterwards; the database re-checked at 0 non-approved and 0
+seeded). The **Entries** screen re-checked after the label fix: its fifteen
+sections now read AGES 5–6 / AGES 5–7 / AGE 7 / … instead of KATA and KUMITE,
+with the boards themselves unchanged. Measured at A4 width (794px): no horizontal overflow anywhere, the
+per-club table fits at 740px, the cards lay out two-up at 364px, and the tallest
+card is 646px — comfortably inside a page, so `break-inside: avoid` can hold for
+every one of them. Console clean apart from the already-documented benign
+pre-login `/auth/me` 401s.
+
+**Not verified: the actual print output.** As with the club sheet, the Print
+button was not taken through a real print dialog in this environment, so
+pagination has been measured in the DOM at A4 width, not seen on a page.
+**Team entries were not seen rendered** — the local database has no `Team` rows,
+so that path is covered by the test suite and the workbook only.
 
 **Event delete, round three: the same bug, independently, one layer down
 (2026-08-17).**

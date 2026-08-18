@@ -3,7 +3,8 @@ import { prisma } from "../lib/prisma.js";
 import { requireRoles } from "../utils/auth.js";
 import { DrawService } from "../services/draw.service.js";
 import { EntrySheetService } from "../services/entry-sheet.service.js";
-import { isEventCoordinator } from "../utils/event-scope.js";
+import { EntryListService } from "../services/entry-list.service.js";
+import { isEventCoordinator, requireEventManager } from "../utils/event-scope.js";
 
 export const router = Router();
 
@@ -150,3 +151,48 @@ router.get("/club-entries.xlsx", requireRoles(...SHEET_ROLES), async (req, res, 
     res.send(Buffer.from(buffer as ArrayBuffer));
   } catch (err) { next(err); }
 });
+
+/**
+ * The whole event's entry list — every club, division by division.
+ *
+ * `requireEventManager` rather than `requireRoles`: this is the one export that
+ * crosses club boundaries by design, so it is admins plus *this* event's
+ * coordinator and nobody else. A club user exports their own roster through
+ * `/club-entries` above, which is scoped to them.
+ */
+router.get(
+  "/event-entries",
+  requireEventManager({ in: "query", key: "eventId" }),
+  async (req, res, next) => {
+    try {
+      const { eventId } = req.query as { eventId?: string };
+      if (!eventId) return res.status(400).json({ error: "eventId required" });
+      res.json(await EntryListService.build(eventId));
+    } catch (err) { next(err); }
+  },
+);
+
+router.get(
+  "/event-entries.xlsx",
+  requireEventManager({ in: "query", key: "eventId" }),
+  async (req, res, next) => {
+    try {
+      const { eventId } = req.query as { eventId?: string };
+      if (!eventId) return res.status(400).json({ error: "eventId required" });
+
+      const list = await EntryListService.build(eventId);
+      const workbook = EntryListService.toWorkbook(list);
+      const buffer = await workbook.xlsx.writeBuffer();
+
+      res.setHeader(
+        "Content-Type",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      );
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="${EntryListService.fileStem(list)}.xlsx"`,
+      );
+      res.send(Buffer.from(buffer as ArrayBuffer));
+    } catch (err) { next(err); }
+  },
+);

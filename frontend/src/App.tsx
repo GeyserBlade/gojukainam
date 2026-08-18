@@ -27,6 +27,7 @@ const EventManagementPage = lazy(() => import("./pages/EventManagement"));
 const EventsPage = lazy(() => import("./pages/Events"));
 const EntriesViewPage = lazy(() => import("./pages/EntriesView"));
 const EntrySheetPage = lazy(() => import("./pages/EntrySheet"));
+const EventEntryListPage = lazy(() => import("./pages/EventEntryList"));
 const DrawsPage = lazy(() => import("./pages/Draws"));
 const RunPage = lazy(() => import("./pages/Run"));
 const MatOperatorPage = lazy(() => import("./pages/MatOperator"));
@@ -92,6 +93,13 @@ const AppRoutes: React.FC = () => (
       <Route
         path="/entry-sheet/:eventId/:clubId"
         element={<Protected><EntrySheetPage /></Protected>}
+      />
+
+      {/* The whole event's entry list, every club — the same document for the
+          organizer. Admin/coordinator only, enforced by the API. */}
+      <Route
+        path="/entry-list/:eventId"
+        element={<Protected><EventEntryListPage /></Protected>}
       />
 
       {/* Legacy paths → hub tabs */}

@@ -91,6 +91,35 @@ export function individualEntryTypeFor(category: "KATA" | "KUMITE"): "KATA" | "K
   return category;
 }
 
+/**
+ * The heading for the age band a division sits in.
+ *
+ * Strip a trailing parenthetical, then the gender and discipline words, which
+ * leaves the age part of the name: "Under 10 Boys" and "Mini Cadet Male Kata
+ * (10-13)" both reduce cleanly.
+ *
+ * The federation's own template names categories the other way round — "KATA
+ * BOYS 5-6" — and stripping from the gender word leaves "KATA", which would
+ * head a band that holds kumite too with a discipline it is not. When nothing
+ * but a discipline survives (or nothing at all), the ages name the band, which
+ * is what the band actually is.
+ *
+ * Mirrored by `ageBandLabel` in backend/src/services/entry-list.service.ts, so
+ * the printable entry list and this screen head their sections identically —
+ * keep the two in step.
+ */
+export function ageBandLabel(name: string, minAge: number, maxAge: number): string {
+  const stripped = name
+    .replace(/\s*\([^)]*\)\s*$/, "")
+    .replace(/\s+(Boys|Girls|Men|Women|Boy|Girl|Male|Female)\b.*/i, "")
+    .replace(/\s+(Team\s+)?(Kata|Kumite)\b.*/i, "")
+    .trim();
+  if (!stripped || /^(team\s+)?(kata|kumite)$/i.test(stripped)) {
+    return minAge === maxAge ? `Age ${minAge}` : `Ages ${minAge}\u2013${maxAge}`;
+  }
+  return stripped;
+}
+
 /** Group divisions by age band (shared minAge/maxAge), sorted by minAge ascending. */
 export function groupDivisionsByAge(divisions: Division[]) {
   const buckets = new Map<
@@ -100,15 +129,12 @@ export function groupDivisionsByAge(divisions: Division[]) {
   for (const d of divisions) {
     const key = `${d.minAge}-${d.maxAge}`;
     if (!buckets.has(key)) {
-      // Strip trailing parenthetical, then gender + category words to get
-      // a clean age-band label. Works for both "Under 10 Boys" and
-      // "Mini Cadet Male Kata (10-13)" style names.
-      const label = d.name
-        .replace(/\s*\([^)]*\)\s*$/, "")
-        .replace(/\s+(Boys|Girls|Men|Women|Boy|Girl|Male|Female)\b.*/i, "")
-        .replace(/\s+(Team\s+)?(Kata|Kumite)\b.*/i, "")
-        .trim();
-      buckets.set(key, { key, label, minAge: d.minAge, divisions: [] });
+      buckets.set(key, {
+        key,
+        label: ageBandLabel(d.name, d.minAge, d.maxAge),
+        minAge: d.minAge,
+        divisions: [],
+      });
     }
     buckets.get(key)!.divisions.push(d);
   }

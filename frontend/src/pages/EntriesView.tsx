@@ -54,7 +54,7 @@ import {
 } from "@/components/ui/table"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
-import { ClubEntrySheetDialog } from "@/components/entries/ClubEntrySheetDialog"
+import { EntryExportDialog } from "@/components/entries/EntryExportDialog"
 import { cn } from "@/lib/utils"
 import {
   EntryService,
@@ -669,7 +669,7 @@ const EntriesView = () => {
         {selectedEventId && (
           <Button variant="outline" size="sm" onClick={() => setExportOpen(true)}>
             <FileDown />
-            Export for club
+            Export entries
           </Button>
         )}
       </div>
@@ -1278,9 +1278,9 @@ const EntriesView = () => {
         </DialogContent>
       </Dialog>
 
-      {/* Entry-confirmation sheet — for clubs that have no access to the system
-          and confirm their roster by email. */}
-      <ClubEntrySheetDialog
+      {/* Two documents behind one button: one club's confirmation sheet (for
+          clubs with no access to the system) or the whole event's entry list. */}
+      <EntryExportDialog
         open={exportOpen}
         onOpenChange={setExportOpen}
         eventId={selectedEventId}
