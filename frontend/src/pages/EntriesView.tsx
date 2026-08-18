@@ -228,6 +228,28 @@ const EntryRow = ({
                     {entry.weightClass.name}
                   </Badge>
                 )}
+                {/* The athlete's own weight, on kumite entries only. Reviewing
+                    a kumite entry is partly a question of whether the person
+                    is in the right category at all, and returning them to
+                    re-enter elsewhere needs the number that decides it. Kata
+                    does not turn on weight, so the row stays quiet there.
+                    A missing weight is called out rather than hidden: it is
+                    the usual reason an entry cannot be placed. */}
+                {!isTeam && cat === "KUMITE" &&
+                  (entry.athlete?.weightKg != null ? (
+                    <Badge variant="outline" className="font-normal text-[10px] gap-1">
+                      {!entry.weightClass && <WeightIcon className="size-3" />}
+                      {entry.athlete.weightKg} kg
+                    </Badge>
+                  ) : (
+                    <Badge
+                      variant="outline"
+                      className="gap-1 border-belt-orange/30 text-belt-orange font-normal text-[10px]"
+                    >
+                      <WeightIcon className="size-3" />
+                      No weight recorded
+                    </Badge>
+                  ))}
                 {!isTeam && entry.athlete?.belt && (
                   <span>{entry.athlete.belt.name}</span>
                 )}

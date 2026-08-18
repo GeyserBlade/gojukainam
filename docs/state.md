@@ -4,7 +4,11 @@ This file is the handoff between coding agents. It describes what is in flight
 right now, not the permanent architecture (that's
 [`architecture.md`](architecture.md)).
 
-**Last updated:** 2026-08-18 — by Claude Code: **the whole event's
+**Last updated:** 2026-08-18 — by Claude Code: **the athlete's weight on
+kumite entry rows in Review**, so an entry can be judged against the category it
+is in. See "In flight" below.
+
+Previously, same day — by Claude Code: **the whole event's
 entry list, all clubs, as a printable document and a workbook** — the
 counterpart of the per-club entry sheet, laid out the way the hub's Entries
 board lays it out on screen. See "In flight" below.
@@ -132,6 +136,34 @@ port; those have since been pushed.) Everything here is verified locally against
 a database, never against production data.
 
 ## In flight (uncommitted)
+
+**Review: the athlete's own weight on kumite entries (2026-08-18).**
+
+Reviewing a kumite entry is partly the question "is this person even in the
+right category", and the answer is their weight — which the expanded category
+did not show. It does now, as a badge on the entry row, individual kumite only:
+kata does not turn on weight, so the row stays quiet there and the line does not
+grow a badge that means nothing.
+
+Where an entry has a weight class the two sit side by side ("O38kg · 43 kg"),
+which is the comparison being made. **A missing weight is called out rather than
+left blank** — an orange "No weight recorded" — because that is the usual reason
+an entry cannot be placed, and it is exactly the case where the reviewer needs
+to return the entry rather than guess.
+
+No API change: `EntryService.list` already includes the whole athlete row, so
+`weightKg` was in the payload and only the row was not reading it.
+
+Touched: `pages/EntriesView.tsx` (the `EntryRow` meta line). The **Table** view's
+"Weight" column still shows the weight *class* only, and was left alone — say so
+if it should carry the athlete's weight too.
+
+Verified in the browser as ADMIN on the 277-entry fixture: a kumite entry with a
+class reads "KUMITE · O38kg · 43 kg", one without a class reads "KUMITE · 24 kg",
+the same athlete's kata entry shows no weight at all, and one athlete's weight
+was temporarily nulled to see the orange "No weight recorded" badge (restored
+afterwards, database re-checked). Frontend `tsc --noEmit` and `npm run build`
+clean; console clean apart from the documented pre-login `/auth/me` 401s.
 
 **Event entry list — every club, laid out like the Entries board
 (2026-08-18).**
