@@ -7,6 +7,18 @@
 // to fit one sheet of paper regardless of how many hours the day spans, so
 // every item is placed as a *percentage* of the whole day's span instead.
 
+import { formatClock } from "./schedule"
+
+/**
+ * "10:30 – 10:45" — a block's own start and end, so its finish time doesn't
+ * have to be eyeballed from its height on the page. En dash with spaces on
+ * both sides, matching this app's other range formatting (e.g. the toolbar's
+ * "08:00 – 16:25 on site").
+ */
+export function formatTimeRange(startMin: number, endMin: number): string {
+  return `${formatClock(startMin)} – ${formatClock(endMin)}`
+}
+
 /**
  * Where an item sits on the page, as a percentage of the full day span
  * (`dayStartMin` to `dayStartMin + totalSpanMin`). Both values are clamped to

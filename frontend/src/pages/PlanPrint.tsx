@@ -32,7 +32,7 @@ import {
   type ScheduleCategoryInput,
   type ScheduleInput,
 } from "@/lib/schedule"
-import { hourTicks, isTeamCategory, layoutMatColumn, layoutPercent } from "@/lib/schedule-print"
+import { formatTimeRange, hourTicks, isTeamCategory, layoutMatColumn, layoutPercent } from "@/lib/schedule-print"
 import { blockSurface, blockText, categorySurface, SPAN_ALL_HATCH } from "@/components/plan/plan-visuals"
 
 const toScheduleCategory = (c: PlanCategory): ScheduleCategoryInput => ({
@@ -267,23 +267,27 @@ export default function PlanPrintPage() {
                           {team && <span className="ml-1 font-normal uppercase text-belt-purple">· Team</span>}
                           {/* Compact: the one thing a full detail line would
                               have said that isn't in the title — the real
-                              start time — folded onto the title's own line
-                              rather than dropped. */}
+                              start–end range — folded onto the title's own
+                              line rather than dropped. */}
                           {compact && (
                             <span className="ml-1 font-normal normal-case text-muted-foreground">
-                              · {formatClock(item.startMin)}
+                              · {formatTimeRange(item.startMin, item.endMin)}
                             </span>
                           )}
                         </p>
                         {!compact &&
                           (item.kind === "CATEGORY" ? (
+                            // Duration is dropped here, not just tacked on: once
+                            // the line states the start–end range, a separate
+                            // duration figure is redundant, and the range is the
+                            // one the brief actually asked to keep.
                             <p className="truncate text-[8px] leading-tight text-muted-foreground">
-                              {isKumite ? "Kumite" : "Kata"} · {formatClock(item.startMin)} ·{" "}
-                              {formatSpan(item.minutes)} · {category?.entryCount ?? 0} entries
+                              {isKumite ? "Kumite" : "Kata"} · {formatTimeRange(item.startMin, item.endMin)} ·{" "}
+                              {category?.entryCount ?? 0} entries
                             </p>
                           ) : (
                             <p className="truncate text-[8px] leading-tight text-muted-foreground">
-                              {formatClock(item.startMin)} · {formatSpan(item.minutes)}
+                              {formatTimeRange(item.startMin, item.endMin)}
                             </p>
                           ))}
                       </div>
@@ -315,7 +319,7 @@ export default function PlanPrintPage() {
                 >
                   <span className="truncate text-[9px] font-semibold uppercase tracking-wide">{band.label}</span>
                   <span className="shrink-0 text-[9px] tabular-nums opacity-80">
-                    {formatClock(band.startMin)} – {formatClock(band.endMin)}
+                    {formatTimeRange(band.startMin, band.endMin)}
                   </span>
                 </div>
               )

@@ -4,10 +4,15 @@ This file is the handoff between coding agents. It describes what is in flight
 right now, not the permanent architecture (that's
 [`architecture.md`](architecture.md)).
 
-**Last updated:** 2026-08-19 — by Claude Code: fixed a print-schedule bug —
+**Last updated:** 2026-08-19 — by Claude Code: print-schedule polish — every
+block (and venue-wide band) now shows its **start–end time range**
+("10:30 – 10:45"), not just the start time, so the finish doesn't have to
+be eyeballed from the block's height. See "In flight" below.
+
+Previously, same day — by Claude Code: fixed a print-schedule bug —
 **categories under ~30 minutes lost their label entirely**, since a block's
 height was strictly proportional to its duration with no floor. Every
-block now gets a minimum height first. See "In flight" below.
+block now gets a minimum height first.
 
 Previously, same day — by Claude Code: **printable one-page
 running-order schedule** — "Print schedule" on the Plan tab opens a
@@ -146,6 +151,63 @@ port; those have since been pushed.) Everything here is verified locally against
 a database, never against production data.
 
 ## In flight (uncommitted)
+
+**Print schedule: show each block's end time, not just its start
+(2026-08-19).**
+
+Polish request: the end time was hard to eyeball from a block's height
+alone, so show both start and end explicitly — `"10:30 – 10:45"`.
+
+New `formatTimeRange(startMin, endMin)` in `lib/schedule-print.ts`, a thin
+wrapper around `lib/schedule.ts`'s own `formatClock` (so a midnight-wrapping
+range still carries its `"+1d"` suffix correctly, for free). En dash with
+spaces on both sides, matching the app's existing range formatting
+elsewhere (the masthead's own "08:00 – 16:25 on site").
+
+Applied everywhere a block states its own time, per the brief:
+- The full two-line detail (`"Kata · 08:30 – 08:59 · 6 entries"`) — and
+  **duration is dropped from this line**, not tacked on alongside the new
+  range: once the line states start and end explicitly, a separate
+  duration figure is redundant, and the range is what was actually asked
+  for. This is the "drop the duration part first" instruction — done as a
+  static design choice (duration never appears here now) rather than a
+  dynamic width check, since there's no per-instance text-measurement
+  logic in this component and adding one for a single redundant field
+  wasn't worth it.
+- The compact single-line fold used for blocks too short for the full
+  detail (`"KUMITE BOYS 7 · 08:59 – 09:25"`) — previously just the start
+  time, now the range. This fold never showed a duration to begin with,
+  so nothing to drop there.
+- Venue-wide bands (opening/closing/lunch) — already showed a range before
+  this change, via two inline `formatClock` calls; swapped to the same
+  `formatTimeRange` helper for consistency rather than leaving two
+  independent implementations of the same formatting.
+
+Files: `frontend/src/lib/schedule-print.ts`,
+`frontend/src/pages/PlanPrint.tsx`,
+`frontend/scripts/test-schedule-print.ts`.
+
+### Verification (run 2026-08-19)
+
+`backend` / `frontend`: `npx tsc --noEmit` both clean. `npx tsx
+scripts/test-schedule-print.ts` extended to 33 checks (up from 29):
+`formatTimeRange` — the exact example from the brief, the en-dash-with-
+spaces format, staying 24-hour, and a midnight-wrapping range correctly
+carrying `formatClock`'s `"+1d"` suffix through unmodified. All other
+frontend pure-logic suites re-run clean as regressions.
+
+Spot-checked against the seeded event's real data (same event used for the
+minimum-height fix above): confirmed via extracted page text that every
+tier now shows a range — full detail (`"Kata · 08:30 – 08:59 · 6
+entries"`), compact fold (`"KUMITE BOYS 7 · 08:59 – 09:25"`), and the
+Lunch break band (`"Lunch break · 12:00 – 12:30"`). No console errors
+traceable to the change (only the same pre-existing, unrelated
+`/api/auth/me` dev-auth-fallback 401 noise confirmed twice already in this
+file's history).
+
+**Not verified in physical print** — same open item as both prior print-
+schedule entries: not checked against a real print preview or an exported
+PDF, only an on-screen render.
 
 **Print schedule: short categories were losing their label entirely
 (2026-08-19).**

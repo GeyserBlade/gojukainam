@@ -6,7 +6,7 @@
  *
  * Run: npx tsx scripts/test-schedule-print.ts
  */
-import { layoutPercent, layoutMatColumn, hourTicks, isTeamCategory } from "../src/lib/schedule-print";
+import { layoutPercent, layoutMatColumn, hourTicks, isTeamCategory, formatTimeRange } from "../src/lib/schedule-print";
 
 let failures = 0;
 function check(label: string, ok: boolean, detail?: unknown) {
@@ -162,6 +162,18 @@ console.log("\n— isTeamCategory —");
   check(
     "a weight-class suffix without \"team\" -> false",
     isTeamCategory("Senior Male Kumite (18+) · -75kg") === false,
+  );
+}
+
+console.log("\n— formatTimeRange —");
+{
+  check("10:30 -> 10:45 formats as \"10:30 – 10:45\"", formatTimeRange(630, 645) === "10:30 – 10:45", formatTimeRange(630, 645));
+  check("uses an en dash with spaces on both sides, not a hyphen", formatTimeRange(480, 540).includes(" – "), formatTimeRange(480, 540));
+  check("stays 24-hour, matching formatClock elsewhere on the page", formatTimeRange(0, 60) === "00:00 – 01:00", formatTimeRange(0, 60));
+  check(
+    "a range crossing midnight carries formatClock's own \"+1d\" through untouched",
+    formatTimeRange(1430, 1500) === "23:50 – 01:00 +1d",
+    formatTimeRange(1430, 1500),
   );
 }
 
