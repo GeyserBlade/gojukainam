@@ -28,6 +28,7 @@ const EventsPage = lazy(() => import("./pages/Events"));
 const EntriesViewPage = lazy(() => import("./pages/EntriesView"));
 const EntrySheetPage = lazy(() => import("./pages/EntrySheet"));
 const EventEntryListPage = lazy(() => import("./pages/EventEntryList"));
+const PlanPrintPage = lazy(() => import("./pages/PlanPrint"));
 const DrawsPage = lazy(() => import("./pages/Draws"));
 const RunPage = lazy(() => import("./pages/Run"));
 const MatOperatorPage = lazy(() => import("./pages/MatOperator"));
@@ -100,6 +101,15 @@ const AppRoutes: React.FC = () => (
       <Route
         path="/entry-list/:eventId"
         element={<Protected><EventEntryListPage /></Protected>}
+      />
+
+      {/* The printable one-page running-order schedule — same reasoning as
+          the entry sheet above: a document, not a tab, so it sits outside
+          the hub's chrome. Admin/coordinator only, enforced in-page (same
+          gate as the Plan tab's own management controls). */}
+      <Route
+        path="/plan/print/:eventId"
+        element={<Protected><PlanPrintPage /></Protected>}
       />
 
       {/* Legacy paths → hub tabs */}

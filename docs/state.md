@@ -4,9 +4,15 @@ This file is the handoff between coding agents. It describes what is in flight
 right now, not the permanent architecture (that's
 [`architecture.md`](architecture.md)).
 
-**Last updated:** 2026-08-18 — by Claude Code: **the athlete's weight on
+**Last updated:** 2026-08-19 — by Claude Code: **printable one-page
+running-order schedule** — "Print schedule" on the Plan tab opens a
+landscape print view (`Cmd/Ctrl+P` → Save as PDF), all tatamis side by side,
+built entirely on the Plan tab's existing scheduling engine. See "In flight"
+below.
+
+Previously, 2026-08-18 — by Claude Code: **the athlete's weight on
 kumite entry rows in Review**, so an entry can be judged against the category it
-is in. See "In flight" below.
+is in.
 
 Previously, same day — by Claude Code: **the whole event's
 entry list, all clubs, as a printable document and a workbook** — the
@@ -136,6 +142,144 @@ port; those have since been pushed.) Everything here is verified locally against
 a database, never against production data.
 
 ## In flight (uncommitted)
+
+**Printable one-page running-order schedule (2026-08-19).**
+
+Request: print/export the event schedule to PDF, one page, running order
+across all tatamis. Told explicitly to investigate before building — the
+Estimator only computes total duration, not a per-tatami running order, and
+the brief flagged that as a real possibility this request was out of scope.
+
+**Investigation result: case (a).** The Plan tab (`pages/hub/Plan.tsx`,
+landed in commits `84c6c39`/`3c32f2a`) already has a complete wall-clock
+scheduling engine, not just an estimate — `lib/schedule.ts`'s
+`buildSchedule()` turns "which categories sit on which floor, in what
+order" (real data: `Draw.matId`/`Draw.matOrder`, `ScheduleBlock` for
+ceremonies/breaks, the event's stored timing config) into an actual
+per-mat timeline with `startMin`/`endMin` for every category and every
+break. This is what the existing `ScheduleTimeline` component already
+draws on screen. So this feature is UI-only, exactly as the brief's case
+(a) described — no new scheduling logic, reuse the engine wholesale.
+
+**What's new:** `lib/schedule-print.ts` — pure percentage-based layout math
+(`layoutPercent`, `hourTicks`), because the on-screen timeline positions
+items in *pixels* at a chosen zoom level, which is the wrong shape for a
+fixed physical page: a printout has to fit one sheet regardless of how many
+hours the plan spans, so every item is placed as a percentage of the day's
+total span instead, inside a grid sized in `mm` (`GRID_HEIGHT_MM`,
+estimated from A4 landscape minus margins minus the header — see
+Verification for what was and wasn't confirmed about the estimate).
+
+Also new: `isTeamCategory(title)` — team events aren't a division-level
+flag in the data model (a division's `category` is only KATA/KUMITE;
+individual vs. team is an entry-level `entryType`), but every team division
+in this app's own templates (`backend/src/data/wkf-template.ts`) puts
+"Team" literally in the name ("Cadet Male Team Kata", "Senior Female Team
+Kumite"). Matching on the title is an honest heuristic for a print-only
+concern rather than a schema change — flagged in the code as exactly that,
+including its one real limitation (a manually renamed division without the
+word "Team" would defeat it).
+
+**Page:** `pages/PlanPrint.tsx`, route `/plan/print/:eventId`, sits outside
+the hub's chrome — same reasoning as `pages/EntrySheet.tsx` and
+`pages/EventEntryList.tsx`: a document that gets saved as PDF should show
+on screen exactly what prints, and `AppShell`'s nav/padding would fight
+that. Wrapped in the existing `.paper` class (re-themes CSS custom
+properties to the light palette regardless of the app's dark-mode default —
+already built for the entry sheet, reused as-is). Fetches `getPlanBoard`
+directly and builds the `ScheduleInput` from the board's own server-side
+`matId`/`matOrder`, skipping the interactive Plan tab's local drag-state
+("lanes") layer entirely — this page is read-only, so there's nothing to
+react to mid-drag.
+
+**Print CSS:** a page-local `<style>` block sets `@page { size: A4
+landscape; margin: 10mm; }` inside `@media print`, deliberately *not*
+touching `index.css`'s existing global `@page` rule (A4 portrait, built for
+the entry-confirmation sheet) — only this one route needs the wider page,
+and a global change would have flipped every other printable page in the
+app to landscape too. Toolbar and the warnings banner are `print:hidden`
+(Tailwind's built-in variant, already used elsewhere in the app); `.paper`
+and the existing `.print-keep` (`break-inside: avoid`) convention are
+reused rather than reinvented.
+
+**Content, matching the brief:** masthead, event name, formatted date,
+"Provisional schedule" caption, "Generated at [timestamp]"; one column per
+tatami with an hour-gridline time gutter; each block shows division name,
+kata/kumite, team flag, start time, entry count, duration; venue-wide bands
+(opening/closing/lunch) drawn as a strip across every column, matching
+`ScheduleTimeline`'s existing visual language (same color functions from
+`components/plan/plan-visuals.ts`, reused rather than re-derived so a
+printed copy and the live board can never visually disagree). Any
+`schedule.warnings` (unplaced categories, unscheduled blocks) show as a
+`print:hidden` heads-up in the toolbar so whoever's about to print knows
+the sheet might be incomplete, but don't clutter the printed page itself.
+
+**Location & permission:** "Print schedule" button in the Plan tab's "The
+day, to scale" section header, gated on `canManage` — the same
+`canManageEvent` check that already gates every other management control
+on that page (admin, or this event's coordinator). The brief said
+"coordinator+admin gated (same as Plan)"; the Plan *tab* itself is open to
+`ALL` roles, but its management actions are `canManage`-gated, and printing
+read the brief as matching that stricter gate rather than the tab's own
+broader visibility. The print route itself re-checks `canManage` in-page
+(same pattern as `pages/Scoreboard.tsx`), since it's a standalone route
+reachable by direct URL, not nested under the hub's own route guard.
+
+Files: `frontend/src/lib/schedule-print.ts` (new),
+`frontend/src/pages/PlanPrint.tsx` (new), `frontend/src/pages/hub/Plan.tsx`,
+`frontend/src/App.tsx`, `frontend/scripts/test-schedule-print.ts` (new). No
+backend changes — everything needed already existed in `getPlanBoard` and
+`buildSchedule`.
+
+### Verification (run 2026-08-19)
+
+`backend` / `frontend`: `npx tsc --noEmit` both clean (backend untouched,
+checked anyway). `npx tsx scripts/test-schedule-print.ts` — 18 checks on
+`layoutPercent` (top/height percentages, clamping outside the day's own
+range, the zero-span degenerate case), `hourTicks` (rounds out to whole
+hours, a sub-hour day still gets two ticks), and `isTeamCategory` (matches
+the real template names, case-insensitive, word-boundary so "Steam Room
+Division" doesn't false-positive on the substring "team"). Every other
+frontend pure-logic test (`test-schedule`, `test-autoschedule`,
+`test-scoreboard`, `test-draws`, `test-timing`, `test-estimator`) re-run
+clean as regressions, since this touches `lib/schedule.ts`'s consumers but
+not the file itself.
+
+**Went further than "not verified in-browser" this time — loaded it with
+real data.** Started both servers locally against the seeded "Goju Kai
+Namibia Championships 2026 (Test)" event (3 mats, 43 categories, 303
+bouts, real ceremonies/breaks already planned) and opened
+`/plan/print/:eventId` directly. Confirmed on screen: the "Print schedule"
+button renders in the Plan tab exactly where intended; the print page
+renders the full masthead, three correctly-labeled tatami columns, hour
+gridlines, and every category block with the right discipline, time,
+duration and entry count text (spot-checked against the page's own visible
+text, e.g. "KATA BOYS 7 · Kata · 08:30 · 29min · 6 entries"); both
+venue-wide bands (Opening ceremony, spanning all three columns) and
+per-mat blocks (this event's Lunch break was configured per-floor, not
+venue-wide — both render correctly, confirming both code paths); the
+`.paper` light-theme override renders correctly even though the app itself
+was in dark mode; no console errors traceable to this feature (the only
+console errors present were pre-existing `/api/auth/me` 401s from the
+unrelated dev-auth fallback flow, confirmed via the network log, not
+caused by this page — `/api/plan/board` itself returned 200). Also
+confirmed via JS that the `mm`-based grid sizing resolves to a sane pixel
+value on screen (155mm → ~586px, matching the browser's own mm-to-px
+conversion), which is the strongest evidence available short of an actual
+print job that the print-time sizing math is sound.
+
+**What is genuinely still unverified, and needs staging (or a real
+printer/PDF check) rather than more of this session:** whether the
+schedule actually lands on *one physical page* when printed — the 155mm
+grid-height budget is an estimate (A4 landscape usable height minus this
+page's margins minus the header block), not a measurement against a real
+print preview or an exported PDF. No team division existed in the seeded
+test data, so `isTeamCategory`'s rendering path (the "· Team" badge) was
+unit-tested but not seen rendered live. `window.open` from the Plan tab's
+button wasn't confirmed opening a real new tab in this browser-automation
+session (a popup-blocker-shaped gap in the tooling, not necessarily the
+app) — reaching the page by direct URL navigation was confirmed instead,
+which exercises everything except that one `window.open` call itself.
 
 **Review: the athlete's own weight on kumite entries (2026-08-18).**
 

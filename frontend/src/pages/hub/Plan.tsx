@@ -8,6 +8,7 @@ import {
   LayoutGrid,
   Layers,
   Plus,
+  Printer,
   Sparkles,
   Swords,
 } from "lucide-react"
@@ -627,21 +628,33 @@ export default function PlanPage() {
       {/* ---------- Timeline ---------- */}
       <Card>
         <CardContent className="p-4">
-          <button
-            type="button"
-            className="mb-1 flex w-full items-center gap-2 text-left"
-            onClick={() => setTimelineOpen((v) => !v)}
-            aria-expanded={timelineOpen}
-          >
-            <LayoutGrid className="size-4 text-muted-foreground" />
-            <span className="font-display text-lg tracking-wide">The day, to scale</span>
-            <ChevronDown
-              className={cn(
-                "ml-auto size-4 text-muted-foreground transition-transform",
-                timelineOpen && "rotate-180",
-              )}
-            />
-          </button>
+          <div className="mb-1 flex w-full items-center gap-2">
+            <button
+              type="button"
+              className="flex flex-1 items-center gap-2 text-left"
+              onClick={() => setTimelineOpen((v) => !v)}
+              aria-expanded={timelineOpen}
+            >
+              <LayoutGrid className="size-4 text-muted-foreground" />
+              <span className="font-display text-lg tracking-wide">The day, to scale</span>
+              <ChevronDown
+                className={cn(
+                  "size-4 text-muted-foreground transition-transform",
+                  timelineOpen && "rotate-180",
+                )}
+              />
+            </button>
+            {canManage && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => window.open(`/plan/print/${eventId}`, "_blank", "noopener")}
+              >
+                <Printer className="size-3.5" />
+                Print schedule
+              </Button>
+            )}
+          </div>
           {timelineOpen && (
             <ScheduleTimeline schedule={schedule} categoriesByDrawId={categoriesByDrawId} />
           )}
