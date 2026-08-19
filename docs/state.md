@@ -4,11 +4,15 @@ This file is the handoff between coding agents. It describes what is in flight
 right now, not the permanent architecture (that's
 [`architecture.md`](architecture.md)).
 
-**Last updated:** 2026-08-19 — by Claude Code: **printable one-page
+**Last updated:** 2026-08-19 — by Claude Code: fixed a print-schedule bug —
+**categories under ~30 minutes lost their label entirely**, since a block's
+height was strictly proportional to its duration with no floor. Every
+block now gets a minimum height first. See "In flight" below.
+
+Previously, same day — by Claude Code: **printable one-page
 running-order schedule** — "Print schedule" on the Plan tab opens a
 landscape print view (`Cmd/Ctrl+P` → Save as PDF), all tatamis side by side,
-built entirely on the Plan tab's existing scheduling engine. See "In flight"
-below.
+built entirely on the Plan tab's existing scheduling engine.
 
 Previously, 2026-08-18 — by Claude Code: **the athlete's weight on
 kumite entry rows in Review**, so an entry can be judged against the category it
@@ -142,6 +146,114 @@ port; those have since been pushed.) Everything here is verified locally against
 a database, never against production data.
 
 ## In flight (uncommitted)
+
+**Print schedule: short categories were losing their label entirely
+(2026-08-19).**
+
+Bug report: "when a category is shorter than 30mins, the category name or
+details don't show." User's own suggestion ("extend the schedule
+timeframe") wouldn't have helped — stretching the total span shrinks every
+block's *relative* share of the page equally, so a 20-minute category stays
+just as visually tiny relative to an 8-hour day no matter how that day's
+total length is framed. The bug picked "shorter than 30 minutes" from the
+seeded test data (categories mostly ran 24-40 minutes on an 8h25m day) but
+is really "however short relative to the whole day" — with a shorter or
+longer day, or more/fewer mats, the exact minute cutoff moves.
+
+**Root cause.** `layoutPercent` (`lib/schedule-print.ts`) sized every block
+strictly proportional to its real duration, with a separate `showLabel =
+heightPct >= 4.5%` gate in `PlanPrint.tsx` that just... didn't render
+anything below that. A block that was too small to hold its own text
+disappeared outright rather than degrading gracefully — silently losing
+the category from the printout, not just making it hard to read.
+
+**Fix — option 1 from the brief (minimum block height), not option 3
+(extend the timeframe) or option 4 (overflow labels).** New
+`layoutMatColumn` in `lib/schedule-print.ts` replaces the old
+per-item-independent `layoutPercent` call for every mat's category/block
+items with a proper stacking pass:
+1. Walk one mat's items in time order (already guaranteed non-overlapping
+   and sequential — `ScheduledMat.items` is built by a single advancing
+   cursor in `lib/schedule.ts`). Floor each item's height at
+   `MIN_BLOCK_HEIGHT_PCT` (2.6%, enough for one line of title text) and
+   push its top down to clear whatever the previous item grew into, so a
+   floored block never overlaps the next one.
+2. If enough short blocks stack up that the floor pushes the column's
+   total past 100% (the bottom of the physical page), scale that whole
+   column back down proportionally so it still fits on one page — a soft
+   floor under genuine overflow pressure, bounded rather than silently
+   broken. This is what the brief's own "they'll still slightly compress
+   each other but every one is legible" describes; normal data (most days
+   have some slack) never reaches it.
+
+Text now has two tiers instead of one all-or-nothing gate: every block
+clears the floor, so the **title always renders**. A second, `COMPACT_
+DETAIL_HEIGHT_PCT` (5.5%) governs only whether the *second* line (full
+discipline/duration/entry-count detail) has room — below it, that line is
+replaced by folding just the real start time onto the title's own line
+("KUMITE GIRLS 8-9 · O31kg · 10:01"), so a compressed block still states
+an accurate time even with no room for anything else. Matches the brief's
+explicit ask: "the block still shows accurate start-time/duration in its
+text, so no information is lost."
+
+**Time positioning:** the hour grid and every block's own *top* edge are
+untouched by this fix — a block still starts exactly at its true time
+(`layoutMatColumn`'s stacking only ever pushes a block *later* than where
+a previous floored block's bottom edge lands, never earlier, and only when
+that previous block needed the floor at all). What drifts from strict
+proportionality is a block's *bottom* edge, and only for blocks that
+needed stretching to stay legible — flagged in the code comment, as asked.
+
+**Print CSS:** no separate change needed beyond the layout math itself.
+`GRID_HEIGHT_MM` (155mm, unchanged) is still the hard ceiling every mat
+column resolves within — `layoutMatColumn`'s pass 2 is exactly what
+guarantees a compressed column can't exceed 100% of it, so "still fits on
+one page" is now a property of the layout function itself, not something
+the CSS separately has to arrange for.
+
+Files: `frontend/src/lib/schedule-print.ts`,
+`frontend/src/pages/PlanPrint.tsx`,
+`frontend/scripts/test-schedule-print.ts`.
+
+### Verification (run 2026-08-19)
+
+`backend` / `frontend`: `npx tsc --noEmit` both clean. `npx tsx
+scripts/test-schedule-print.ts` extended to 29 checks (up from 18): the
+unaffected normal case (comfortably long items match plain `layoutPercent`
+exactly, proving the fix doesn't distort what wasn't broken), the bug's
+own scenario (a 20-minute item on a 600-minute day floored to the minimum,
+the next item pushed down to clear it, and *visually* later than its own
+true time — the one traded-off property, confirmed rather than assumed),
+the overflow-into-rescale fallback (30 five-minute items forced to
+compress — column stays within [100% - ε, 100%], strictly ordered with no
+overlaps, and every item keeps *some* height rather than being zeroed
+out), and edge cases (empty column, zero total span). All other frontend
+pure-logic suites re-run clean as regressions.
+
+**Verified against a real short-category scenario, per the brief — not
+just synthetic unit inputs.** Rather than editing the seeded schedule's
+real categories, added a genuine 12-minute `ScheduleBlock` via the live
+`POST /plan/board` API to the seeded event's Tatami 1 (2.4% of that day's
+~505-minute span — well under both the old 4.5% show/hide gate and the
+new 2.6% floor, so it exercises the exact failure the report describes)
+and loaded `/plan/print/:eventId` against it. Confirmed on screen and via
+extracted page text: the new block rendered as `"Photo break — very short
+· 15:57"` — previously it would have rendered nothing. Also noticed and
+confirmed, unprompted: several of the seeded event's own real categories
+(weight-subdivided kumite brackets, PARA categories — short by nature,
+few entries) were *already* silently missing under the old code and now
+show at least a compact line too, e.g. `"KUMITE GIRLS 8-9 · O31kg ·
+10:01"` — the bug was live in the already-shipped feature's own demo
+data, not just a hypothetical. No console errors traceable to the change
+(only the pre-existing, unrelated `/api/auth/me` dev-auth-fallback 401
+noise). The synthesized test block was deleted via the API afterward —
+nothing left behind in the seeded event.
+
+**Not verified in physical print** — same caveat as the original feature,
+still open: whether the compressed layout actually lands on one physical
+A4 landscape sheet has not been checked against a real print preview or
+an exported PDF, only against the layout math's own [0, 100]% guarantee
+and an on-screen render at browser DPI.
 
 **Printable one-page running-order schedule (2026-08-19).**
 

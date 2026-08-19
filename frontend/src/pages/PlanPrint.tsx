@@ -32,7 +32,7 @@ import {
   type ScheduleCategoryInput,
   type ScheduleInput,
 } from "@/lib/schedule"
-import { hourTicks, isTeamCategory, layoutPercent } from "@/lib/schedule-print"
+import { hourTicks, isTeamCategory, layoutMatColumn, layoutPercent } from "@/lib/schedule-print"
 import { blockSurface, blockText, categorySurface, SPAN_ALL_HATCH } from "@/components/plan/plan-visuals"
 
 const toScheduleCategory = (c: PlanCategory): ScheduleCategoryInput => ({
@@ -56,10 +56,18 @@ const formatGeneratedAt = (d: Date) =>
 // Estimated, not measured — the actual fit wants checking on a real print
 // preview (see docs/state.md); if the header ever grows this needs revisiting.
 const GRID_HEIGHT_MM = 155
-// Below this, a block can't hold its two lines of text without spilling
-// into its neighbours — same reasoning as ScheduleTimeline's LABEL_MIN_PX,
-// expressed as a share of the grid instead of a pixel count.
-const LABEL_MIN_HEIGHT_PCT = 4.5
+// Every block is floored at this height regardless of its real duration —
+// enough for one line of the category name — via lib/schedule-print.ts's
+// layoutMatColumn. Sizing strictly proportional to duration (the previous
+// behaviour) meant a 15-20 minute category could shrink below the height
+// its own text needs, and the label just disappeared: the bug this fixes.
+const MIN_BLOCK_HEIGHT_PCT = 2.6
+// At or above this, there's room for the full two-line detail (discipline,
+// time, duration, entries) under the title. Below it — a block that only
+// cleared the floor above, not its natural size — the detail line drops to
+// a compact single line (still the real start time, just nothing else), per
+// the fix's brief: no information silently lost, just less of it at once.
+const COMPACT_DETAIL_HEIGHT_PCT = 5.5
 
 export default function PlanPrintPage() {
   const { eventId = "" } = useParams()
@@ -220,46 +228,55 @@ export default function PlanPrintPage() {
               })}
             </div>
 
-            {schedule.mats.map((mat) => (
-              <div key={mat.id} className="relative min-w-0 flex-1">
-                <div className="absolute inset-0 rounded border bg-muted/10" aria-hidden />
-                <p className="absolute -top-4 left-0 right-0 truncate text-center text-[10px] font-semibold uppercase tracking-wide">
-                  {mat.name}
-                </p>
-                {mat.items.map((item) => {
-                  const { topPct, heightPct } = layoutPercent(
-                    item.startMin,
-                    item.endMin,
-                    schedule.dayStartMin,
-                    totalSpanMin,
-                  )
-                  const category = item.category ? categoriesByDrawId.get(item.id) : undefined
-                  const isKumite = category?.category === "KUMITE"
-                  const team = category ? isTeamCategory(categoryTitle(category)) : false
-                  const showLabel = heightPct >= LABEL_MIN_HEIGHT_PCT
-                  return (
-                    <div
-                      key={`${item.kind}:${item.id}`}
-                      className={cn(
-                        "absolute inset-x-0.5 overflow-hidden rounded border px-1 py-0.5",
-                        item.kind === "CATEGORY"
-                          ? categorySurface(!!isKumite, category?.status ?? null)
-                          : cn("border-dashed", blockSurface(item.block!.kind)),
-                      )}
-                      style={{ top: `${topPct}%`, height: `${heightPct}%` }}
-                    >
-                      {showLabel && (
-                        <>
-                          <p
-                            className={cn(
-                              "truncate text-[9px] font-semibold leading-tight",
-                              item.kind === "BLOCK" && blockText(item.block!.kind),
-                            )}
-                          >
-                            {category ? categoryTitle(category) : item.title}
-                            {team && <span className="ml-1 font-normal uppercase text-belt-purple">· Team</span>}
-                          </p>
-                          {item.kind === "CATEGORY" ? (
+            {schedule.mats.map((mat) => {
+              const laidOut = layoutMatColumn(mat.items, schedule.dayStartMin, totalSpanMin, MIN_BLOCK_HEIGHT_PCT)
+              const layoutById = new Map(laidOut.map((l) => [l.id, l]))
+              return (
+                <div key={mat.id} className="relative min-w-0 flex-1">
+                  <div className="absolute inset-0 rounded border bg-muted/10" aria-hidden />
+                  <p className="absolute -top-4 left-0 right-0 truncate text-center text-[10px] font-semibold uppercase tracking-wide">
+                    {mat.name}
+                  </p>
+                  {mat.items.map((item) => {
+                    const { topPct, heightPct } = layoutById.get(item.id) ?? { topPct: 0, heightPct: 0 }
+                    const category = item.category ? categoriesByDrawId.get(item.id) : undefined
+                    const isKumite = category?.category === "KUMITE"
+                    const team = category ? isTeamCategory(categoryTitle(category)) : false
+                    // Every block clears MIN_BLOCK_HEIGHT_PCT, so the title
+                    // always fits — only the second, more detailed line is
+                    // conditional on there being room for it.
+                    const compact = heightPct < COMPACT_DETAIL_HEIGHT_PCT
+                    return (
+                      <div
+                        key={`${item.kind}:${item.id}`}
+                        className={cn(
+                          "absolute inset-x-0.5 overflow-hidden rounded border px-1 py-0.5",
+                          item.kind === "CATEGORY"
+                            ? categorySurface(!!isKumite, category?.status ?? null)
+                            : cn("border-dashed", blockSurface(item.block!.kind)),
+                        )}
+                        style={{ top: `${topPct}%`, height: `${heightPct}%` }}
+                      >
+                        <p
+                          className={cn(
+                            "truncate text-[9px] font-semibold leading-tight",
+                            item.kind === "BLOCK" && blockText(item.block!.kind),
+                          )}
+                        >
+                          {category ? categoryTitle(category) : item.title}
+                          {team && <span className="ml-1 font-normal uppercase text-belt-purple">· Team</span>}
+                          {/* Compact: the one thing a full detail line would
+                              have said that isn't in the title — the real
+                              start time — folded onto the title's own line
+                              rather than dropped. */}
+                          {compact && (
+                            <span className="ml-1 font-normal normal-case text-muted-foreground">
+                              · {formatClock(item.startMin)}
+                            </span>
+                          )}
+                        </p>
+                        {!compact &&
+                          (item.kind === "CATEGORY" ? (
                             <p className="truncate text-[8px] leading-tight text-muted-foreground">
                               {isKumite ? "Kumite" : "Kata"} · {formatClock(item.startMin)} ·{" "}
                               {formatSpan(item.minutes)} · {category?.entryCount ?? 0} entries
@@ -268,14 +285,13 @@ export default function PlanPrintPage() {
                             <p className="truncate text-[8px] leading-tight text-muted-foreground">
                               {formatClock(item.startMin)} · {formatSpan(item.minutes)}
                             </p>
-                          )}
-                        </>
-                      )}
-                    </div>
-                  )
-                })}
-              </div>
-            ))}
+                          ))}
+                      </div>
+                    )
+                  })}
+                </div>
+              )
+            })}
 
             {/* Venue-wide bands sit above every column */}
             {schedule.bands.map((band) => {
@@ -295,7 +311,7 @@ export default function PlanPrintPage() {
                     blockText(band.kind),
                     SPAN_ALL_HATCH,
                   )}
-                  style={{ top: `${topPct}%`, height: `${Math.max(heightPct, 1.5)}%` }}
+                  style={{ top: `${topPct}%`, height: `${Math.max(heightPct, MIN_BLOCK_HEIGHT_PCT)}%` }}
                 >
                   <span className="truncate text-[9px] font-semibold uppercase tracking-wide">{band.label}</span>
                   <span className="shrink-0 text-[9px] tabular-nums opacity-80">
