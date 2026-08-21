@@ -23,7 +23,7 @@ import { useAuth } from "@/contexts/AuthContext"
 import { Button } from "@/components/ui/button"
 import { PageSpinner } from "@/components/UIState"
 import { cn } from "@/lib/utils"
-import { categoryTitle, getPlanBoard, type PlanCategory } from "@/lib/plan"
+import { categoryTitle, getPlanBoard, toScheduleCategory, type PlanCategory } from "@/lib/plan"
 import {
   buildSchedule,
   formatClock,
@@ -34,16 +34,6 @@ import {
 } from "@/lib/schedule"
 import { formatTimeRange, hourTicks, isTeamCategory, layoutMatColumn, layoutPercent } from "@/lib/schedule-print"
 import { blockSurface, blockText, categorySurface, SPAN_ALL_HATCH } from "@/components/plan/plan-visuals"
-
-const toScheduleCategory = (c: PlanCategory): ScheduleCategoryInput => ({
-  drawId: c.drawId!,
-  title: categoryTitle(c),
-  isKata: c.category === "KATA",
-  entryCount: c.entryCount,
-  drawEntryCount: c.drawEntryCount,
-  boutDurationSec: c.boutDurationSec,
-  bufferPct: c.bufferPct,
-})
 
 const formatDate = (iso: string) =>
   new Date(iso).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric" })
