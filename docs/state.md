@@ -4,10 +4,15 @@ This file is the handoff between coding agents. It describes what is in flight
 right now, not the permanent architecture (that's
 [`architecture.md`](architecture.md)).
 
-**Last updated:** 2026-08-19 — by Claude Code: print-schedule polish — every
+**Last updated:** 2026-08-21 — by Claude Code: **call-up sheets** — one
+printable page per division for the tatami coordinator gathering athletes
+ahead of a category (AKA/red vs AO/blue, bout order, bronze bouts), plus a
+per-mat batch print for a whole floor's day. See "In flight" below.
+
+Previously, 2026-08-19 — by Claude Code: print-schedule polish — every
 block (and venue-wide band) now shows its **start–end time range**
 ("10:30 – 10:45"), not just the start time, so the finish doesn't have to
-be eyeballed from the block's height. See "In flight" below.
+be eyeballed from the block's height.
 
 Previously, same day — by Claude Code: fixed a print-schedule bug —
 **categories under ~30 minutes lost their label entirely**, since a block's
@@ -151,6 +156,170 @@ port; those have since been pushed.) Everything here is verified locally against
 a database, never against production data.
 
 ## In flight (uncommitted)
+
+**Call-up sheets for tatami coordinators (2026-08-21).**
+
+Request: a printable, one-division-per-page sheet a coordinator uses to
+physically gather athletes before their category — seat them on the AKA
+(red) or AO (blue) *equipment belt* side (not karate rank), in fight order,
+so they're ready to walk on. Two entry points: one division at a time from
+the Draws page, and a batch "every division on this floor" from the Plan
+tab, ordered by scheduled time.
+
+**Data — no backend work needed.** Everything already existed:
+`DrawBout.aka`/`ao` already carry name + club flattened (no separate
+athlete/club lookup), `phase`/`round`/`position` already encode the bracket
+structure including repechage, and `getPlanBoard` + `buildSchedule` (built
+for the print-schedule feature) already know which draws sit on which mat,
+in what order, and roughly when they'll start. This feature is pure
+frontend reuse of both.
+
+**New `lib/callup.ts`** — bout ordering, TBD handling, and bronze-bout
+labeling, unit tested (`scripts/test-callup.ts`):
+- `roundLabel` ("Final"/"Semi-finals"/"Quarter-finals"/"Round of N") was a
+  private function inside `components/draws/BracketView.tsx`; moved to
+  `lib/draws.ts` (alongside the podium feature's `isFinalBout`) and
+  re-exported so the bracket view and the call-up sheet name rounds
+  identically instead of risking two conventions drifting apart. No logic
+  change, pure relocation.
+- **A bout is dropped from the sheet only when it's already decided with a
+  side missing** — a bye or walkover that auto-advanced without a real
+  opponent, nothing happens on the mat for it. Caught a real bug in my own
+  first draft here: `winnerEntryId === null` with *both* sides still
+  unknown (a normal later-round bout, e.g. an undecided final waiting on
+  both semis) was being wrongly dropped by an over-eager "both empty ->
+  skip" check, when it's exactly the kind of bout the coordinator needs to
+  see coming. Caught by the unit tests themselves, not in review — the
+  test for the pending-final scenario failed against the first
+  implementation and named the bug precisely.
+- **TBD slots reference their real predecessor where that's cheap and
+  exact, and say so plainly where it isn't.** A main-bracket bout's
+  predecessor is exact bracket math (`round-1, position*2 + side`) — the
+  same relationship `DrawService.computeDrawState` builds the tree with —
+  so "TBD (from Quarter-finals — Bout 2)" is precise. A repechage bout's
+  stage-1 predecessor is sourced from a full finalist-path trace that only
+  exists in that backend service; reproducing it here would mean
+  duplicating real backend logic for a print-only label, so a pending
+  repechage slot reads "TBD (result pending)" instead — flagged in the
+  code as a deliberate simplification, not an oversight.
+- **Bronze bouts** get one labeled sub-bracket per side ("Bronze 1",
+  "Bronze 2"); a side that's a multi-stage WKF double-repechage chain gets
+  "Bronze 1.1", "Bronze 1.2", ... so every stage is individually
+  identifiable rather than colliding on one label.
+- **Kata** reuses the exact same bout-row builders (`kumiteMainRows`/
+  `kumiteBronzeRows` work identically regardless of discipline — a bout is
+  a bout) and flattens each row's two sides into individual "Performance
+  N" entries, AKA's slot before AO's (WKF's standard sequential order), with
+  no AKA/AO label surfacing anywhere in the kata output — the coordinator
+  needs "who's next", not which side of the floor. Bronze performances get
+  their own numbering, reset at 1, under a separate "Bronze performances"
+  heading — mirroring the "Bronze 1"/"Bronze 2" sub-bracket split kumite
+  already has, since a kata coordinator needs to know about the bronze
+  bracket too, just without a side to track.
+
+**Page (`pages/CallupPrint.tsx`)** handles both routes with one component:
+`/callup/print/:eventId/:drawId` (one division) and `/callup/print/:eventId/
+mat/:matNumber` (every drawn division on that floor, ordered by
+`matOrder` — the same field the schedule reads) both resolve to a list of
+"targets" (length 1 or N) rendered by the same per-division section.
+`:matNumber` is a 1-based index into the already-ordered `board.mats`
+array, not the mat's own (not necessarily contiguous) `order` field or its
+freeform name — the button that opens this route already has the array
+index in hand, so this avoids parsing anything fragile out of a URL.
+
+Sits outside the hub chrome (same reasoning as `PlanPrint.tsx`/
+`EntrySheet.tsx`), wrapped in the existing `.paper` light-theme override.
+**A4 portrait**, and deliberately *doesn't* add a local `@page` override the
+way `PlanPrint.tsx` did for landscape — the app's existing global `@page`
+rule in `index.css` is already A4 portrait, built for the entry-
+confirmation sheet, and this page just inherits it.
+
+**"One division per page" is a page-break rule (`break-after-page` per
+section), not a forced-fit like the multi-tatami schedule.** A call-up
+sheet is a flowing list with no natural "compress to fit" dimension the
+way a duration-sized time block has, so a large bracket's sheet is allowed
+to spill onto a second physical page rather than being artificially
+shrunk — the constraint is "don't mix two divisions on one page," not
+"every division must be exactly one sheet."
+
+**Checkboxes are drawn CSS squares, not `<input type="checkbox">`** — a
+call-up sheet is printed and then hand-ticked with a pen, not clicked on
+screen, and native checkbox print rendering is inconsistent across
+browsers.
+
+**Entry points, both `canManage`-gated (admin, or this event's
+coordinator) — same gate as Plan's own management controls and the print-
+schedule button, per the brief:**
+- Draws page: "Print call-up sheet" next to the existing bracket "Print"
+  button.
+- Plan tab: "Print call-up sheets" added to each floor's existing options
+  dropdown (`components/plan/PlanBoard.tsx`) — that menu already had
+  Rename/Add-a-break/Remove, so a new print action fits the existing
+  pattern rather than needing a new UI element. `PlanBoard` gained an
+  `eventId` prop and each `MatColumn` its 1-based `matNumber` to build the
+  URL.
+
+Files: `frontend/src/lib/draws.ts`, `frontend/src/lib/callup.ts` (new),
+`frontend/src/pages/CallupPrint.tsx` (new), `frontend/src/pages/Draws.tsx`,
+`frontend/src/pages/hub/Plan.tsx`,
+`frontend/src/components/plan/PlanBoard.tsx`,
+`frontend/src/components/draws/BracketView.tsx`, `frontend/src/App.tsx`,
+`frontend/scripts/test-callup.ts` (new). No backend changes.
+
+### Verification (run 2026-08-21)
+
+`backend` / `frontend`: `npx tsc --noEmit` both clean (backend untouched,
+checked anyway). `npx tsx scripts/test-callup.ts` — 22 checks: bout
+ordering and round labeling, the pending-final bug caught and fixed mid-
+session (see above), byes/walkovers dropped without a phantom row, single-
+stage vs. multi-stage bronze labeling, an empty bronze side producing
+nothing, kata flattening's numbering and aka-then-ao ordering, and
+`buildCallupSheet` picking the right shape by discipline. Every other
+frontend pure-logic suite re-run clean as regressions, including
+`test-draws.ts` (the `roundLabel` relocation's only real risk).
+
+**Verified against real data, both routes, both disciplines, in one
+session** — not left to "should work": loaded the seeded event's actual
+brackets in a live dev server.
+- Single-division, a 9-of-16 kumite bracket: confirmed byes correctly
+  excluded (only the one real Round-of-16 bout appears), quarter-finals
+  correctly mixed (some slots filled from byes, others genuinely TBD), and
+  both semis and the final correctly reading "TBD (from ...)" referencing
+  the exact right predecessor bout — traced by hand against the bracket
+  math and matched exactly.
+- Batch mode for a mat with mixed disciplines: confirmed a kata division
+  and a kumite division on the same floor both render correctly in the
+  same batch, in schedule-time order (kata's earlier start time placed it
+  first), each in its own correct format.
+- A kata division with a bout already decided: confirmed the winner's name
+  correctly appears *twice* — once in their own bout, once already filled
+  into their next bout's slot — while their next opponent still reads TBD.
+  This is the one behavior that most needed a real, decided bracket to
+  actually exercise rather than a synthetic fixture, and it worked exactly
+  as designed on the first real check.
+- No console errors traceable to this feature in either route (only the
+  same pre-existing, unrelated `/api/auth/me` dev-auth-fallback 401 noise
+  already documented several times in this file's history).
+- The "Print call-up sheet" button on the Draws page was confirmed
+  visible, correctly labeled, and clickable; clicking it did not produce a
+  trackable new browser tab in this automation session (the same
+  `window.open` tooling limitation already noted for the print-schedule
+  feature, not an app-level issue) — the destination it points at was
+  instead verified directly by URL, which exercises everything the click
+  itself would have except the `window.open` call. The Plan tab's mat
+  dropdown item was added by the same code pattern but not independently
+  screenshotted — the board's drag-and-drop layout didn't scroll
+  predictably in this automation session; confirmed by reading the
+  component code instead.
+
+**Not verified in physical print** — same open item as every print feature
+in this file: not checked against a real print preview or an exported PDF,
+only an on-screen render. In particular unverified here specifically:
+whether the page-break rule actually starts each division on a fresh
+sheet when printed, and whether a large bracket's multi-page spill reads
+cleanly rather than awkwardly splitting a table mid-row (the `.print-keep`
+`break-inside: avoid` on each row is meant to prevent that, but hasn't
+been checked against real pagination).
 
 **Print schedule: show each block's end time, not just its start
 (2026-08-19).**

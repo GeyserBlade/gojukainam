@@ -663,6 +663,7 @@ export default function PlanPage() {
 
       {/* ---------- Board ---------- */}
       <PlanBoard
+        eventId={eventId}
         lanes={lanes}
         categoriesByDrawId={categoriesByDrawId}
         blocksById={blocksById}

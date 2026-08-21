@@ -29,6 +29,7 @@ const EntriesViewPage = lazy(() => import("./pages/EntriesView"));
 const EntrySheetPage = lazy(() => import("./pages/EntrySheet"));
 const EventEntryListPage = lazy(() => import("./pages/EventEntryList"));
 const PlanPrintPage = lazy(() => import("./pages/PlanPrint"));
+const CallupPrintPage = lazy(() => import("./pages/CallupPrint"));
 const DrawsPage = lazy(() => import("./pages/Draws"));
 const RunPage = lazy(() => import("./pages/Run"));
 const MatOperatorPage = lazy(() => import("./pages/MatOperator"));
@@ -110,6 +111,21 @@ const AppRoutes: React.FC = () => (
       <Route
         path="/plan/print/:eventId"
         element={<Protected><PlanPrintPage /></Protected>}
+      />
+
+      {/* Call-up sheets — one printable page per division, for the tatami
+          coordinator gathering athletes ahead of a category. Same
+          outside-the-hub reasoning as the schedule above. The mat route is
+          registered first only for readability; react-router already ranks
+          the literal "mat" segment over the single-division route's dynamic
+          :drawId regardless of order. */}
+      <Route
+        path="/callup/print/:eventId/mat/:matNumber"
+        element={<Protected><CallupPrintPage /></Protected>}
+      />
+      <Route
+        path="/callup/print/:eventId/:drawId"
+        element={<Protected><CallupPrintPage /></Protected>}
       />
 
       {/* Legacy paths → hub tabs */}

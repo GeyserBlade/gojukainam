@@ -3,7 +3,7 @@ import { Check, Medal, Timer, Trophy } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { cn } from "@/lib/utils"
-import type { DrawBout, DrawDetail, DrawEntrySummary } from "@/lib/draws"
+import { roundLabel, type DrawBout, type DrawDetail, type DrawEntrySummary } from "@/lib/draws"
 
 interface BracketViewProps {
   draw: DrawDetail
@@ -22,13 +22,6 @@ const OUTCOME_LABEL: Record<string, string> = {
   HANSOKU: "hansoku",
   KIKEN: "kiken",
   FLAGS: "flags",
-}
-
-function roundLabel(round: number, totalRounds: number, size: number): string {
-  if (round === totalRounds) return "Final"
-  if (round === totalRounds - 1) return "Semi-finals"
-  if (round === totalRounds - 2) return "Quarter-finals"
-  return `Round of ${size / 2 ** (round - 1)}`
 }
 
 interface FighterRowProps {

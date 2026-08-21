@@ -212,6 +212,20 @@ export function isFinalBout(draw: DrawDetail, bout: Pick<DrawBout, "phase" | "ro
 }
 
 /**
+ * "Final" / "Semi-finals" / "Quarter-finals" / "Round of N" — the naming
+ * convention already shown on the bracket view (components/draws/
+ * BracketView.tsx), moved here so callup.ts's call-up sheet can label a
+ * bout the same way rather than defining its own round names that could
+ * drift from what the coordinator sees on screen.
+ */
+export function roundLabel(round: number, totalRounds: number, size: number): string {
+  if (round === totalRounds) return "Final";
+  if (round === totalRounds - 1) return "Semi-finals";
+  if (round === totalRounds - 2) return "Quarter-finals";
+  return `Round of ${size / 2 ** (round - 1)}`;
+}
+
+/**
  * Both bronze-medal bouts' winners, or null while either side of the
  * repechage ladder is still undecided. Order is arbitrary (bracket-half
  * order, not seed order) — callers that care about display order should

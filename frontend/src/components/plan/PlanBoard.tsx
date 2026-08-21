@@ -20,7 +20,7 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable"
 import { CSS } from "@dnd-kit/utilities"
-import { CalendarPlus, Inbox, MoreVertical, Pencil, Plus, Trash2 } from "lucide-react"
+import { CalendarPlus, Inbox, MoreVertical, Pencil, Plus, Printer, Trash2 } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -126,6 +126,7 @@ function SortableRow({
 // ---------------------------------------------------------------------------
 
 export interface PlanBoardProps {
+  eventId: string
   lanes: Lanes
   categoriesByDrawId: Map<string, PlanCategory>
   blocksById: Map<string, PlanBlock>
@@ -153,6 +154,7 @@ export interface PlanBoardProps {
 
 export function PlanBoard(props: PlanBoardProps) {
   const {
+    eventId,
     lanes,
     categoriesByDrawId,
     blocksById,
@@ -324,12 +326,19 @@ export function PlanBoard(props: PlanBoardProps) {
           onSearchChange={onSearchChange}
         />
 
-        {mats.map((mat) => {
+        {mats.map((mat, index) => {
           const scheduledMat = schedule.mats.find((m) => m.id === mat.id)
           return (
             <MatColumn
               key={mat.id}
               mat={mat}
+              // 1-based position in this already-ordered list — matches
+              // pages/CallupPrint.tsx's :matNumber route param, which reads
+              // "the Nth mat" the same way rather than parsing the mat's
+              // own (not necessarily contiguous) `order` value or its
+              // freeform name.
+              matNumber={index + 1}
+              eventId={eventId}
               items={(lanes[mat.id] ?? []).filter(matchesSearch)}
               categoriesByDrawId={categoriesByDrawId}
               blocksById={blocksById}
@@ -471,6 +480,8 @@ function PoolColumn({
 
 function MatColumn({
   mat,
+  matNumber,
+  eventId,
   items,
   categoriesByDrawId,
   blocksById,
@@ -489,6 +500,8 @@ function MatColumn({
   onUnassign,
 }: {
   mat: { id: string; name: string }
+  matNumber: number
+  eventId: string
   items: LaneItem[]
   categoriesByDrawId: Map<string, PlanCategory>
   blocksById: Map<string, PlanBlock>
@@ -533,6 +546,12 @@ function MatColumn({
               <DropdownMenuItem onSelect={onAddBlock}>
                 <CalendarPlus />
                 Add a break here
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onSelect={() => window.open(`/callup/print/${eventId}/mat/${matNumber}`, "_blank", "noopener")}
+              >
+                <Printer />
+                Print call-up sheets
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem onSelect={onDelete} variant="destructive">

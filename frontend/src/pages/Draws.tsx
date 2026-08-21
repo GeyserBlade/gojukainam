@@ -412,6 +412,14 @@ export default function DrawsPage() {
                       <Button
                         variant="outline"
                         size="sm"
+                        onClick={() => window.open(`/callup/print/${eventId}/${draw.id}`, "_blank", "noopener")}
+                      >
+                        <Printer className="mr-1.5 h-3.5 w-3.5" />
+                        Print call-up sheet
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
                         onClick={() => lockMutation.mutate({ id: draw.id, locked: !draw.locked })}
                         disabled={busy}
                       >
