@@ -4,10 +4,16 @@ This file is the handoff between coding agents. It describes what is in flight
 right now, not the permanent architecture (that's
 [`architecture.md`](architecture.md)).
 
-**Last updated:** 2026-08-21 — by Claude Code: **call-up sheets** — one
+**Last updated:** 2026-08-21 — by Claude Code: **call-up sheets — kata now
+uses the same AKA/AO two-column table as kumite**, not a simplified
+single-column list. Kata divisions in this app are a real head-to-head
+bracket (won by flag majority, not points), so the coordinator's process
+is identical either way. See "In flight" below.
+
+Previously, same day — by Claude Code: **call-up sheets** — one
 printable page per division for the tatami coordinator gathering athletes
 ahead of a category (AKA/red vs AO/blue, bout order, bronze bouts), plus a
-per-mat batch print for a whole floor's day. See "In flight" below.
+per-mat batch print for a whole floor's day.
 
 Previously, 2026-08-19 — by Claude Code: print-schedule polish — every
 block (and venue-wide band) now shows its **start–end time range**
@@ -156,6 +162,68 @@ port; those have since been pushed.) Everything here is verified locally against
 a database, never against production data.
 
 ## In flight (uncommitted)
+
+**Call-up sheets: kata switches to the same paired AKA/AO table as kumite
+(2026-08-21).**
+
+Follow-up correction to the call-up sheet feature below. The original
+implementation gave kata a simplified single-column "Performance N: Athlete
+· Club" list, reasoning that kata is scored by an individual performance
+rather than a head-to-head bout. That reasoning didn't match how this app
+actually runs kata: the user's real coordinator workflow is identical for
+both disciplines, and — confirmed by reading the schema, `draw.service.ts`,
+and `KataScoreboard.tsx`, plus querying the seeded event's real kata
+brackets — kata bouts in this app **are** a real aka/ao head-to-head
+pairing (`Bout.akaEntryId`/`aoEntryId`, decided by 5-judge flag majority
+instead of points), running through the exact same binary-elimination
+bracket builder as kumite with zero category-based branching anywhere in
+the draw engine. There is no other division/category format in the schema
+(`CategoryType` is only `KATA`/`KUMITE`) that lacks this pairing, so there
+was no case left to gate a simplified format behind.
+
+**Change:** `lib/callup.ts`'s `CallupSheet` is no longer a discriminated
+union — it's always `{ mainRows: CallupBoutRow[]; bronzeRows:
+CallupBoutRow[] }`, the same aka/ao-pair shape kumite always used.
+`kumiteMainRows`/`kumiteBronzeRows` were renamed to `mainBoutRows`/
+`bronzeBoutRows` (dropping the "kumite" prefix, since there's no longer a
+kata-specific alternative) and `CallupDraw` dropped its now-unused
+`division.category` field — the module never needed to know which
+discipline it was building for. `pages/CallupPrint.tsx`'s `KataList`
+single-column component and the `sheet.isKata` branch were deleted; both
+disciplines now render through one `BoutTable` (renamed from
+`KumiteTable`). The per-sheet "Kumite"/"Kata" header label (sourced from
+`PlanCategory.category`, not from the draw) is the only thing that still
+differs between the two on the page.
+
+Files: `frontend/src/lib/callup.ts`, `frontend/src/pages/CallupPrint.tsx`,
+`frontend/scripts/test-callup.ts`.
+
+### Verification (run 2026-08-21)
+
+`npx tsc --noEmit` clean in both `frontend` and `backend` (backend
+untouched). `npx tsx scripts/test-callup.ts` — rewrote the kata-flattening
+tests into a "kata produces the exact same paired-row shape as kumite"
+test plus a "buildCallupSheet has no discipline branching" test; 18/18
+checks pass.
+
+Verified against a real KATA division in the seeded event (`KATA BOYS 13`,
+6 entries, drawId `cmsnmfkjk01bmhy3vedq2le42`) in the browser: the sheet
+now renders the same red/blue AKA/AO table, checkboxes, and TBD-chained
+bracket labels as a kumite sheet — confirmed both in extracted page text
+and a screenshot showing the red/blue header tint. Checked a second, larger
+kata division (`KATA MALE SENIOR`, 10 entries) to confirm a full Round-of-16
+renders correctly too. No bronze rows were present in either sample bracket
+to check (no repechage results exist yet for those divisions in the seed
+data) — the bronze-bout code path itself is unchanged from the original
+call-up sheet feature (already verified there against a real kumite bronze
+bracket) and applies identically to kata since it's the same
+`bronzeBoutRows` function for both. No console errors beyond the
+pre-existing, unrelated `/api/auth/me` dev-auth-fallback 401 noise already
+documented earlier in this file.
+
+**Not verified in physical print** — same standing caveat as the rest of
+this feature: only checked on-screen, not against a real print preview or
+exported PDF.
 
 **Call-up sheets for tatami coordinators (2026-08-21).**
 

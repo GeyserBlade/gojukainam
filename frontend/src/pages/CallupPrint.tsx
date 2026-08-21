@@ -36,7 +36,7 @@ import { cn } from "@/lib/utils"
 import { categoryTitle, getPlanBoard, type PlanCategory } from "@/lib/plan"
 import { buildSchedule, formatClock, interleaveMatOrder, type ScheduleCategoryInput, type ScheduleInput } from "@/lib/schedule"
 import { getDraw, type DrawDetail } from "@/lib/draws"
-import { buildCallupSheet, type CallupBoutRow, type CallupPerformanceRow, type CallupSlot } from "@/lib/callup"
+import { buildCallupSheet, type CallupBoutRow, type CallupSlot } from "@/lib/callup"
 
 const toScheduleCategory = (c: PlanCategory): ScheduleCategoryInput => ({
   drawId: c.drawId!,
@@ -66,7 +66,10 @@ const SlotText = ({ slot }: { slot: CallupSlot }) =>
     </>
   )
 
-const KumiteTable = ({ rows, heading }: { rows: CallupBoutRow[]; heading?: string }) => {
+// Kata and kumite both run as a real aka/ao head-to-head bracket (kata just
+// decides the winner by flags instead of points), so both are seated the
+// same way — one shared table, no separate single-column kata format.
+const BoutTable = ({ rows, heading }: { rows: CallupBoutRow[]; heading?: string }) => {
   if (rows.length === 0) return null
   return (
     <div className="print-keep mb-4">
@@ -103,25 +106,6 @@ const KumiteTable = ({ rows, heading }: { rows: CallupBoutRow[]; heading?: strin
           ))}
         </tbody>
       </table>
-    </div>
-  )
-}
-
-const KataList = ({ rows, heading }: { rows: CallupPerformanceRow[]; heading?: string }) => {
-  if (rows.length === 0) return null
-  return (
-    <div className="print-keep mb-4">
-      {heading && <h3 className="mb-1.5 font-display text-sm tracking-wide">{heading}</h3>}
-      <ul className="space-y-1 text-[11px]">
-        {rows.map((row) => (
-          <li key={`${row.boutId ?? row.boutLabel}:${row.label}`} className="print-keep flex items-start gap-2">
-            <CheckSquare />
-            <span>
-              <span className="font-medium">{row.label}:</span> <SlotText slot={row.performer} />
-            </span>
-          </li>
-        ))}
-      </ul>
     </div>
   )
 }
@@ -165,17 +149,8 @@ function DivisionSheet({
         </div>
       </header>
 
-      {sheet.isKata ? (
-        <>
-          <KataList rows={sheet.mainRows} />
-          <KataList rows={sheet.bronzeRows} heading={sheet.bronzeRows.length > 0 ? "Bronze performances" : undefined} />
-        </>
-      ) : (
-        <>
-          <KumiteTable rows={sheet.mainRows} />
-          <KumiteTable rows={sheet.bronzeRows} heading={sheet.bronzeRows.length > 0 ? "Bronze bouts" : undefined} />
-        </>
-      )}
+      <BoutTable rows={sheet.mainRows} />
+      <BoutTable rows={sheet.bronzeRows} heading={sheet.bronzeRows.length > 0 ? "Bronze bouts" : undefined} />
 
       {sheet.mainRows.length === 0 && sheet.bronzeRows.length === 0 && (
         <p className="rounded border border-dashed p-3 text-center text-muted-foreground">

@@ -10,9 +10,13 @@
 import { roundLabel, type DrawBout, type DrawEntrySummary } from "./draws"
 
 /** The subset of DrawDetail this module actually needs, kept narrow so a
- * test fixture doesn't have to fake slots/sync/placements it never reads. */
+ * test fixture doesn't have to fake slots/sync/placements it never reads.
+ *
+ * No `division.category` field: kata bouts are just as much a real aka/ao
+ * head-to-head pairing as kumite bouts (decided by flag majority instead of
+ * points, but the bracket shape — and this sheet's layout — is identical),
+ * so this module doesn't need to know which discipline it's building for. */
 export interface CallupDraw {
-  division: { category: "KATA" | "KUMITE" };
   size: number;
   bouts: DrawBout[];
 }
@@ -24,7 +28,7 @@ export interface CallupSlot {
    * null once the athlete is known. Otherwise a short reason a coordinator
    * can read at a glance — "Round of 8 — Bout 1" (main-bracket predecessor,
    * traceable exactly from the bracket's own 2i/2i+1 indexing) or "result
-   * pending" (a repechage predecessor — see kumiteBronzeRows for why that
+   * pending" (a repechage predecessor — see bronzeBoutRows for why that
    * one isn't traced to an exact bout).
    */
   tbdFrom: string | null;
@@ -38,19 +42,10 @@ export interface CallupBoutRow {
   ao: CallupSlot;
 }
 
-export interface CallupPerformanceRow {
-  label: string;
-  /** Which bout this performance belongs to, for context — not an AKA/AO
-   * side, kata drops that distinction entirely per the brief. */
-  boutLabel: string;
-  section: "MAIN" | "BRONZE";
-  boutId: string | null;
-  performer: CallupSlot;
+export interface CallupSheet {
+  mainRows: CallupBoutRow[];
+  bronzeRows: CallupBoutRow[];
 }
-
-export type CallupSheet =
-  | { isKata: false; mainRows: CallupBoutRow[]; bronzeRows: CallupBoutRow[] }
-  | { isKata: true; mainRows: CallupPerformanceRow[]; bronzeRows: CallupPerformanceRow[] };
 
 const knownSlot = (entry: DrawEntrySummary): CallupSlot => ({
   name: entry.name,
@@ -95,10 +90,14 @@ function mainPredecessorLabel(size: number, totalRounds: number, round: number, 
 }
 
 /**
- * The main bracket, round 1 first, in fight order. Byes and other rows with
- * nothing to call up are omitted — see hasSomethingToCallUp.
+ * The main bracket, round 1 first, in fight order — one row per bout, aka
+ * and ao side by side. Applies identically to kumite and kata: both run as
+ * a real head-to-head bracket (kata just decides the winner by flags
+ * instead of points), so both are seated and called up the same way. Byes
+ * and other rows with nothing to call up are omitted — see
+ * hasSomethingToCallUp.
  */
-export function kumiteMainRows(draw: CallupDraw): CallupBoutRow[] {
+export function mainBoutRows(draw: CallupDraw): CallupBoutRow[] {
   const totalRounds = Math.log2(draw.size);
   const mainBouts = draw.bouts
     .filter((b) => b.phase === "MAIN")
@@ -141,7 +140,7 @@ export function kumiteMainRows(draw: CallupDraw): CallupBoutRow[] {
  * backend logic for a print-only label, so a pending repechage slot reads
  * "TBD (result pending)" instead of a precise bout reference.
  */
-export function kumiteBronzeRows(draw: CallupDraw): CallupBoutRow[] {
+export function bronzeBoutRows(draw: CallupDraw): CallupBoutRow[] {
   const rows: CallupBoutRow[] = [];
   for (const side of [0, 1] as const) {
     const sideBouts = draw.bouts
@@ -163,36 +162,7 @@ export function kumiteBronzeRows(draw: CallupDraw): CallupBoutRow[] {
   return rows;
 }
 
-/** Every bout row's two sides, flattened into individual performances in
- * bout order — AKA's slot performs before AO's, matching WKF's standard
- * sequential kata order. No side identity carries through: kata's call-up
- * need is "who's next", not "which side of the floor". */
-function flattenToPerformances(rows: CallupBoutRow[]): CallupPerformanceRow[] {
-  const out: CallupPerformanceRow[] = [];
-  let n = 0;
-  for (const row of rows) {
-    for (const slot of [row.aka, row.ao]) {
-      n += 1;
-      out.push({ label: `Performance ${n}`, boutLabel: row.label, section: row.section, boutId: row.boutId, performer: slot });
-    }
-  }
-  return out;
-}
-
-export function kataMainPerformances(draw: CallupDraw): CallupPerformanceRow[] {
-  return flattenToPerformances(kumiteMainRows(draw));
-}
-
-export function kataBronzePerformances(draw: CallupDraw): CallupPerformanceRow[] {
-  return flattenToPerformances(kumiteBronzeRows(draw));
-}
-
-/** The one entry point pages/CallupPrint.tsx actually needs — picks kata's
- * flattened single-column form or kumite's two-sided bout rows based on the
- * draw's own division category. */
+/** The one entry point pages/CallupPrint.tsx actually needs. */
 export function buildCallupSheet(draw: CallupDraw): CallupSheet {
-  if (draw.division.category === "KATA") {
-    return { isKata: true, mainRows: kataMainPerformances(draw), bronzeRows: kataBronzePerformances(draw) };
-  }
-  return { isKata: false, mainRows: kumiteMainRows(draw), bronzeRows: kumiteBronzeRows(draw) };
+  return { mainRows: mainBoutRows(draw), bronzeRows: bronzeBoutRows(draw) };
 }
