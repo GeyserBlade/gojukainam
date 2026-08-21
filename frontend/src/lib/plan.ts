@@ -1,6 +1,6 @@
 import { api } from "./api";
 import { normalizeEventTiming, type EventTiming } from "./timing";
-import type { ScheduleBlockKind } from "./schedule";
+import type { ScheduleBlockKind, ScheduleCategoryInput } from "./schedule";
 
 // The tournament plan: which categories run on which floor, in what order, and
 // where the ceremonies and breaks sit between them. Mat CRUD lives in lib/run.ts
@@ -56,6 +56,24 @@ export interface PlanBoard {
 
 export const categoryTitle = (c: PlanCategory) =>
   c.weightClassName ? `${c.divisionName} · ${c.weightClassName}` : c.divisionName;
+
+/**
+ * A plan row as the schedule walk wants it. Every surface that draws a
+ * timeline — the Plan tab, the printed running order, the call-up sheets and
+ * the spectator board — must map a category the same way, or the same plan
+ * would produce four different clocks. Only call it on rows with a draw:
+ * `drawId` is non-null for those and the schedule has nothing to place
+ * without one.
+ */
+export const toScheduleCategory = (c: PlanCategory): ScheduleCategoryInput => ({
+  drawId: c.drawId!,
+  title: categoryTitle(c),
+  isKata: c.category === "KATA",
+  entryCount: c.entryCount,
+  drawEntryCount: c.drawEntryCount,
+  boutDurationSec: c.boutDurationSec,
+  bufferPct: c.bufferPct,
+});
 
 export async function getPlanBoard(eventId: string): Promise<PlanBoard> {
   const res = await api.get("/plan/board", { params: { eventId } });

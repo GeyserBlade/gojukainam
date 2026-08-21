@@ -33,20 +33,10 @@ import { useAuth } from "@/contexts/AuthContext"
 import { Button } from "@/components/ui/button"
 import { PageSpinner } from "@/components/UIState"
 import { cn } from "@/lib/utils"
-import { categoryTitle, getPlanBoard, type PlanCategory } from "@/lib/plan"
+import { categoryTitle, getPlanBoard, toScheduleCategory, type PlanCategory } from "@/lib/plan"
 import { buildSchedule, formatClock, interleaveMatOrder, type ScheduleCategoryInput, type ScheduleInput } from "@/lib/schedule"
 import { getDraw, type DrawDetail } from "@/lib/draws"
 import { buildCallupSheet, type CallupBoutRow, type CallupSlot } from "@/lib/callup"
-
-const toScheduleCategory = (c: PlanCategory): ScheduleCategoryInput => ({
-  drawId: c.drawId!,
-  title: categoryTitle(c),
-  isKata: c.category === "KATA",
-  entryCount: c.entryCount,
-  drawEntryCount: c.drawEntryCount,
-  boutDurationSec: c.boutDurationSec,
-  bufferPct: c.bufferPct,
-})
 
 const formatGeneratedAt = (d: Date) =>
   d.toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })

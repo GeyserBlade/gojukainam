@@ -34,6 +34,61 @@ export interface ComputedBout {
   isUserResult: boolean;
 }
 
+/**
+ * Where one athlete stands in one category, as a spectator needs it stated:
+ *
+ * - `NOT_DRAWN`  — entered and approved, but the category has no bracket yet
+ * - `READY`      — their next bout is fully paired and waiting on a mat
+ * - `WAITING`    — they are through, but their opponent is not decided yet
+ * - `REPECHAGE_HOPE` — knocked out, and still in with a WKF repechage chance
+ *   because the athlete who beat them can still reach the final
+ * - `OUT`        — finished, no medal
+ * - `MEDAL`      — finished on the podium
+ */
+export type AthleteRunStatus =
+  | "NOT_DRAWN"
+  | "READY"
+  | "WAITING"
+  | "REPECHAGE_HOPE"
+  | "OUT"
+  | "MEDAL";
+
+/** One bout from a single athlete's point of view — scores are theirs first. */
+export interface AthleteBout {
+  phase: "MAIN" | "REPECHAGE";
+  round: number;
+  /** Awarded by the bracket with nobody to fight; not a win they earned. */
+  bye: boolean;
+  /** null when the opponent is still being decided upstream. */
+  opponentName: string | null;
+  opponentClubName: string | null;
+  /** null while undecided. */
+  won: boolean | null;
+  scoreFor: number | null;
+  scoreAgainst: number | null;
+  outcome: string | null;
+  startedAt: Date | null;
+}
+
+/** One athlete's run through one category. */
+export interface AthleteRun {
+  /** null before the category has been drawn. */
+  drawId: string | null;
+  entryId: string;
+  /** Division, plus the weight class where the category uses one. */
+  category: string;
+  discipline: "KATA" | "KUMITE";
+  size: number;
+  drawStatus: "DRAWN" | "IN_PROGRESS" | "COMPLETED";
+  matId: string | null;
+  matName: string | null;
+  /** 1, 2 or 3 once the podium is decided. */
+  place: number | null;
+  status: AthleteRunStatus;
+  next: { phase: "MAIN" | "REPECHAGE"; round: number; opponentName: string | null } | null;
+  bouts: AthleteBout[];
+}
+
 interface DrawState {
   bouts: ComputedBout[];
   placements: {
@@ -1441,4 +1496,233 @@ export class DrawService {
 
     return { categories, clubTally };
   }
+  /**
+   * Every competitor in an event with the story of each category they entered:
+   * the bouts they have fought, what is next, and where they finished.
+   *
+   * This is the spectator's index — "find my daughter, tell me when she is on"
+   * — so it is organised by *person*, not by bracket. It is the same
+   * computation `eventResults` does (one pass over every draw, replayed
+   * through `computeDrawState`), turned inside out: instead of asking each
+   * bracket who its medallists are, it asks each athlete what happened to
+   * them.
+   *
+   * Kept here rather than in `public.service.ts` because it is bracket
+   * reasoning — repechage eligibility below is a WKF rule, not a display
+   * choice — and because it must stay next to the compute it depends on.
+   */
+  static async eventAthletes(eventId: string) {
+    const [draws, mats, approved] = await Promise.all([
+      prisma.draw.findMany({
+        where: { eventId },
+        include: {
+          division: true,
+          weightClass: true,
+          slots: { include: { entry: { include: ENTRY_INCLUDE } } },
+          bouts: true,
+        },
+        orderBy: [{ division: { category: "asc" } }, { division: { name: "asc" } }],
+      }),
+      prisma.mat.findMany({
+        where: { eventId },
+        select: { id: true, name: true },
+        orderBy: [{ order: "asc" }, { createdAt: "asc" }],
+      }),
+      // Approved entries as well as drawn ones. On the morning of a
+      // tournament nothing is drawn yet, which is exactly when parents are
+      // searching for their child — an index built only from bracket slots
+      // would tell every one of them "no such athlete".
+      prisma.entry.findMany({
+        where: { eventId, status: { in: [...ELIGIBLE_STATUSES] } },
+        include: { ...ENTRY_INCLUDE, division: true, weightClass: true },
+      }),
+    ]);
+    const matNameById = new Map(mats.map((m) => [m.id, m.name]));
+
+    type Person = {
+      id: string;
+      name: string;
+      clubId: string;
+      clubName: string;
+      runs: AthleteRun[];
+    };
+    const people = new Map<string, Person>();
+
+    for (const draw of draws) {
+      const slotByPosition = new Map<number, string>();
+      const entryById = new Map<string, (typeof draw.slots)[number]["entry"]>();
+      for (const s of draw.slots) {
+        slotByPosition.set(s.position, s.entryId);
+        entryById.set(s.entryId, s.entry);
+      }
+      const storedWinners = new Map<BoutKey, string>();
+      const boutRowByKey = new Map<string, (typeof draw.bouts)[number]>();
+      for (const b of draw.bouts) {
+        boutRowByKey.set(boutKey(b.phase, b.round, b.position), b);
+        if (b.winnerEntryId) storedWinners.set(boutKey(b.phase, b.round, b.position), b.winnerEntryId);
+      }
+
+      const state = computeDrawState(draw.size, slotByPosition, storedWinners);
+      const category = draw.weightClass
+        ? `${draw.division.name} · ${draw.weightClass.name}`
+        : draw.division.name;
+
+      const placeByEntry = new Map<string, number>();
+      if (state.placements.firstEntryId) placeByEntry.set(state.placements.firstEntryId, 1);
+      if (state.placements.secondEntryId) placeByEntry.set(state.placements.secondEntryId, 2);
+      for (const id of state.placements.thirdEntryIds) placeByEntry.set(id, 3);
+
+      // Who lost a main-bracket bout, and to whom. Both halves are needed for
+      // the repechage rule below: a beaten athlete is only still in with a
+      // chance while the athlete who beat them can still reach the final, and
+      // the one thing that ends that is a main-bracket loss of their own.
+      const lostMain = new Set<string>();
+      const beatenBy = new Map<string, string>();
+      for (const b of state.bouts) {
+        if (b.phase !== "MAIN" || !b.isUserResult || !b.winnerEntryId) continue;
+        const loser = b.winnerEntryId === b.akaEntryId ? b.aoEntryId : b.akaEntryId;
+        if (!loser) continue;
+        lostMain.add(loser);
+        beatenBy.set(loser, b.winnerEntryId);
+      }
+
+      for (const slot of draw.slots) {
+        const entry = slot.entry;
+        // One row per person, not per entry: an athlete in three categories is
+        // one search result with three runs under it.
+        const personId = entry.athlete?.id ?? entry.id;
+        const person =
+          people.get(personId) ??
+          {
+            id: personId,
+            name: entry.athlete
+              ? `${entry.athlete.firstName} ${entry.athlete.lastName}`
+              : entry.team?.name ?? "Unknown",
+            clubId: entry.club?.id ?? "",
+            clubName: entry.club?.name ?? "",
+            runs: [],
+          };
+        people.set(personId, person);
+
+        const mine = state.bouts.filter(
+          (b) => b.akaEntryId === slot.entryId || b.aoEntryId === slot.entryId
+        );
+
+        const bouts: AthleteBout[] = mine.map((b) => {
+          const isAka = b.akaEntryId === slot.entryId;
+          const opponentId = isAka ? b.aoEntryId : b.akaEntryId;
+          const opponent = opponentId ? entryById.get(opponentId) : null;
+          const row = boutRowByKey.get(boutKey(b.phase, b.round, b.position));
+          // A bye is a bout the bracket awarded without anyone fighting it —
+          // shown as such rather than as a win the athlete never earned.
+          const bye = !!b.winnerEntryId && !b.isUserResult;
+          return {
+            phase: b.phase,
+            round: b.round,
+            bye,
+            opponentName: opponent
+              ? opponent.athlete
+                ? `${opponent.athlete.firstName} ${opponent.athlete.lastName}`
+                : opponent.team?.name ?? "Unknown"
+              : null,
+            opponentClubName: opponent?.club?.name ?? null,
+            won: b.winnerEntryId ? b.winnerEntryId === slot.entryId : null,
+            // Scores are reported from this athlete's side, so "3 - 5" always
+            // reads as theirs first regardless of which corner they were in.
+            scoreFor: row ? (isAka ? row.akaScore : row.aoScore) : null,
+            scoreAgainst: row ? (isAka ? row.aoScore : row.akaScore) : null,
+            outcome: row?.outcome ?? null,
+            startedAt: row?.startedAt ?? null,
+          };
+        });
+
+        const next = mine.find((b) => !b.winnerEntryId) ?? null;
+        const place = placeByEntry.get(slot.entryId) ?? null;
+
+        // Beaten, no medal, no bout pending — but WKF repechage can still pull
+        // them back in if the athlete who knocked them out reaches the final.
+        const conqueror = beatenBy.get(slot.entryId);
+        const repechagePossible =
+          !place && !next && !!conqueror && !lostMain.has(conqueror) && state.status !== "COMPLETED";
+
+        const status: AthleteRunStatus = place
+          ? "MEDAL"
+          : next
+          ? next.akaEntryId && next.aoEntryId
+            ? "READY"
+            : "WAITING"
+          : repechagePossible
+          ? "REPECHAGE_HOPE"
+          : "OUT";
+
+        person.runs.push({
+          drawId: draw.id,
+          entryId: slot.entryId,
+          category,
+          discipline: draw.division.category as "KATA" | "KUMITE",
+          size: draw.size,
+          drawStatus: state.status,
+          matId: draw.matId,
+          matName: draw.matId ? matNameById.get(draw.matId) ?? null : null,
+          place,
+          status,
+          next: next
+            ? {
+                phase: next.phase,
+                round: next.round,
+                opponentName: (() => {
+                  const oppId = next.akaEntryId === slot.entryId ? next.aoEntryId : next.akaEntryId;
+                  const opp = oppId ? entryById.get(oppId) : null;
+                  if (!opp) return null;
+                  return opp.athlete
+                    ? `${opp.athlete.firstName} ${opp.athlete.lastName}`
+                    : opp.team?.name ?? "Unknown";
+                })(),
+              }
+            : null,
+          bouts,
+        });
+      }
+    }
+
+    // Entries whose category has not been drawn yet. They carry no bracket, so
+    // they get a run with nothing but a name and "not drawn yet" — enough to
+    // be found, and honest about there being nothing more to say.
+    const drawnEntryIds = new Set(draws.flatMap((d) => d.slots.map((s) => s.entryId)));
+    for (const entry of approved) {
+      if (drawnEntryIds.has(entry.id)) continue;
+      const personId = entry.athlete?.id ?? entry.id;
+      const person =
+        people.get(personId) ??
+        {
+          id: personId,
+          name: entry.athlete
+            ? `${entry.athlete.firstName} ${entry.athlete.lastName}`
+            : entry.team?.name ?? "Unknown",
+          clubId: entry.club?.id ?? "",
+          clubName: entry.club?.name ?? "",
+          runs: [],
+        };
+      people.set(personId, person);
+      person.runs.push({
+        drawId: null,
+        entryId: entry.id,
+        category: entry.weightClass
+          ? `${entry.division.name} · ${entry.weightClass.name}`
+          : entry.division.name,
+        discipline: entry.division.category as "KATA" | "KUMITE",
+        size: 0,
+        drawStatus: "DRAWN",
+        matId: null,
+        matName: null,
+        place: null,
+        status: "NOT_DRAWN",
+        next: null,
+        bouts: [],
+      });
+    }
+
+    return [...people.values()].sort((a, b) => a.name.localeCompare(b.name));
+  }
 }
+

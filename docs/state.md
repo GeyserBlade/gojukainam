@@ -4,11 +4,17 @@ This file is the handoff between coding agents. It describes what is in flight
 right now, not the permanent architecture (that's
 [`architecture.md`](architecture.md)).
 
-**Last updated:** 2026-08-21 — by Claude Code: **draws now keep club-mates
+**Last updated:** 2026-08-21 — by Claude Code: **the public spectator
+board rebuilt for phones**. Four tabs (Results / Mats / Times / Clubs) with
+results on top, tatamis on a swipeable pager, one-line bout rows instead of
+cards, and an **athlete search** so a parent can find their own child and
+see when they are on or how they did. Three new public endpoints behind the
+same share token. See "In flight" below.
+
+Previously, same day — by Claude Code: **draws now keep club-mates
 apart**. Unseeded athletes are no longer placed by a plain shuffle: the
 shuffle is rearranged so two athletes from the same club meet as late in the
-bracket as it allows, instead of knocking each other out in round 1. See
-"In flight" below.
+bracket as it allows, instead of knocking each other out in round 1.
 
 Previously, same day — by Claude Code: **call-up sheets — kata now
 uses the same AKA/AO two-column table as kumite**, not a simplified
@@ -168,6 +174,177 @@ port; those have since been pushed.) Everything here is verified locally against
 a database, never against production data.
 
 ## In flight (uncommitted)
+
+**Public spectator board rebuilt for mobile (2026-08-21).**
+
+Request: review the public board for spectators — make it suit a phone
+(tabs or swiping between tatamis), summarise it, put results on top, and add
+athlete search so parents can find their athlete and see either when they
+are competing or their detailed results. Club totals and tatami schedules
+visible too.
+
+The board this replaces was one stacked column: every ready bout on every
+mat, as a three-line card each, and only then the medals. On the seeded test
+event that is **~100 cards before a parent reaches the result they opened
+the link for**, and on a 375px screen the three tatamis were simply three
+long lists one after another.
+
+### Shape
+
+**Four tabs, results first** (`pages/PublicBoard.tsx`, plus a new
+`components/public/` folder):
+
+- **Results** — podium cards, "14 of 43 categories decided", with the
+  still-running categories folded behind a toggle rather than dropped.
+- **Mats** — the live queues, one tatami per swipeable page.
+- **Times** — the day's running order per tatami.
+- **Clubs** — the medal table; tapping a club lists its medallists.
+
+Above the tabs, a sticky header with a **Find an athlete** button that opens
+a full-screen search.
+
+**The tatami pager** (`components/public/MatPager.tsx`) is CSS scroll
+snapping, not a carousel dependency: the browser does momentum and touch
+handoff better than JS can. A chip strip scrolls the container; the
+container's scroll position drives the chips (read from `scrollLeft`, so a
+half-swipe that snaps back cannot leave the chips lying). Above `md` the
+pager is replaced **in CSS** by a plain grid — no measuring, no hydration
+mismatch — because a laptop or the hall projector has room for every floor
+at once and swipping past what already fits would be a regression.
+
+**Summarising** is mostly the queue: one line per bout (`aka v ao`, category
+and round beneath) instead of a card, capped at 8 per floor with a "+N more
+· see the Schedule tab" footer, and one full-size "On now" card at the head
+of each real floor. The unassigned pool deliberately gets no "On now" — it
+is a to-do list, not a mat.
+
+### Backend
+
+Four endpoints instead of one payload, because they go stale at very
+different rates — `routes/public.ts` and `services/public.service.ts`:
+
+| Endpoint | Cache TTL | Gzipped |
+|---|---|---|
+| `/public/board/:token` | 10s | 8.6 KB |
+| `/public/board/:token/athletes` | 20s | 6.8 KB |
+| `/public/board/:token/schedule` | 120s | 3.0 KB |
+| `/public/board/:token/athletes/:athleteId` | (shares the athlete index) | small |
+
+`utils/board-cache.ts` gained a per-entry TTL and namespaced keys
+(`${eventId}:board`, `:athletes`, `:schedule`) so the hard-polled live board
+does not drag the schedule's rebuild along with it. The token lookup is
+still per-request — it is the access check — so rotating the token still
+revokes access immediately.
+
+**`DrawService.eventAthletes(eventId)`** is the new computation: the same
+one-pass-per-draw bracket replay `eventResults` does, turned inside out to
+ask *per athlete* what happened to them rather than per bracket who
+medalled. It returns each person once (an athlete in three categories is one
+search result with three runs), each run carrying its bouts with **scores
+from that athlete's side** — "Won 4 – 2", never "aka 4, ao 2", because the
+spectator does not know which corner their child was in.
+
+Two rules worth keeping in mind if you touch it:
+
+- **Repechage eligibility is computed, not guessed.** A beaten athlete is
+  `REPECHAGE_HOPE` only while the athlete who beat them can still reach the
+  final — i.e. that athlete has not themselves lost a main-bracket bout.
+  Otherwise they are `OUT`. Telling a parent "still possible" when it isn't
+  is worse than saying nothing.
+- **The index includes approved entries with no draw yet** (`NOT_DRAWN`).
+  On the morning of a tournament nothing is drawn, which is exactly when
+  parents are searching; an index built only from bracket slots would tell
+  every one of them "no such athlete".
+
+**The schedule tab deliberately serves `PlanService.getBoard` unchanged**
+and the frontend builds it with the same `buildSchedule` walk as the Plan
+tab and the printed running order. A spectator schedule that could drift
+from the one pinned to the wall would be worse than none. Verified byte-
+identical below.
+
+### Privacy
+
+Everything exposed is what a tournament announces over the PA: names, clubs,
+categories, bracket structure, results. **`checkedIn` is now stripped** from
+the public queue — it is the one field in the run board that says whether a
+named child is physically at the venue, the spectator view never rendered
+it, and a public link is the wrong place to publish it. The module comment
+in `public.service.ts` states that line so new fields get judged against it.
+
+### Refactor carried along
+
+`toScheduleCategory` existed as three identical private copies (Plan tab,
+PlanPrint, CallupPrint) and this change needed a fourth. It now lives once
+in `lib/plan.ts`; all four surfaces import it. Pure move, no behaviour
+change — every schedule test still passes.
+
+Files: `backend/src/services/draw.service.ts`,
+`backend/src/services/public.service.ts`, `backend/src/routes/public.ts`,
+`backend/src/utils/board-cache.ts`, `frontend/src/lib/public.ts`,
+`frontend/src/lib/plan.ts`, `frontend/src/pages/PublicBoard.tsx`,
+`frontend/src/components/public/*` (7 new), and the three pages that lost
+their local `toScheduleCategory`.
+
+### Verification (run 2026-08-21)
+
+`npx tsc --noEmit` **and** `npm run build` clean in both projects. The
+lazy-loaded `PublicBoard` chunk is 25.9 KB / **7.25 KB gzipped**. (The
+pre-existing 500 KB warning is the shared `index` chunk, untouched here.)
+
+All existing test scripts pass — run because the `toScheduleCategory` move
+touched three schedule surfaces: frontend `test-schedule`, `test-callup`,
+`test-autoschedule`, `test-estimator`, `test-draws`, `test-kata`; backend
+`test-plan` (53), `test-draws` (83), `test-bout-scoring` (24).
+
+Exercised in the browser at **375×812** and **1280** against the seeded
+`Championships 2026 (Test)` event (277 entries, 43 draws, 3 tatamis), with
+results simulated into 22 of the 43 categories so the medals, scores and
+half-run brackets were real rather than empty:
+
+- Results tab leads; podiums, club table and its expansion all correct —
+  Swakopmund's 5/3/2 tally matched exactly 5 🥇, 3 🥈, 2 🥉 in the expanded
+  medallist list.
+- **Pager verified in both directions**: a chip tap scrolls to exactly
+  `index × clientWidth` (0 / 343 / 686 on a 375px screen, with
+  `scrollWidth` exactly 3 × `clientWidth`), and a scroll updates the chips,
+  including the mid-flick rounding case.
+- Search: "amutenya" → 12 matches including "Hamutenya", each with a live
+  status chip ("Semi-finals · waiting for an opponent", "🥇 Gold medal").
+  Opening one showed both its categories and the full journey — bye →
+  "Won 4 – 2" → "Won 5 – 0" → Gold.
+- Schedule: the public payload is **byte-identical** to
+  `PlanService.getBoard` for the same event (checked by diffing the two in
+  a script), and renders the opening-ceremony band plus per-tatami rows.
+- `document.body.scrollWidth === window.innerWidth` at 375px — the two
+  horizontally-scrolling children do not leak page-level overflow.
+- All four payloads scanned for `email`, `dateOfBirth`, `weight`, `beltId`,
+  `checkedIn`, `userId`, `feeCents`, contact and guardian fields: **clean**.
+- Console: only the pre-existing `/api/auth/me` dev-auth-fallback 401 noise
+  already documented in this file. Every public endpoint returned 200.
+
+**Two real bugs found and fixed during that pass**, both of which type-
+checking would never have caught:
+
+1. `scrollTo({ behavior: "smooth" })` is **silently a no-op** on a
+   `scroll-snap-type: mandatory` container in Chromium — the chip lit up and
+   the pages never moved. Now `behavior: "instant"`; there is a comment at
+   the call site so nobody "improves" it back. Swiping is unaffected either
+   way, since the browser drives that.
+2. The first pass put every screen on the pager, which on a 1280px desktop
+   showed one 736px floor and hid the other two behind a swipe — worse than
+   the board being replaced. Hence the `md` grid, and the page shell
+   widening to `xl:max-w-6xl` (three floors truncated every name at 768px).
+
+**Not verified:** real touch swiping on a physical phone — this environment
+does not emit scroll events for programmatic `scrollTo`, so the
+scroll→chip direction was exercised by dispatching the scroll event the
+browser fires on a real swipe. Also not checked on iOS Safari, only
+Chromium at a mobile viewport.
+
+**Local test data left behind:** the seeded `Championships 2026 (Test)`
+event has had its public token enabled (`00bac1f24b79bd836f68c814`) and
+carries simulated results in 22 of its 43 categories. Local dev database
+only — nothing was run against production.
 
 **Draws separate club-mates in the unseeded field (2026-08-21).**
 
