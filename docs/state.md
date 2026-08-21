@@ -4,11 +4,17 @@ This file is the handoff between coding agents. It describes what is in flight
 right now, not the permanent architecture (that's
 [`architecture.md`](architecture.md)).
 
-**Last updated:** 2026-08-21 — by Claude Code: **call-up sheets — kata now
+**Last updated:** 2026-08-21 — by Claude Code: **draws now keep club-mates
+apart**. Unseeded athletes are no longer placed by a plain shuffle: the
+shuffle is rearranged so two athletes from the same club meet as late in the
+bracket as it allows, instead of knocking each other out in round 1. See
+"In flight" below.
+
+Previously, same day — by Claude Code: **call-up sheets — kata now
 uses the same AKA/AO two-column table as kumite**, not a simplified
 single-column list. Kata divisions in this app are a real head-to-head
 bracket (won by flag majority, not points), so the coordinator's process
-is identical either way. See "In flight" below.
+is identical either way.
 
 Previously, same day — by Claude Code: **call-up sheets** — one
 printable page per division for the tatami coordinator gathering athletes
@@ -162,6 +168,84 @@ port; those have since been pushed.) Everything here is verified locally against
 a database, never against production data.
 
 ## In flight (uncommitted)
+
+**Draws separate club-mates in the unseeded field (2026-08-21).**
+
+Request: when a draw is generated, unseeded athletes from different clubs
+should be matched against each other as much as possible, so an unseeded
+bracket doesn't put two athletes from one club against each other in the
+early rounds.
+
+Until now `seededOrder` (`backend/src/services/draw.service.ts`) placed the
+seeds into their protected slots and then filled every remaining index with
+a plain `shuffle()` — nothing in the draw engine had ever looked at which
+club an entry belonged to, so two of a club's four athletes landing in the
+same round-1 pair was pure luck, and happened regularly.
+
+**Change:** `SeedableEntry` gained an optional `clubId`, and the two
+`prisma.entry.findMany` calls that feed draw generation (`DrawService.create`
+and `.regenerate`) now select it. The unseeded fill is no longer the raw
+shuffle: it still *starts* as that shuffle, then `spreadUnseededByClub`
+hill-climbs it — repeatedly swapping pairs of unseeded athletes whenever the
+swap strictly lowers a total "clash cost", where a club-mate pairing costs
+`4 ** (totalRounds - meetRound)`. That weighting is steeply front-loaded on
+purpose: one round-1 club clash outweighs any number of clashes in later
+rounds, which is the actual complaint. Seeds are never moved — they take
+part only as fixed obstacles, so seeding protection still outranks club
+separation. Where separation is impossible (one club filling the category)
+the cost simply can't be improved and the original shuffle stands; the
+passes are capped at 8 so no field can spin there.
+
+Two properties worth keeping in mind for anyone touching this next:
+
+- **The draw is still random.** Only strict improvements are accepted, from
+  a randomly shuffled start, with the candidate swap order itself shuffled —
+  so among arrangements that are equally club-clean, which one comes out is
+  still luck. Measured over 200 draws of an 8-athlete/4-club field, every
+  athlete still reaches all 8 bracket positions and still draws all 6 of
+  their legal round-1 opponents.
+- **`clubId` is optional on purpose.** A caller that selects only `id` and
+  `seed` degrades to exactly the old shuffle, which is what the pure seeding
+  tests in `scripts/test-draws.ts` do.
+
+No schema change, no migration, no API shape change. `SeedPanel.tsx`'s
+explanatory copy was updated, since it previously told the user unseeded
+athletes are "drawn at random" full stop.
+
+Files: `backend/src/services/draw.service.ts`,
+`backend/scripts/test-draws.ts`, `frontend/src/components/draws/SeedPanel.tsx`.
+
+### Verification (run 2026-08-21)
+
+`npx tsc --noEmit` clean in both `backend` and `frontend`.
+
+`npx tsx scripts/test-draws.ts` — ALL CHECKS PASSED, including the whole
+pre-existing seeding suite (seed 1 v 2 only in the final, tier confinement,
+byes on the top seeds, totality) unchanged, plus 12 new club-separation
+checks:
+
+- **Zero** round-1 club clashes in the worst of 60 draws for every field
+  where zero is achievable: 8 athletes/2 clubs of 4, 12/3 clubs of 4, 16/2
+  clubs of 8, `A,A,B,B,C`, and 32 athletes over 8 clubs.
+- Still zero with seeds 1–4 placed one per club, *and* seeds 1 and 2 still
+  only meet in the final in that same field — i.e. club separation did not
+  buy itself anything at seeding's expense.
+- Impossible fields settle at the theoretical minimum rather than erroring
+  or looping: `A×5, B×2` in a size-8 bracket gives exactly 1 clash, six of
+  one club gives exactly 2.
+- Randomness preserved (the two measurements above).
+- A clubless caller still behaves as before.
+
+Measured separately over 500 draws per scenario: average round-1 clashes
+0.000 for every separable field (previously these were routine), and the
+cost stays negligible — ~1.2 ms per 32-athlete draw, ~10 ms for a
+64-athlete one, both far below any real category size and only paid at
+draw-generation time.
+
+**Not verified in the browser.** This is a pure change to the draw engine
+with no UI beyond the one copy edit; it was verified against the local
+database via `scripts/test-draws.ts`, which generates and regenerates real
+draws end to end.
 
 **Call-up sheets: kata switches to the same paired AKA/AO table as kumite
 (2026-08-21).**

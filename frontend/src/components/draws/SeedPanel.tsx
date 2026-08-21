@@ -133,7 +133,8 @@ export function SeedPanel({
             <p className="mb-3 text-xs text-muted-foreground">
               Seed the strongest few athletes from prior performance. Seeds 1 and 2 are placed in
               opposite halves so they can only meet in the final; everyone left unseeded is drawn
-              at random. Seeding takes effect the next time this category is drawn.
+              at random, except that athletes from the same club are kept apart for as many rounds
+              as the bracket allows. Seeding takes effect the next time this category is drawn.
             </p>
 
             {isLoading || !data ? (

@@ -80,7 +80,12 @@ function bracketSize(n: number): number {
   return size;
 }
 
-export type SeedableEntry = { id: string; seed: number | null };
+/**
+ * `clubId` is optional so that the pure seeding helpers stay callable from
+ * tests and callers that only care about ranks; when it is present the draw
+ * also keeps club-mates apart (see spreadUnseededByClub).
+ */
+export type SeedableEntry = { id: string; seed: number | null; clubId?: string | null };
 
 /**
  * Dense ranks 1..N over the seeded members of a set.
@@ -114,13 +119,137 @@ function seedTiers(count: number): [number, number][] {
 }
 
 /**
+ * First round in which two 1-based bracket positions can face each other:
+ * positions 1 and 2 meet in round 1, 1 and 3 in round 2, and so on. Infinity
+ * is unreachable for two distinct positions inside one bracket, but is the
+ * honest answer for a position compared with itself.
+ */
+function meetRound(p1: number, p2: number, size: number): number {
+  for (let r = 1; r <= Math.log2(size); r++) {
+    if (Math.floor((p1 - 1) / 2 ** r) === Math.floor((p2 - 1) / 2 ** r)) return r;
+  }
+  return Infinity;
+}
+
+/**
+ * What it costs to have two club-mates able to meet in round `r`. Steeply
+ * front-loaded: one round-1 club clash is worse than any number of clashes in
+ * later rounds, which is the actual complaint — two athletes travel to a
+ * championship and are knocked out by each other before they have fought
+ * anyone else. By the semi-final nobody minds.
+ */
+function clashCost(r: number, totalRounds: number): number {
+  if (!Number.isFinite(r)) return 0;
+  return 4 ** (totalRounds - r);
+}
+
+/** One competitor as the spreader sees it: where they sit, and who they are with. */
+type Placed = { position: number; clubId: string | null };
+
+/**
+ * Spread unseeded entries across the free bracket indices so that club-mates
+ * meet as late as possible.
+ *
+ * The seeded entries are already placed and must not move — seeding protection
+ * outranks club separation — so they take part only as fixed obstacles. What is
+ * free is which unseeded entry goes to which leftover index.
+ *
+ * Method: start from the uniform shuffle that this function used to return
+ * outright, then hill-climb by swapping pairs of unseeded entries whenever the
+ * swap strictly lowers the total clash cost. Fields are small (a large karate
+ * category is tens of athletes, not thousands), so a few O(n^2) passes with an
+ * O(n) delta per candidate swap is cheap, and the randomised start keeps the
+ * draw non-deterministic: among arrangements that are equally good, which one
+ * comes out is still luck.
+ *
+ * Nothing here can fail. When separation is impossible — one club filling the
+ * category, or every free index adjacent to a club-mate — the cost simply
+ * cannot be improved and the original shuffle stands.
+ *
+ * @param free     free k indices, with the bracket position each maps to
+ * @param unseeded unseeded entries, pre-shuffled; assigned to `free` in order
+ * @param fixed    already-placed seeded entries, as immovable obstacles
+ * @returns the unseeded entries reordered to align with `free`
+ */
+function spreadUnseededByClub<T extends { clubId?: string | null }>(
+  free: { position: number }[],
+  unseeded: T[],
+  fixed: Placed[],
+  size: number
+): T[] {
+  const totalRounds = Math.log2(size);
+  const assigned = [...unseeded];
+  if (assigned.length < 2) return assigned;
+
+  // Nothing to separate unless at least one club is represented twice across
+  // the whole field. Bailing here keeps the common small-category case free.
+  const counts = new Map<string, number>();
+  for (const c of [...assigned.map((e) => e.clubId ?? null), ...fixed.map((f) => f.clubId)]) {
+    if (c) counts.set(c, (counts.get(c) ?? 0) + 1);
+  }
+  if (![...counts.values()].some((n) => n > 1)) return assigned;
+
+  const pairCost = (a: Placed, b: Placed): number =>
+    a.clubId && a.clubId === b.clubId
+      ? clashCost(meetRound(a.position, b.position, size), totalRounds)
+      : 0;
+
+  /**
+   * Cost of the entry sitting at free index `i` against everything except the
+   * occupants of `skip`. Used for swap deltas, where the two swapped entries'
+   * mutual cost is invariant (same clubs, same pair of positions) and so must
+   * be excluded from both sides of the comparison rather than counted twice.
+   */
+  const costAt = (i: number, clubId: string | null, skip: number): number => {
+    const self: Placed = { position: free[i].position, clubId };
+    let total = 0;
+    for (const f of fixed) total += pairCost(self, f);
+    for (let j = 0; j < assigned.length; j++) {
+      if (j === i || j === skip) continue;
+      total += pairCost(self, { position: free[j].position, clubId: assigned[j].clubId ?? null });
+    }
+    return total;
+  };
+
+  // Passes are capped rather than run to a fixed point: hill-climbing on a
+  // field this small settles in one or two passes, and the cap means a
+  // pathological field can never spin here.
+  for (let pass = 0; pass < 8; pass++) {
+    let improved = false;
+    // Shuffled pair order so that a tie between two swaps is not always broken
+    // the same way, which would bias the draw towards low indices.
+    const pairs: [number, number][] = [];
+    for (let i = 0; i < assigned.length; i++)
+      for (let j = i + 1; j < assigned.length; j++) pairs.push([i, j]);
+
+    for (const [i, j] of shuffle(pairs)) {
+      const ci = assigned[i].clubId ?? null;
+      const cj = assigned[j].clubId ?? null;
+      if (ci === cj) continue; // swapping two club-mates changes nothing
+      const before = costAt(i, ci, j) + costAt(j, cj, i);
+      const after = costAt(i, cj, j) + costAt(j, ci, i);
+      if (after < before) {
+        [assigned[i], assigned[j]] = [assigned[j], assigned[i]];
+        improved = true;
+      }
+    }
+    if (!improved) break;
+  }
+
+  return assigned;
+}
+
+/**
  * Order entries for bracketPositions(): result[k] takes bracket position
  * bracketPositions(size)[k], i.e. it plays the bracket's "seed k+1" slot.
  *
  * Seeds 1 and 2 are placed exactly, which puts them in opposite halves so they
  * can only meet in the final. Seeds 3-4, 5-8, 9-16 ... are randomised within
  * their tier, per standard WKF/tennis practice: protected from each other, but
- * not predetermined. Unseeded entries fill whatever indices are left.
+ * not predetermined. Unseeded entries fill whatever indices are left, arranged
+ * so that club-mates meet as late as the bracket allows — see
+ * spreadUnseededByClub. Seeded placement always wins: a seed is never moved to
+ * avoid a club clash.
  *
  * Byes need no special handling: they are the unused tail indices, which
  * bracketPositions maps to the top seeds' round-1 partners, so the byes land on
@@ -130,8 +259,10 @@ export function seededOrder(
   entries: SeedableEntry[]
 ): { id: string; rank: number | null }[] {
   const n = entries.length;
+  const size = bracketSize(n);
   const ranks = denseSeedRanks(entries);
   const idByRank = new Map([...ranks].map(([id, r]) => [r, id]));
+  const clubById = new Map(entries.map((e) => [e.id, e.clubId ?? null]));
   const seededCount = ranks.size;
 
   const order = new Array<{ id: string; rank: number | null } | undefined>(n);
@@ -154,11 +285,30 @@ export function seededOrder(
     });
   }
 
-  const rest = shuffle(entries.filter((e) => !ranks.has(e.id)));
-  let next = 0;
+  // Unseeded entries fill whatever indices the seeds left. A plain shuffle
+  // would do, and is where this starts, but it regularly drew two athletes
+  // from the same club against each other in round 1 — so the shuffle is then
+  // rearranged to push club-mates apart. Where clubs are unknown (callers that
+  // pass only ids and seeds) this degrades to exactly the old shuffle.
+  const free: { k: number; position: number }[] = [];
+  const positions = bracketPositions(size);
+  for (let k = 0; k < n; k++) if (!used.has(k)) free.push({ k, position: positions[k] });
+
+  const fixed: Placed[] = [];
   for (let k = 0; k < n; k++) {
-    if (!used.has(k)) order[k] = { id: rest[next++].id, rank: null };
+    const seat = order[k];
+    if (seat) fixed.push({ position: positions[k], clubId: clubById.get(seat.id) ?? null });
   }
+
+  const rest = spreadUnseededByClub(
+    free,
+    shuffle(entries.filter((e) => !ranks.has(e.id))),
+    fixed,
+    size
+  );
+  free.forEach(({ k }, i) => {
+    order[k] = { id: rest[i].id, rank: null };
+  });
 
   return order as { id: string; rank: number | null }[];
 }
@@ -672,7 +822,9 @@ export class DrawService {
 
     const entries = await prisma.entry.findMany({
       where: eligibleEntryWhere(data.eventId, data.divisionId, weightClassId),
-      select: { id: true, seed: true },
+      // clubId is selected for the draw itself, not for display: seededOrder
+      // uses it to keep club-mates out of each other's early rounds.
+      select: { id: true, seed: true, clubId: true },
     });
     if (entries.length < 2)
       throw { status: 422, message: "At least 2 approved entries are needed for a draw" };
@@ -721,7 +873,7 @@ export class DrawService {
 
     const entries = await prisma.entry.findMany({
       where: eligibleEntryWhere(draw.eventId, draw.divisionId, draw.weightClassId),
-      select: { id: true, seed: true },
+      select: { id: true, seed: true, clubId: true },
     });
     if (entries.length < 2)
       throw { status: 422, message: "At least 2 approved entries are needed for a draw" };
