@@ -55,10 +55,18 @@ export interface QueueSortableBout extends RunOrderableBout {
   /** A manual per-bout override (drag-to-reorder in the Run tab). */
   queueOrder: number | null;
   /** Non-null while this exact bout's clock is running and undecided —
-   * Bout.startedAt, the mat-side scoreboard's "in progress" ping. Its
-   * whole division is what a coordinator means by "currently on", not just
-   * this one bout — see sortRunQueue. */
+   * Bout.startedAt, the mat-side scoreboard's "in progress" ping. Cleared
+   * once the *next* bout starts fresh, so this is only ever true for the
+   * single bout currently on the clock — see divisionStarted below for the
+   * signal that outlives it. */
   startedAt: Date | string | null;
+  /** True once this division has at least one real, operator-recorded
+   * result (not an auto-resolved bye) — same value on every bout of the
+   * same draw, mirroring drawMatOrder. A division stays "mid-category" in
+   * the gap between one bout ending and the next being picked up, when no
+   * bout currently has startedAt set — this is what keeps it there. See
+   * sortRunQueue. */
+  divisionStarted: boolean;
 }
 
 /**
@@ -74,14 +82,29 @@ export interface QueueSortableBout extends RunOrderableBout {
  *    coordinator's screen should reflect what is actually happening, not
  *    the pre-plan. If more than one division somehow has a live bout at
  *    once, the one that started earliest — furthest along — sorts first.
- * 3. Otherwise divisions run to completion one after another, ordered by
- *    their own place on the mat (drawMatOrder), with drawId as an explicit
- *    tiebreak so two divisions that tie on (or both lack) a drawMatOrder
- *    never interleave with each other — most commonly both simply lacking
- *    one, which `?? Number.MAX_SAFE_INTEGER` otherwise collapses into one
- *    large tied group that would fall straight through to the next key
- *    with no notion of which division a bout belongs to.
- * 4. Only *within* a division does WKF running order (boutRunGroup: main
+ * 3. Otherwise, any division that has already recorded a real result
+ *    (divisionStarted) floats next, even though nothing of its is
+ *    currently on the clock — the gap between one bout ending and the
+ *    operator picking up its next one. Without this tier, the moment a
+ *    division's live bout is decided it drops out of tier 2 (a decided
+ *    bout is never "ready", so it can't carry startedAt into this
+ *    function at all) and, if its next bout hasn't itself been started
+ *    yet, falls all the way back to matOrder — visibly and wrongly
+ *    "finishing" a division that is still mid-category. Multiple such
+ *    divisions have no stronger signal to rank by than the next tier.
+ * 4. Otherwise divisions that haven't started at all run in the order
+ *    they're scheduled on the mat (drawMatOrder), with drawId as an
+ *    explicit tiebreak so two divisions that tie on (or both lack) a
+ *    drawMatOrder never interleave with each other — most commonly both
+ *    simply lacking one, which `?? Number.MAX_SAFE_INTEGER` otherwise
+ *    collapses into one large tied group that would fall straight through
+ *    to the next key with no notion of which division a bout belongs to.
+ *    Tier 3's divisions (divisionStarted but not currently live) fall
+ *    through to this same drawMatOrder/drawId ordering among themselves,
+ *    for lack of a better signal — there is no requirement here beyond
+ *    "ranks above an unstarted division," which the tier check above
+ *    already guarantees.
+ * 5. Only *within* a division does WKF running order (boutRunGroup: main
  *    through the semis, then bronze, then the final) apply.
  *
  * A fully completed division contributes no items here at all — getBoard
@@ -95,22 +118,34 @@ export function sortRunQueue<T extends QueueSortableBout>(items: readonly T[]): 
   // floats together — every one of its remaining bouts, started or not —
   // once any one of its bouts is live.
   const activeSinceByDraw = new Map<string, number>();
+  const startedDraws = new Set<string>();
   for (const item of items) {
+    if (item.divisionStarted) startedDraws.add(item.drawId);
     if (!item.startedAt) continue;
     const startedMs = new Date(item.startedAt).getTime();
     const current = activeSinceByDraw.get(item.drawId);
     if (current === undefined || startedMs < current) activeSinceByDraw.set(item.drawId, startedMs);
   }
 
+  // 0 = a bout of this division is live right now, 1 = the division has
+  // recorded a result but nothing is live this instant, 2 = untouched.
+  const tierOf = (drawId: string): 0 | 1 | 2 => {
+    if (activeSinceByDraw.has(drawId)) return 0;
+    if (startedDraws.has(drawId)) return 1;
+    return 2;
+  };
+
   return [...items].sort((a, b) => {
     const manual = (a.queueOrder ?? Number.MAX_SAFE_INTEGER) - (b.queueOrder ?? Number.MAX_SAFE_INTEGER);
     if (manual !== 0) return manual;
 
-    const aActiveSince = activeSinceByDraw.get(a.drawId);
-    const bActiveSince = activeSinceByDraw.get(b.drawId);
-    if (aActiveSince !== undefined || bActiveSince !== undefined) {
-      if (aActiveSince === undefined) return 1;
-      if (bActiveSince === undefined) return -1;
+    const aTier = tierOf(a.drawId);
+    const bTier = tierOf(b.drawId);
+    if (aTier !== bTier) return aTier - bTier;
+
+    if (aTier === 0) {
+      const aActiveSince = activeSinceByDraw.get(a.drawId)!;
+      const bActiveSince = activeSinceByDraw.get(b.drawId)!;
       if (aActiveSince !== bActiveSince) return aActiveSince - bActiveSince;
       // Same division (or two divisions that started at the exact same
       // millisecond) — fall through to the within-division rule below.
@@ -169,6 +204,7 @@ interface QueueItem {
   drawMatOrder: number | null;
   queueOrder: number | null;
   startedAt: Date | null;
+  divisionStarted: boolean;
 }
 
 export class RunService {
@@ -206,6 +242,10 @@ export class RunService {
       const category = draw.weightClass
         ? `${draw.division.name} · ${draw.weightClass.name}`
         : draw.division.name;
+      // DRAWN = no real result captured yet anywhere in this bracket — see
+      // computeDrawState's own status derivation, which this reuses rather
+      // than trusting the possibly-stale stored Draw.status column.
+      const divisionStarted = state.status !== "DRAWN";
 
       for (const cb of state.bouts) {
         // Ready = both fighters known and no result yet.
@@ -227,6 +267,7 @@ export class RunService {
           drawMatOrder: draw.matOrder ?? null,
           queueOrder: row?.queueOrder ?? null,
           startedAt: row?.startedAt ?? null,
+          divisionStarted,
         });
       }
     }

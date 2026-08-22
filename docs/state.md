@@ -4,12 +4,24 @@ This file is the handoff between coding agents. It describes what is in flight
 right now, not the permanent architecture (that's
 [`architecture.md`](architecture.md)).
 
-**Last updated:** 2026-08-22 — by Claude Code: **final and bronze bouts
+**Last updated:** 2026-08-22 — by Claude Code: **PR #32's "active division
+floats to top" fix didn't survive a bout actually being decided** — the
+priority signal was only ever "a ready bout has `startedAt` set," and a
+decided bout is never "ready" (so it drops out of the queue entirely,
+carrying its `startedAt` with it); if the division's *next* bout hadn't
+itself been started yet, the whole division fell back to `matOrder` mid-
+category. Fixed with a durable second signal — "this division has
+recorded at least one real result" — so it stays on top for the whole
+category, not just its currently-airing bout. See "In flight" below.
+
+Previously, same day — by Claude Code: **final and bronze bouts
 now carry a visible medal badge** everywhere a bout list is shown — gold
 "FINAL" pill, bronze/orange "BRONZE" pill, plus a grayscale-safe ★ marker
 on the printable call-up sheet. New `boutMedalType(bout, size)` in
-`lib/draws.ts`, backing a shared `MedalBadge` component. See "In flight"
-below.
+`lib/draws.ts`, backing a shared `MedalBadge` component.
+
+Previously, same day — by Claude Code: **a currently-active
+division could get stuck at the bottom of the coordinator's Run queue**
 
 Previously, same day — by Claude Code: **a currently-active
 division could get stuck at the bottom of the coordinator's Run queue**
@@ -217,6 +229,111 @@ port; those have since been pushed.) Everything here is verified locally against
 a database, never against production data.
 
 ## In flight (uncommitted)
+
+**Follow-up on PR #32: a mid-category division kept dropping out of
+priority (2026-08-22).**
+
+Request: reported as "we are now halfway through a category... the next
+bout shows at top, but the bouts to follow in that tatami for that same
+category are placed right at the end of all other categories." PR #32's
+`startedAt`-based priority worked for exactly one bout at a time, then
+stopped working the moment that bout was actually decided.
+
+**Root cause, confirmed by reproducing before touching any code.** Picked
+a real ready round-1 bout on `KATA GIRLS 12-13` (a division sitting
+mid-pack in Tatami 2's `matOrder`) and recorded a real winner for it via
+direct SQL. Reloading `/api/run/board` showed the division's now-ready
+round-2 bouts sitting back at its plain `matOrder` position, not
+prioritized at all — reproducing the report exactly. The mechanism:
+`getBoard`'s per-bout filter (`if (!cb.akaEntryId || !cb.aoEntryId ||
+cb.winnerEntryId) continue`) means a decided bout is *never* included in
+the array `sortRunQueue` sees — it carries its own `startedAt` value out
+of the queue's view entirely the instant it's scored. PR #32's whole
+priority tier lived on scanning that array for a live `startedAt`, so a
+division that just had its one live bout decided has nothing left to key
+on — if its next bout hasn't itself been explicitly started yet (the
+operator hasn't opened the scoreboard for it), the division has zero
+presence in the "active" computation and falls straight back to
+`drawMatOrder`. Neither `drawMatOrder` nor `startedAt` was wrong on its
+own; the bug was relying on a signal (a bout literally on the clock) that
+is inherently gap-y between bouts, for a property (this whole category is
+mid-flight) that needs to be continuous.
+
+**Fix.** `getBoard` already computes `computeDrawState`'s `state.status`
+(`DRAWN` / `IN_PROGRESS` / `COMPLETED`) fresh, once per draw, for reasons
+unrelated to ordering — reused it here rather than trusting the *stored*
+`Draw.status` column, which can lag behind (confirmed live: my raw-SQL
+test bout left the stored column reading `DRAWN` even after recording a
+result, since only the app's own `setBoutWinner` path — not a direct SQL
+write — triggers the recompute that updates it; `computeDrawState` has no
+such staleness since it always reads the bouts fresh). `state.status !==
+"DRAWN"` is exactly "this division has at least one real, operator-
+recorded result" (`computeDrawState`'s own `hasUserResults`, not counting
+auto-resolved byes) — attached to every `QueueItem` of that draw as
+`divisionStarted`, the same one-value-per-draw pattern already used for
+`drawMatOrder`.
+
+`sortRunQueue` now has three tiers instead of two: (0) a division with a
+bout live *right now* (`startedAt` set, unchanged from PR #32, ordered by
+earliest start among ties) — (1) a division with `divisionStarted` true
+but nothing live this instant — the exact gap PR #32 missed — falling
+back to `drawMatOrder`/`drawId` among its own peers for lack of a
+stronger signal — (2) untouched divisions, `drawMatOrder`/`drawId` as
+before. A live bout (tier 0) still outranks a merely-started one (tier 1)
+when both exist at once — a bout actually being fought is a stronger
+signal than "started at some point."
+
+One second-order effect worth flagging, not a bug: this fix changed the
+*baseline* running order of the seeded event beyond just the reproduction
+case — several other divisions on Tatami 2 already had real (non-bye)
+results recorded in the seed data itself and are now correctly promoted
+ahead of divisions that only *look* further along because of resolved
+byes. That's the fix doing its job; the previous "queue order" for those
+divisions was already quietly wrong in the same way, just never reported
+because nobody happened to notice a bye-heavy division sitting ahead of a
+genuinely-fought one.
+
+Files: `backend/src/services/run.service.ts`,
+`backend/scripts/test-run-order.ts`. No frontend changes — the frontend
+never re-sorts `mat.queue`, so this one backend fix covers the Run tab,
+the operator's mat screen, and the public spectator board alike, same as
+PR #32.
+
+### Verification (run 2026-08-22)
+
+`npx tsc --noEmit` clean in both `backend` and `frontend`. Full regression
+sweep clean on both sides.
+
+**Reproduced the bug live against the real seeded event before writing
+any fix, then re-verified the fix against the same reproduction**: marked
+a real ready bout on `KATA GIRLS 12-13` (Tatami 2, `matOrder` 8) as
+decided via direct SQL; confirmed pre-fix that its now-ready round-2
+bouts sat at their plain `matOrder` position (not prioritized). Applied
+the fix; confirmed the same division's remaining bouts now sit in the
+"started" tier, correctly ordered by `matOrder` among the other genuinely
+in-progress divisions on that mat, strictly ahead of every untouched
+division. Reverted the test bout to its original undecided state
+immediately after and confirmed via a fresh query that the specific row
+matched its pre-test values exactly — the queue's *overall* order shifted
+from what it looked like earlier in this session, but that's the second-
+order effect described above (other seed divisions correctly promoted),
+not leftover test contamination.
+
+Directly simulated the exact pre-fix comparator against the new
+regression's fixture in a standalone script to confirm it actually
+reproduces the reported failure (`a-r1,b-final` — division B stuck behind
+an untouched division A) before confirming the new comparator produces
+the correct order (`b-final,a-r1`).
+
+Extended `backend/scripts/test-run-order.ts` with three new cases: a
+division mid-category (one bout decided, next bout ready but not itself
+started) still floats entirely ahead of an untouched division; a bout
+that's actually live right now still outranks a merely-started division
+when both are present; two merely-started divisions with nothing
+currently live fall back to `matOrder` between themselves, same as
+before. All 18 checks in the file pass, including the PR #32 tests
+re-confirmed unaffected (a manual `queueOrder` still overrides everything,
+including the new mid-category tier).
 
 **Medal badges on final/bronze bouts, everywhere a bout list is shown
 (2026-08-22).**
