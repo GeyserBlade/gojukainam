@@ -35,7 +35,7 @@ import { PageSpinner } from "@/components/UIState"
 import { cn } from "@/lib/utils"
 import { categoryTitle, getPlanBoard, toScheduleCategory, type PlanCategory } from "@/lib/plan"
 import { buildSchedule, formatClock, interleaveMatOrder, type ScheduleCategoryInput, type ScheduleInput } from "@/lib/schedule"
-import { getDraw, type DrawDetail } from "@/lib/draws"
+import { getDraw, type DrawDetail, type BoutMedalType } from "@/lib/draws"
 import { buildCallupSheet, type CallupBoutRow, type CallupSlot } from "@/lib/callup"
 
 const formatGeneratedAt = (d: Date) =>
@@ -55,6 +55,24 @@ const SlotText = ({ slot }: { slot: CallupSlot }) =>
       <span className="text-muted-foreground"> · {slot.clubName}</span>
     </>
   )
+
+/**
+ * A medal marker that survives black-and-white printing: colored ink is a
+ * "nice to have" here, not something to rely on, so the final gets a
+ * thicker (2px) border and the bronze bouts a thinner one, with a ★ glyph
+ * and the word itself doing the actual work — a coordinator scanning a
+ * grayscale photocopy still sees exactly which rows matter.
+ */
+const MedalMark = ({ type }: { type: NonNullable<BoutMedalType> }) => (
+  <span
+    className={cn(
+      "ml-1.5 inline-flex items-center gap-0.5 rounded px-1 py-0.5 align-middle text-[9px] font-bold tracking-wide uppercase",
+      type === "final" ? "border-2 border-foreground bg-yellow-400/25" : "border border-foreground/70 bg-orange-500/20",
+    )}
+  >
+    ★ {type === "final" ? "Final" : "Bronze"}
+  </span>
+)
 
 // Kata and kumite both run as a real aka/ao head-to-head bracket (kata just
 // decides the winner by flags instead of points), so both are seated the
@@ -79,7 +97,10 @@ const BoutTable = ({ rows, heading }: { rows: CallupBoutRow[]; heading?: string 
         <tbody>
           {rows.map((row) => (
             <tr key={row.boutId ?? row.label} className="print-keep">
-              <td className="border border-foreground/20 px-2 py-1.5 align-top font-medium">{row.label}</td>
+              <td className="border border-foreground/20 px-2 py-1.5 align-top font-medium">
+                {row.label}
+                {row.medalType && <MedalMark type={row.medalType} />}
+              </td>
               <td className="border border-foreground/20 bg-red-50 px-2 py-1.5 align-top">
                 <div className="flex items-start gap-2">
                   <CheckSquare />

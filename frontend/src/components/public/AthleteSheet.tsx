@@ -4,8 +4,9 @@ import { Loader2, MapPin } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { Skeleton } from "@/components/ui/skeleton"
+import { MedalBadge } from "@/components/MedalBadge"
 import { cn } from "@/lib/utils"
-import { roundLabel } from "@/lib/draws"
+import { roundLabel, boutMedalType } from "@/lib/draws"
 import { getPublicAthlete, type AthleteBout, type AthleteRun } from "@/lib/public"
 import { RunStatusChip, medalFor } from "./AthleteStatus"
 
@@ -21,11 +22,15 @@ const boutRound = (bout: Pick<AthleteBout, "phase" | "round">, size: number) =>
 function BoutRow({ bout, size }: { bout: AthleteBout; size: number }) {
   const decided = bout.won !== null
   const hasScore = bout.scoreFor !== null && bout.scoreAgainst !== null
+  const medalType = boutMedalType(bout, size)
 
   return (
     <li className="flex items-baseline justify-between gap-3 border-b border-border/60 py-2 last:border-0">
       <div className="min-w-0">
-        <p className="text-xs text-muted-foreground">{boutRound(bout, size)}</p>
+        <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          {boutRound(bout, size)}
+          {medalType && <MedalBadge type={medalType} />}
+        </p>
         <p className="truncate text-sm">
           {bout.bye ? (
             <span className="text-muted-foreground">Bye — no bout</span>

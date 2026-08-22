@@ -3,7 +3,9 @@ import { useState } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
+import { MedalBadge } from "@/components/MedalBadge"
 import { cn } from "@/lib/utils"
+import { boutMedalType } from "@/lib/draws"
 import type { PublicQueueItem, PublicRunBoard } from "@/lib/public"
 import { MatPager, type MatPage } from "./MatPager"
 
@@ -23,13 +25,15 @@ const boutRound = (item: PublicQueueItem) =>
 
 /** The bout at the head of a floor's queue — the one being fought or called. */
 function OnNowCard({ item }: { item: PublicQueueItem }) {
+  const medalType = boutMedalType(item, item.size)
   return (
     <Card className="border-primary ring-1 ring-primary/40">
       <CardContent className="space-y-2 p-3">
         <div className="flex items-center justify-between gap-2">
           <Badge className="bg-primary text-primary-foreground text-[10px]">On now</Badge>
-          <span className="min-w-0 flex-1 truncate text-right text-xs text-muted-foreground">
+          <span className="flex min-w-0 flex-1 items-center justify-end gap-1.5 truncate text-right text-xs text-muted-foreground">
             {item.category} · {boutRound(item)}
+            {medalType && <MedalBadge type={medalType} />}
           </span>
         </div>
         <div className="space-y-1.5 border-t pt-2">
@@ -58,6 +62,7 @@ function OnNowCard({ item }: { item: PublicQueueItem }) {
  * ten screens of scrolling on a phone.
  */
 function QueueRow({ item, index }: { item: PublicQueueItem; index: number }) {
+  const medalType = boutMedalType(item, item.size)
   return (
     <li className="flex items-center gap-2.5 border-b py-2 last:border-0">
       <span className="w-4 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
@@ -67,8 +72,9 @@ function QueueRow({ item, index }: { item: PublicQueueItem; index: number }) {
         <p className="truncate text-sm">
           {item.aka.name} <span className="text-xs text-muted-foreground">v</span> {item.ao.name}
         </p>
-        <p className="truncate text-[11px] text-muted-foreground">
+        <p className="flex items-center gap-1.5 truncate text-[11px] text-muted-foreground">
           {item.category} · {boutRound(item)}
+          {medalType && <MedalBadge type={medalType} />}
         </p>
       </div>
       <span

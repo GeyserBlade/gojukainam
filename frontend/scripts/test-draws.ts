@@ -8,6 +8,7 @@
  */
 import {
   isFinalBout,
+  boutMedalType,
   finalBronzeMedalists,
   sortBoutsForRunning,
   type DrawDetail,
@@ -73,6 +74,65 @@ console.log("\n— isFinalBout —");
     "smallest possible bracket (size 2) — its one bout is the final",
     isFinalBout(draw2, { phase: "MAIN", round: 1 }) === true,
   );
+}
+
+console.log("\n— boutMedalType: 2-entry bracket, just a final, no bronze at all —");
+{
+  // The whole division is a single bout — trivially the final, and there's
+  // no repechage bracket possible with only 2 entries (a finalist can have
+  // beaten at most one opponent, never enough for a bronze chain).
+  check("the sole bout is \"final\"", boutMedalType({ phase: "MAIN", round: 1 }, 2) === "final");
+}
+
+console.log("\n— boutMedalType: 4-entry bracket, 1 final + bronze bouts —");
+{
+  // Round 1 = semis (not a medal bout), round 2 = the final; any
+  // REPECHAGE row is "bronze" regardless of round/position.
+  check("round 1 (semis) is not a medal bout", boutMedalType({ phase: "MAIN", round: 1 }, 4) === null);
+  check("round 2 (the final) is \"final\"", boutMedalType({ phase: "MAIN", round: 2 }, 4) === "final");
+  check("a REPECHAGE bout is \"bronze\"", boutMedalType({ phase: "REPECHAGE", round: 1 }, 4) === "bronze");
+}
+
+console.log("\n— boutMedalType: 8-entry bracket, multi-stage bronze chain —");
+{
+  // 3 rounds: round 1, round 2 (semis), round 3 (final). A double-
+  // repechage chain's later stage (round 2 of the REPECHAGE side) is still
+  // "bronze", not reclassified as anything else just because its round
+  // number happens to equal the MAIN bracket's semi-final round.
+  check("round 1 is not a medal bout", boutMedalType({ phase: "MAIN", round: 1 }, 8) === null);
+  check("round 2 (semis) is not a medal bout", boutMedalType({ phase: "MAIN", round: 2 }, 8) === null);
+  check("round 3 (the final) is \"final\"", boutMedalType({ phase: "MAIN", round: 3 }, 8) === "final");
+  check("REPECHAGE stage 1 is \"bronze\"", boutMedalType({ phase: "REPECHAGE", round: 1 }, 8) === "bronze");
+  check(
+    "REPECHAGE stage 2 is still \"bronze\", not confused with the MAIN semis at the same round number",
+    boutMedalType({ phase: "REPECHAGE", round: 2 }, 8) === "bronze",
+  );
+}
+
+console.log("\n— boutMedalType: 16-entry bracket —");
+{
+  check("round 3 (semis of 4 rounds) is not a medal bout", boutMedalType({ phase: "MAIN", round: 3 }, 16) === null);
+  check("round 4 (the final) is \"final\"", boutMedalType({ phase: "MAIN", round: 4 }, 16) === "final");
+}
+
+console.log("\n— boutMedalType and isFinalBout agree on every case —");
+{
+  // isFinalBout now delegates to boutMedalType; pin that they can't drift
+  // apart across a spread of sizes/rounds/phases.
+  for (const size of [2, 4, 8, 16, 32]) {
+    const totalRounds = Math.log2(size);
+    for (let round = 1; round <= totalRounds; round++) {
+      for (const phase of ["MAIN", "REPECHAGE"] as const) {
+        const draw = makeDraw(size);
+        const bout = { phase, round };
+        check(
+          `size ${size}, ${phase} round ${round}: isFinalBout === (boutMedalType === "final")`,
+          isFinalBout(draw, bout) === (boutMedalType(bout, size) === "final"),
+          { size, phase, round },
+        );
+      }
+    }
+  }
 }
 
 console.log("\n— finalBronzeMedalists —");

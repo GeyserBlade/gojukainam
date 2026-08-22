@@ -13,6 +13,10 @@ export interface RunQueueItem {
   phase: "MAIN" | "REPECHAGE"
   round: number
   position: number
+  /** Bracket size — needed to tell a final round from an ordinary one
+   * (lib/draws.ts's boutMedalType). Already present on the API payload;
+   * this was just missing from the type. */
+  size: number
   category: string
   gender: "Male" | "Female"
   isKumite: boolean
