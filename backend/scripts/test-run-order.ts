@@ -1,14 +1,19 @@
 /**
- * Unit tests for run.service.ts's sortBoutsForRunning — the pure WKF
- * running-order rule (main bracket through semis, then bronze/repechage,
- * then the final last). No DB: importing run.service.ts pulls in
- * ../lib/prisma.js, but PrismaClient only connects on first query, and this
- * script never issues one — mirrors the frontend's pure-script convention
- * (frontend/scripts/test-callup.ts) since this helper has no DB dependency.
+ * Unit tests for run.service.ts's pure ordering rules:
+ *  - sortBoutsForRunning — WKF running order *within one division* (main
+ *    bracket through semis, then bronze/repechage, then the final last).
+ *  - sortRunQueue — the mat-wide, *multi-division* queue that wraps it:
+ *    manual queueOrder first, then divisions kept together and ordered by
+ *    their own place on the mat.
+ * No DB: importing run.service.ts pulls in ../lib/prisma.js, but
+ * PrismaClient only connects on first query, and this script never issues
+ * one — mirrors the frontend's pure-script convention
+ * (frontend/scripts/test-callup.ts) since neither helper has a DB
+ * dependency.
  *
  * Run: npx tsx scripts/test-run-order.ts
  */
-import { sortBoutsForRunning, type RunOrderableBout } from "../src/services/run.service.js";
+import { sortBoutsForRunning, sortRunQueue, type RunOrderableBout, type QueueSortableBout } from "../src/services/run.service.js";
 
 let failures = 0;
 function check(label: string, ok: boolean, detail?: unknown) {
@@ -113,6 +118,92 @@ console.log("\n— sortBoutsForRunning: does not mutate the input array —");
   const original = bouts.map((b) => b.id).join(",");
   sortBoutsForRunning(bouts, 4);
   check("the caller's array is untouched", bouts.map((b) => b.id).join(",") === original, bouts);
+}
+
+interface QItem extends QueueSortableBout {
+  id: string;
+}
+const qitem = (
+  id: string,
+  drawId: string,
+  phase: "MAIN" | "REPECHAGE",
+  round: number,
+  position: number,
+  size: number,
+  drawMatOrder: number | null,
+  queueOrder: number | null = null,
+): QItem => ({ id, drawId, phase, round, position, size, drawMatOrder, queueOrder });
+
+console.log("\n— sortRunQueue: regression — divisions must run to completion, not phase-by-phase across the mat —");
+{
+  // The exact bug report: with drawMatOrder distinct per division, a mat
+  // with two size-4 divisions (round 1 = semis, round 2 = final) must
+  // finish division A entirely (semis, then final) before division B's
+  // semis even though A's final and B's semis are both "round 2" — a
+  // naive round-number comparison would put them in the same bucket.
+  const items = [
+    qitem("b-semi1", "B", "MAIN", 1, 0, 4, 1),
+    qitem("b-semi2", "B", "MAIN", 1, 1, 4, 1),
+    qitem("a-final", "A", "MAIN", 2, 0, 4, 0),
+    qitem("a-semi1", "A", "MAIN", 1, 0, 4, 0),
+    qitem("a-semi2", "A", "MAIN", 1, 1, 4, 0),
+    qitem("b-final", "B", "MAIN", 2, 0, 4, 1),
+  ];
+  const order = sortRunQueue(items).map((i) => i.id);
+  check(
+    "division A runs to completion (semis, then final) before division B starts",
+    order.join(",") === "a-semi1,a-semi2,a-final,b-semi1,b-semi2,b-final",
+    order,
+  );
+}
+
+console.log("\n— sortRunQueue: regression — tied/missing drawMatOrder must not merge two divisions' phases —");
+{
+  // This is the actual failure mode: two divisions that both lack a
+  // drawMatOrder (or happen to share one) used to fall straight through to
+  // boutRunGroup with no notion of which division a bout belongs to,
+  // producing "every division's non-final bouts, then every division's
+  // bronze bouts, then every division's finals" instead of one division at
+  // a time. drawId as the next key is what has to prevent this.
+  const items = [
+    qitem("a-r1", "A", "MAIN", 1, 0, 8, null),
+    qitem("a-semi", "A", "MAIN", 2, 0, 8, null),
+    qitem("a-bronze", "A", "REPECHAGE", 1, 0, 8, null),
+    qitem("a-final", "A", "MAIN", 3, 0, 8, null),
+    qitem("b-r1", "B", "MAIN", 1, 0, 8, null),
+    qitem("b-semi", "B", "MAIN", 2, 0, 8, null),
+    qitem("b-bronze", "B", "REPECHAGE", 1, 0, 8, null),
+    qitem("b-final", "B", "MAIN", 3, 0, 8, null),
+  ];
+  const order = sortRunQueue(items).map((i) => i.id);
+  const buggyOrder = [
+    "a-r1,b-r1,a-semi,b-semi,a-bronze,b-bronze,a-final,b-final", // interleaved by phase (the bug)
+  ];
+  check(
+    "each division's own 4 bouts stay contiguous (grouped by drawId), not interleaved by phase",
+    order.join(",") === "a-r1,a-semi,a-bronze,a-final,b-r1,b-semi,b-bronze,b-final" ||
+      order.join(",") === "b-r1,b-semi,b-bronze,b-final,a-r1,a-semi,a-bronze,a-final",
+    order,
+  );
+  check("the buggy phase-interleaved order does not occur", !buggyOrder.includes(order.join(",")), order);
+}
+
+console.log("\n— sortRunQueue: a manual queueOrder overrides division grouping entirely —");
+{
+  const items = [
+    qitem("a-r1", "A", "MAIN", 1, 0, 4, 0, 1),
+    qitem("b-r1", "B", "MAIN", 1, 0, 4, 1, 0),
+  ];
+  const order = sortRunQueue(items).map((i) => i.id);
+  check("the coordinator's manual order (b before a) wins over drawMatOrder", order.join(",") === "b-r1,a-r1", order);
+}
+
+console.log("\n— sortRunQueue: does not mutate the input array —");
+{
+  const items = [qitem("b", "B", "MAIN", 1, 0, 4, 1), qitem("a", "A", "MAIN", 1, 0, 4, 0)];
+  const original = items.map((i) => i.id).join(",");
+  sortRunQueue(items);
+  check("the caller's array is untouched", items.map((i) => i.id).join(",") === original, items);
 }
 
 console.log(failures === 0 ? "\nAll checks passed." : `\n${failures} check(s) failed.`);

@@ -4,13 +4,22 @@ This file is the handoff between coding agents. It describes what is in flight
 right now, not the permanent architecture (that's
 [`architecture.md`](architecture.md)).
 
-**Last updated:** 2026-08-22 — by Claude Code: **the final bout wasn't
+**Last updated:** 2026-08-22 — by Claude Code: **real regression in the
+run-order fix** — a mat's queue could interleave two divisions' bouts by
+phase (every division's non-finals, then every division's bronze bouts,
+then every division's finals) instead of running one division to
+completion before the next starts, whenever those divisions tied on (or
+both lacked) `Draw.matOrder`. Fixed by making division grouping itself an
+explicit sort key, extracted into a new testable `sortRunQueue`. See "In
+flight" below.
+
+Previously, same day — by Claude Code: **the final bout wasn't
 visible on the public spectator board** — not a regression in the run-order
 fix below (verified live: the operator's screen and the Run tab both
 already showed it correctly), but a pre-existing truncation on the
 spectator board's "Up next" preview that could silently swallow any deep
 queue item, including a division's final. Fixed by making the cut-off
-expandable instead of a dead end. See "In flight" below.
+expandable instead of a dead end.
 
 Previously, same day — by Claude Code: **fixed the tatami
 operator's bout running order** — the final was being called right after
@@ -192,6 +201,107 @@ port; those have since been pushed.) Everything here is verified locally against
 a database, never against production data.
 
 ## In flight (uncommitted)
+
+**Real regression: divisions interleaving by phase across a mat instead of
+running to completion (2026-08-22).**
+
+Request: a genuine regression from the PR #29 run-order fix — a mat's
+queue could show `Category A: R1, R2, Semis; Category B: R1, R2, Semis;
+Category A: Bronze 1, Bronze 2; Category B: Bronze 1, Bronze 2; Category A:
+Final; Category B: Final` instead of running Category A to completion
+before Category B starts at all.
+
+**Root cause.** `RunService.getBoard`'s merged queue comparator was
+already keying on `drawMatOrder` *before* `boutRunGroup` (the within-
+division phase rule from PR #29) — on paper the right order of keys. The
+bug is in what happens when `drawMatOrder` **ties**: `(a.drawMatOrder ??
+Number.MAX_SAFE_INTEGER) - (b.drawMatOrder ?? ...)` evaluates to `0` for
+two divisions that share a value, or — far more commonly — for any two
+divisions that both simply lack one (both fall to the same
+`MAX_SAFE_INTEGER` fallback). A `0` from an `||`-chained comparator falls
+through to the *next* key, which was `boutRunGroup` — a rule that has no
+notion of which division a bout belongs to. Two tied divisions then get
+sorted by phase *across* both of them: every non-final bout from either
+division, then every bronze bout from either, then every final from
+either. Confirmed by direct simulation of the exact pre-fix comparator
+against a two-division fixture — it reproduces the reported pattern
+precisely (see the "before" order in the test file's regression comment).
+
+This wasn't caught during the PR #29 verification because that pass only
+checked a single division's own bout order — the seeded event happens to
+have every draw's `matOrder` populated distinctly (a QA-seed artifact, not
+representative), so cross-division ties never came up. A live check
+during PR #30's investigation touched several other divisions on the same
+mat but never happened to inspect whether *their own* relative order was
+sound, only whether one specific bout was visible.
+
+**Fix.** Extracted the queue's whole comparator out of an unexported
+inline arrow into a new exported, independently-testable
+`sortRunQueue<T extends QueueSortableBout>` in `run.service.ts`, and
+inserted `a.drawId.localeCompare(b.drawId)` as an explicit key *between*
+`drawMatOrder` and `boutRunGroup`. This guarantees one division's bouts
+stay contiguous regardless of whether `drawMatOrder` gives a meaningful
+cross-division order or not — `drawMatOrder` still decides *which*
+division goes first when it can, `drawId` only takes over exactly when
+`drawMatOrder` can't (a tie, most often both null), and only once a run of
+same-`drawId` bouts is established does `boutRunGroup`/round/position
+apply *within* it. The now-fully-redundant trailing
+`category.localeCompare` tiebreak (unreachable once `drawId` disambiguates
+completely) was removed. `sortBoutsForRunning` itself — the single-
+division rule call-up sheet and this file both use — was untouched; it was
+never the source of this bug, since it never receives more than one
+division's bouts at a time.
+
+**Call-up sheet checked, confirmed unaffected.** `lib/callup.ts`'s
+`mainBoutRows`/`bronzeBoutRows`/`finalBoutRows` all call
+`sortBoutsForRunning(draw.bouts, draw.size)` where `draw` is always one
+division's own `CallupDraw` (from a single `getDraw(drawId)` call) — never
+a merged array. `CallupPrint.tsx`'s per-mat batch mode renders one
+`buildCallupSheet(draw)` call per division independently (`targets.map`),
+each in its own printed section; there is no code path where bouts from
+two different divisions are ever sorted against each other. Nothing to
+fix here — verified by reading, not assumed.
+
+Files: `backend/src/services/run.service.ts`,
+`backend/scripts/test-run-order.ts`. No frontend changes.
+
+### Verification (run 2026-08-22)
+
+`npx tsc --noEmit` clean in both `backend` and `frontend`. Full regression
+sweep clean on both sides (frontend's pure-logic suite unaffected, as
+expected, since only backend files changed).
+
+**Confirmed the bug reproduces with the pre-fix logic**: directly
+simulated the exact old comparator (queueOrder → drawMatOrder →
+boutRunGroup → round → position) against a two-division, tied-matOrder
+fixture in a standalone Node script — it produced
+`a-r1,b-r1,a-semi,b-semi,a-bronze,b-bronze,a-final,b-final`, the identical
+phase-interleaved pattern from the report.
+
+Extended `backend/scripts/test-run-order.ts` with four new `sortRunQueue`
+cases: (1) two divisions with *distinct* `drawMatOrder` must each run to
+completion before the next starts (semis then final for A, only then B's
+semis) — this alone doesn't catch the real bug, since distinct values
+never hit the `0`-tie path; (2) the actual regression — two divisions
+that both lack `drawMatOrder` must stay grouped by `drawId`, not
+interleaved by phase, with an explicit assertion that the known-buggy
+order does *not* occur; (3) a manual `queueOrder` still overrides division
+grouping entirely, unchanged from before; (4) the sort doesn't mutate its
+input. All pass.
+
+**Verified live against the seeded event, not just a synthetic fixture.**
+Temporarily nulled `Draw.matOrder` via direct SQL for two real division
+pairs on the same mat (Tatami 2) — first `KUMITE MALE JUNIOR` O63kg/U63kg
+(confirmed both push to the end of the queue together when tied, though
+each had only one ready bout, so this alone couldn't show intra-group
+interleaving), then the more decisive case, `KATA BOYS 5-6` and
+`KATA GIRLS 12-13` (each with 4 ready bouts spanning two rounds): with
+both `matOrder`s null, `/api/run/board` returned all 4 of KATA BOYS 5-6's
+bouts contiguously, then all 4 of KATA GIRLS 12-13's — not interleaved
+round-by-round. Restored both pairs' original `matOrder` values
+immediately after (0/8/12/13, confirmed via a follow-up query, and the
+full Tatami 2 queue re-checked to match its original 28-item order
+exactly) — no lasting change to the seed data.
 
 **Follow-up: the final bout wasn't visible on the public spectator board
 (2026-08-22).**
