@@ -54,40 +54,76 @@ export interface QueueSortableBout extends RunOrderableBout {
   drawMatOrder: number | null;
   /** A manual per-bout override (drag-to-reorder in the Run tab). */
   queueOrder: number | null;
+  /** Non-null while this exact bout's clock is running and undecided —
+   * Bout.startedAt, the mat-side scoreboard's "in progress" ping. Its
+   * whole division is what a coordinator means by "currently on", not just
+   * this one bout — see sortRunQueue. */
+  startedAt: Date | string | null;
 }
 
 /**
- * Sorts a whole mat's *merged, multi-division* ready-queue: a manual
- * queueOrder wins outright when a coordinator has set one; otherwise
- * divisions run to completion one after another, ordered by their own
- * place on the mat (drawMatOrder) — and only *within* a division does WKF
- * running order (boutRunGroup: main through the semis, then bronze, then
- * the final) apply.
+ * Sorts a whole mat's *merged, multi-division* ready-queue.
  *
- * `drawId` sits between those two keys specifically to guard the
- * cross-division grouping itself: drawMatOrder alone only outer-sorts
- * correctly when every division on the mat has been given a distinct
- * value. Two divisions that tie on drawMatOrder — most commonly both
- * simply lacking one, which `?? Number.MAX_SAFE_INTEGER` otherwise
- * collapses into one large tied group — would otherwise fall straight
- * through to boutRunGroup as the next key, which has no idea which
- * division a bout belongs to. That reproduces exactly the reported bug:
- * every tied division's non-final bouts first, then every tied division's
- * bronze bouts, then every tied division's finals, instead of one division
- * finishing before the next one starts. Keying on drawId first keeps a
- * division's own bouts contiguous regardless of whether drawMatOrder gives
- * a meaningful cross-division order or not.
+ * 1. A manual queueOrder wins outright when a coordinator has set one —
+ *    unchanged, an explicit human override of everything below it.
+ * 2. Whichever division has a bout actually being fought right now (a
+ *    ready bout with startedAt set) floats to the top, ahead of every
+ *    division's own place on the mat — an operator who started a bout out
+ *    of turn (or whose earlier division stalled waiting on results
+ *    elsewhere) makes that the mat's real current reality, and the
+ *    coordinator's screen should reflect what is actually happening, not
+ *    the pre-plan. If more than one division somehow has a live bout at
+ *    once, the one that started earliest — furthest along — sorts first.
+ * 3. Otherwise divisions run to completion one after another, ordered by
+ *    their own place on the mat (drawMatOrder), with drawId as an explicit
+ *    tiebreak so two divisions that tie on (or both lack) a drawMatOrder
+ *    never interleave with each other — most commonly both simply lacking
+ *    one, which `?? Number.MAX_SAFE_INTEGER` otherwise collapses into one
+ *    large tied group that would fall straight through to the next key
+ *    with no notion of which division a bout belongs to.
+ * 4. Only *within* a division does WKF running order (boutRunGroup: main
+ *    through the semis, then bronze, then the final) apply.
+ *
+ * A fully completed division contributes no items here at all — getBoard
+ * only ever includes a bout once both fighters are known and no result is
+ * recorded yet, so there is nothing to specially sort "last": it is simply
+ * absent once every one of its bouts is decided.
  */
 export function sortRunQueue<T extends QueueSortableBout>(items: readonly T[]): T[] {
-  return [...items].sort(
-    (a, b) =>
-      (a.queueOrder ?? Number.MAX_SAFE_INTEGER) - (b.queueOrder ?? Number.MAX_SAFE_INTEGER) ||
+  // Per division: the earliest startedAt among its own ready bouts, or
+  // undefined if none of them are currently running. A whole division
+  // floats together — every one of its remaining bouts, started or not —
+  // once any one of its bouts is live.
+  const activeSinceByDraw = new Map<string, number>();
+  for (const item of items) {
+    if (!item.startedAt) continue;
+    const startedMs = new Date(item.startedAt).getTime();
+    const current = activeSinceByDraw.get(item.drawId);
+    if (current === undefined || startedMs < current) activeSinceByDraw.set(item.drawId, startedMs);
+  }
+
+  return [...items].sort((a, b) => {
+    const manual = (a.queueOrder ?? Number.MAX_SAFE_INTEGER) - (b.queueOrder ?? Number.MAX_SAFE_INTEGER);
+    if (manual !== 0) return manual;
+
+    const aActiveSince = activeSinceByDraw.get(a.drawId);
+    const bActiveSince = activeSinceByDraw.get(b.drawId);
+    if (aActiveSince !== undefined || bActiveSince !== undefined) {
+      if (aActiveSince === undefined) return 1;
+      if (bActiveSince === undefined) return -1;
+      if (aActiveSince !== bActiveSince) return aActiveSince - bActiveSince;
+      // Same division (or two divisions that started at the exact same
+      // millisecond) — fall through to the within-division rule below.
+    }
+
+    return (
       (a.drawMatOrder ?? Number.MAX_SAFE_INTEGER) - (b.drawMatOrder ?? Number.MAX_SAFE_INTEGER) ||
       a.drawId.localeCompare(b.drawId) ||
       boutRunGroup(a, a.size) - boutRunGroup(b, b.size) ||
       a.round - b.round ||
-      a.position - b.position,
-  );
+      a.position - b.position
+    );
+  });
 }
 
 const SLOT_ENTRY_INCLUDE = {
@@ -132,6 +168,7 @@ interface QueueItem {
   matId: string | null;
   drawMatOrder: number | null;
   queueOrder: number | null;
+  startedAt: Date | null;
 }
 
 export class RunService {
@@ -189,6 +226,7 @@ export class RunService {
           matId: row?.matId ?? draw.matId ?? null,
           drawMatOrder: draw.matOrder ?? null,
           queueOrder: row?.queueOrder ?? null,
+          startedAt: row?.startedAt ?? null,
         });
       }
     }

@@ -4,14 +4,21 @@ This file is the handoff between coding agents. It describes what is in flight
 right now, not the permanent architecture (that's
 [`architecture.md`](architecture.md)).
 
-**Last updated:** 2026-08-22 — by Claude Code: **real regression in the
+**Last updated:** 2026-08-22 — by Claude Code: **a currently-active
+division could get stuck at the bottom of the coordinator's Run queue**
+— `getBoard` never read `Bout.startedAt` at all, so a bout actually being
+fought had zero effect on ordering; whichever `matOrder` slot a division
+was pre-assigned kept it there even while live. Fixed: the division with
+a live (started, undecided) bout now floats to the top of its mat's
+queue, ahead of `matOrder`. See "In flight" below.
+
+Previously, same day — by Claude Code: **real regression in the
 run-order fix** — a mat's queue could interleave two divisions' bouts by
 phase (every division's non-finals, then every division's bronze bouts,
 then every division's finals) instead of running one division to
 completion before the next starts, whenever those divisions tied on (or
 both lacked) `Draw.matOrder`. Fixed by making division grouping itself an
-explicit sort key, extracted into a new testable `sortRunQueue`. See "In
-flight" below.
+explicit sort key, extracted into a new testable `sortRunQueue`.
 
 Previously, same day — by Claude Code: **the final bout wasn't
 visible on the public spectator board** — not a regression in the run-order
@@ -201,6 +208,96 @@ port; those have since been pushed.) Everything here is verified locally against
 a database, never against production data.
 
 ## In flight (uncommitted)
+
+**A currently-active division floats to the top of the Run queue
+(2026-08-22).**
+
+Request: follow-up on PR #31. Reported as "the run order is still mixed
+up" — a category actively being scored on a mat showed up at the *bottom*
+of the coordinator's Run queue instead of near the top, even while a bout
+in it was genuinely being fought.
+
+**What "currently on" means in the data**, checked by reading rather than
+guessing: `Bout.startedAt` — "Set once, the first time the mat-side
+scoreboard starts this bout's clock... the app has no other signal that a
+bout is 'in progress'," reset to null whenever the result or fighters are
+invalidated. This is the one authoritative live-ping field.
+`Draw.status` was the other candidate the report named, but it means
+something different and coarser: `IN_PROGRESS` just means "at least one
+result has ever been captured for this division," true for hours after
+the operator moved on to other rounds — not "there is a bout on the clock
+right now." No `Division.order` field exists in the schema at all.
+
+**Root cause, confirmed by reproducing before touching any code.** Marked
+a real ready bout's `startedAt` via direct SQL on a division sitting last
+in a mat's `matOrder` (position 25 of 28 on Tatami 2) and reloaded
+`/api/run/board` — its position never changed. Reading `getBoard`
+confirmed why: `QueueItem` never read `row?.startedAt` from the bout row
+at all, and `sortRunQueue` (from the PR #31 fix) had no notion of it
+either — the queue was built entirely from `queueOrder` → `drawMatOrder` →
+`drawId` → WKF phase order, none of which reflect what is actually
+happening on the mat right now. A bout could be mid-fight and it would
+make literally zero difference to where its division sat in the list.
+
+**Fix.** `QueueItem`/`QueueSortableBout` gained a `startedAt` field,
+populated straight from `row?.startedAt`. `sortRunQueue` now precomputes,
+per `drawId`, the earliest `startedAt` among that division's own ready
+bouts (or nothing, if none are live), and applies it as a new priority
+tier sitting between the manual `queueOrder` override (still the single
+highest-priority key — an explicit human decision beats everything,
+including "this one is live") and the `drawMatOrder`/`drawId`/phase chain
+from PR #31: any division with a live bout outranks every division
+without one, regardless of `matOrder`; among two simultaneously-live
+divisions (an edge case, but the report explicitly asked for a rule here),
+the one that started earliest — furthest along — goes first. The whole
+division floats together, not just the one bout with `startedAt` set: a
+division's other ready-but-not-yet-started bouts (its still-to-come
+rounds, bronze, final) move up with it, still ordered internally by the
+existing WKF `boutRunGroup`/round/position rule. Below that tier, nothing
+changes from PR #31.
+
+**Completed divisions**, per the report's ask #4 to verify whether
+they're still returned at all: confirmed by reading, not assumed — they
+aren't. `getBoard`'s per-bout filter (`if (!cb.akaEntryId || !cb.aoEntryId
+|| cb.winnerEntryId) continue`) means a division with every bout decided
+contributes zero items to the queue in the first place, so there's
+nothing for `sortRunQueue` to specially push "last" — it's simply absent,
+which already satisfies the requirement without any new code.
+
+Files: `backend/src/services/run.service.ts`,
+`backend/scripts/test-run-order.ts`. No frontend changes — the frontend
+never re-sorts `mat.queue`, so fixing the one backend function is enough
+for the Run tab, the operator's mat screen, and the public spectator
+board alike (the same three surfaces PR #30 already traced this data
+through).
+
+### Verification (run 2026-08-22)
+
+`npx tsc --noEmit` clean in both `backend` and `frontend`. Full regression
+sweep clean on both sides.
+
+**Reproduced the exact bug against the real seeded event before writing
+any fix**, per the report's own ask: temporarily set `startedAt = now()`
+on a real ready bout belonging to `KUMITE MALE SENIOR` (`matOrder` 15, the
+very last division on Tatami 2's 28-item queue) via direct SQL, confirmed
+`/api/run/board` left it at positions 25–27 completely unmoved — the bug,
+reproduced live, not inferred. Applied the fix, reloaded (the dev server's
+watch mode picked it up automatically), and confirmed the same division
+now sits at positions 0–2, ahead of everything else on that mat, with the
+rest of the queue otherwise unchanged. Cleared the test `startedAt` value
+immediately after and re-confirmed the mat's full 28-item queue matched
+its original order exactly — no lasting change to the seed data.
+
+Extended `backend/scripts/test-run-order.ts` with three new `sortRunQueue`
+cases, each deliberately set up so the signal under test *disagrees* with
+the others (to prove it's actually driving the result, not riding along
+with a correct answer for the wrong reason): (1) a division scheduled
+last by `matOrder` but with a live bout floats entirely ahead of two
+earlier-scheduled, inactive divisions; (2) of two simultaneously-active
+divisions, the one with the *later* `matOrder` but the *earlier*
+`startedAt` still wins; (3) a manual `queueOrder` still beats an active
+division when the two disagree. All pass, alongside the full existing
+suite (15 checks total in the file).
 
 **Real regression: divisions interleaving by phase across a mat instead of
 running to completion (2026-08-22).**
