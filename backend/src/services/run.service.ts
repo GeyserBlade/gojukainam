@@ -29,16 +29,64 @@ function boutRunGroup(bout: RunOrderableBout, size: number): number {
 }
 
 /**
- * Sorts one division's bouts into WKF running order. The queue below sorts
- * a *merged* multi-division board, so it calls boutRunGroup directly as one
- * of several tie-break keys rather than this — but single-division
+ * Sorts one division's bouts into WKF running order. Single-division
  * surfaces (and frontend/src/lib/callup.ts's call-up sheet, which
  * reimplements this exact rule since the two projects share no code) use
- * this directly, so the running order is never hand-rolled twice.
+ * this directly, so the within-division running order is never hand-rolled
+ * twice. getBoard's queue below is a *merged, multi-division* board — see
+ * sortRunQueue, which reuses boutRunGroup for the same within-division rule
+ * but adds the cross-division grouping this function has no notion of.
  */
 export function sortBoutsForRunning<T extends RunOrderableBout>(bouts: readonly T[], size: number): T[] {
   return [...bouts].sort(
     (a, b) => boutRunGroup(a, size) - boutRunGroup(b, size) || a.round - b.round || a.position - b.position,
+  );
+}
+
+export interface QueueSortableBout extends RunOrderableBout {
+  /** Uniquely identifies the division/bracket a bout belongs to. */
+  drawId: string;
+  size: number;
+  /** This division's place in its mat's running order — same field on
+   * every bout of the same draw. Divisions with no explicit order (or two
+   * divisions that happen to share one) sort after those that have one,
+   * broken by drawId — see sortRunQueue. */
+  drawMatOrder: number | null;
+  /** A manual per-bout override (drag-to-reorder in the Run tab). */
+  queueOrder: number | null;
+}
+
+/**
+ * Sorts a whole mat's *merged, multi-division* ready-queue: a manual
+ * queueOrder wins outright when a coordinator has set one; otherwise
+ * divisions run to completion one after another, ordered by their own
+ * place on the mat (drawMatOrder) — and only *within* a division does WKF
+ * running order (boutRunGroup: main through the semis, then bronze, then
+ * the final) apply.
+ *
+ * `drawId` sits between those two keys specifically to guard the
+ * cross-division grouping itself: drawMatOrder alone only outer-sorts
+ * correctly when every division on the mat has been given a distinct
+ * value. Two divisions that tie on drawMatOrder — most commonly both
+ * simply lacking one, which `?? Number.MAX_SAFE_INTEGER` otherwise
+ * collapses into one large tied group — would otherwise fall straight
+ * through to boutRunGroup as the next key, which has no idea which
+ * division a bout belongs to. That reproduces exactly the reported bug:
+ * every tied division's non-final bouts first, then every tied division's
+ * bronze bouts, then every tied division's finals, instead of one division
+ * finishing before the next one starts. Keying on drawId first keeps a
+ * division's own bouts contiguous regardless of whether drawMatOrder gives
+ * a meaningful cross-division order or not.
+ */
+export function sortRunQueue<T extends QueueSortableBout>(items: readonly T[]): T[] {
+  return [...items].sort(
+    (a, b) =>
+      (a.queueOrder ?? Number.MAX_SAFE_INTEGER) - (b.queueOrder ?? Number.MAX_SAFE_INTEGER) ||
+      (a.drawMatOrder ?? Number.MAX_SAFE_INTEGER) - (b.drawMatOrder ?? Number.MAX_SAFE_INTEGER) ||
+      a.drawId.localeCompare(b.drawId) ||
+      boutRunGroup(a, a.size) - boutRunGroup(b, b.size) ||
+      a.round - b.round ||
+      a.position - b.position,
   );
 }
 
@@ -145,21 +193,8 @@ export class RunService {
       }
     }
 
-    // Manual per-bout queueOrder wins (nulls last); otherwise the natural
-    // category/bracket order stands — WKF running order within a division
-    // (boutRunGroup: main up through semis, then bronze, then the final
-    // last), divisions kept together by their own place in the mat's
-    // running order (drawMatOrder).
-    const sortQueue = (a: QueueItem, b: QueueItem) =>
-      (a.queueOrder ?? Number.MAX_SAFE_INTEGER) - (b.queueOrder ?? Number.MAX_SAFE_INTEGER) ||
-      (a.drawMatOrder ?? Number.MAX_SAFE_INTEGER) - (b.drawMatOrder ?? Number.MAX_SAFE_INTEGER) ||
-      boutRunGroup(a, a.size) - boutRunGroup(b, b.size) ||
-      a.round - b.round ||
-      a.position - b.position ||
-      a.category.localeCompare(b.category);
-
     const byMat = (matId: string | null) =>
-      items.filter((i) => i.matId === matId).sort(sortQueue);
+      sortRunQueue(items.filter((i) => i.matId === matId));
 
     return {
       mats: mats.map((m) => ({ id: m.id, name: m.name, order: m.order, queue: byMat(m.id) })),
