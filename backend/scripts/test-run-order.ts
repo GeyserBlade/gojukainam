@@ -133,7 +133,8 @@ const qitem = (
   drawMatOrder: number | null,
   queueOrder: number | null = null,
   startedAt: string | null = null,
-): QItem => ({ id, drawId, phase, round, position, size, drawMatOrder, queueOrder, startedAt });
+  divisionStarted = false,
+): QItem => ({ id, drawId, phase, round, position, size, drawMatOrder, queueOrder, startedAt, divisionStarted });
 
 console.log("\n— sortRunQueue: regression — divisions must run to completion, not phase-by-phase across the mat —");
 {
@@ -230,6 +231,54 @@ console.log("\n— sortRunQueue: among two active divisions, the one that starte
   ];
   const order = sortRunQueue(items).map((i) => i.id);
   check("B (started 10:00, furthest along) outranks A (started 10:05) despite A's earlier matOrder", order.join(",") === "b-r1,a-r1", order);
+}
+
+console.log("\n— sortRunQueue: regression — a division stays on top mid-category, after its live bout is decided —");
+{
+  // The exact reported follow-up: a division's currently-airing bout gets
+  // scored and drops out of the ready queue entirely (a decided bout is
+  // never "ready", so it never even reaches this function again), and its
+  // next bout — ready now, but not itself started yet — carries no
+  // startedAt of its own. The old logic had nothing left to key on and
+  // fell straight back to matOrder, visibly "finishing" a division that is
+  // still mid-category. Division B (matOrder 1, scheduled *behind* A) has
+  // recorded a real result (divisionStarted) and this is its only
+  // currently-ready bout, with nothing on the clock right now — it must
+  // still float entirely ahead of A, which hasn't started at all.
+  const items = [
+    qitem("a-r1", "A", "MAIN", 1, 0, 4, 0, null, null, false),
+    qitem("b-final", "B", "MAIN", 2, 0, 4, 1, null, null, true),
+  ];
+  const order = sortRunQueue(items).map((i) => i.id);
+  check(
+    "division B (mid-category, nothing currently live) still floats ahead of untouched division A",
+    order.join(",") === "b-final,a-r1",
+    order,
+  );
+}
+
+console.log("\n— sortRunQueue: a live bout still outranks a merely-started division —");
+{
+  // Division B has a real result recorded (divisionStarted) but nothing on
+  // the clock right now; division C has an actual bout currently live.
+  // C's bout being fought *right now* is a stronger signal than B's "has
+  // started at some point" — C goes first.
+  const items = [
+    qitem("b-r2", "B", "MAIN", 2, 0, 4, 0, null, null, true),
+    qitem("c-r1", "C", "MAIN", 1, 0, 4, 1, null, "2026-08-22T10:00:00Z", false),
+  ];
+  const order = sortRunQueue(items).map((i) => i.id);
+  check("the currently-live division (C) outranks the merely-started one (B)", order.join(",") === "c-r1,b-r2", order);
+}
+
+console.log("\n— sortRunQueue: two merely-started divisions (neither currently live) fall back to matOrder —");
+{
+  const items = [
+    qitem("b-r2", "B", "MAIN", 2, 0, 4, 1, null, null, true),
+    qitem("a-r2", "A", "MAIN", 2, 0, 4, 0, null, null, true),
+  ];
+  const order = sortRunQueue(items).map((i) => i.id);
+  check("both mid-category, ordered by their own matOrder same as usual", order.join(",") === "a-r2,b-r2", order);
 }
 
 console.log("\n— sortRunQueue: a manual queueOrder still beats an active division —");
