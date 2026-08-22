@@ -4,7 +4,19 @@ This file is the handoff between coding agents. It describes what is in flight
 right now, not the permanent architecture (that's
 [`architecture.md`](architecture.md)).
 
-**Last updated:** 2026-08-22 — by Claude Code: **PR #32's "active division
+**Last updated:** 2026-08-22 — by Claude Code: **investigated a 3rd report
+that the Run-queue priority fix (PR #32 → PR #34) "still doesn't work on
+production" — found no code bug.** Re-verified PR #34's logic against two
+fresh local reproductions (single bout decided, and multiple bouts
+decided with one currently live), confirmed the frontend does zero
+re-sorting or caching that could mask a working fix, and confirmed
+`e93543d` (PR #34's merge) is HEAD of `origin/main`. No code shipped this
+pass — waiting on a diagnostic from the user (raw `/api/run/board`
+response for the affected event) to find out whether this is a Railway
+deploy lag or a real scenario the local reproductions haven't hit yet.
+See "In flight" below.
+
+Previously, same day — by Claude Code: **PR #32's "active division
 floats to top" fix didn't survive a bout actually being decided** — the
 priority signal was only ever "a ready bout has `startedAt` set," and a
 decided bout is never "ready" (so it drops out of the queue entirely,
@@ -12,7 +24,7 @@ carrying its `startedAt` with it); if the division's *next* bout hadn't
 itself been started yet, the whole division fell back to `matOrder` mid-
 category. Fixed with a durable second signal — "this division has
 recorded at least one real result" — so it stays on top for the whole
-category, not just its currently-airing bout. See "In flight" below.
+category, not just its currently-airing bout.
 
 Previously, same day — by Claude Code: **final and bronze bouts
 now carry a visible medal badge** everywhere a bout list is shown — gold
@@ -229,6 +241,86 @@ port; those have since been pushed.) Everything here is verified locally against
 a database, never against production data.
 
 ## In flight (uncommitted)
+
+**3rd report on the same issue: "PR #34 didn't fix it, still no change on
+production" — investigated, found no code bug, waiting on diagnostic
+info (2026-08-22).**
+
+Request: after PR #34 merged, the user reported no change in behavior on
+production — the third report on this exact "mid-category division
+doesn't stay on top" issue (PR #32 → PR #34 → this). Explicitly asked to
+rule out the trivial stuff (deploy status, frontend caching/re-sort)
+before re-touching the fix logic, and not to ship speculative code
+changes if the bug can't be reproduced.
+
+**Deploy status, confirmed.** `git log origin/main -5 --oneline` has
+`e93543d` (PR #34's merge commit) at HEAD, with `783fcd0` (the fix
+itself) directly beneath it. `railway.json` uses Nixpacks with the
+backend's own `build`/`start` scripts (`tsc` then `node dist/server.js`)
+— Railway builds fresh from whatever's pushed, it does not run a stale
+local `dist/` (which is gitignored, never pushed, and irrelevant here
+regardless). I cannot see Railway's own deploy log or dashboard from
+here, so I cannot independently confirm *when* Railway last deployed or
+whether that deploy succeeded — this is the one link in the chain I
+can't verify myself.
+
+**Frontend, confirmed clean.** `pages/Run.tsx` calls
+`getRunBoard(eventId)` (`lib/run.ts`) which is a bare `api.get("/run/board",
+...); return res.data` — no `.sort(` anywhere in `Run.tsx`, no
+post-processing in `getRunBoard`. The global `QueryClient` has a 30s
+`staleTime`, but both `winnerMutation` and `kikenMutation` call
+`invalidate()` on success, forcing an immediate refetch regardless — a
+coordinator who just scored a bout gets the fresh order on the next
+render, not up to 30s later. `divisionStarted` (PR #34's new field) is
+consumed entirely inside `sortRunQueue` server-side; the frontend never
+needs to know it exists, so this is conclusively a backend-only question
+— confirms the report's own hypothesis #5.
+
+**Fix logic, re-verified fresh, twice.** Reproduced two variants live
+against the real seeded event (not just the original PR #34 fixture):
+(1) the original single-bout-decided case, re-run from scratch — the
+division correctly floated into the mid-category tier; (2) a closer match
+to "we are halfway through a category" — two of a fresh division's four
+round-1 bouts decided (one with a live `startedAt`, one without, matching
+"some done, one in progress, some still to come") — the division's 3
+remaining bouts (2 round-1 stragglers + the newly-ready round-2) correctly
+sat together near the top. Reverted both test mutations immediately after
+each check, confirmed via a follow-up query that the exact rows matched
+their original values. Also directly re-read `computeDrawState`'s bye
+handling (hypothesis #4): a bye's `isUserResult` is never set to `true`
+(only the `stored && (stored === aka || stored === ao)` branch — a real
+two-fighter decision — sets it), so `hasUserResults`/`state.status` cannot
+be tricked into "IN_PROGRESS" by byes alone; a bye-only division stays
+correctly un-prioritized. No duplicate `getBoard`/`sortRunQueue`
+implementation exists anywhere else in the codebase, and no caching layer
+sits between `/run/board`'s route handler and `RunService.getBoard`.
+
+**Conclusion: no code bug found.** Everything independently checkable
+from this end — the merged commit, the frontend, and the sort logic
+itself under two different reproductions — checks out correct. The
+remaining gap is exactly what's described as unverifiable in this
+environment: whether Railway has actually deployed `e93543d`, and/or
+whether the user's exact real-world scenario has a property the local
+reproductions haven't captured (e.g., what they mean by "category" —
+if a division has multiple weight classes, each is a *separate* `Draw`
+with its own `drawId`, and the fix operates strictly per-draw; a
+still-`DRAWN` sibling weight class would not float just because another
+weight class of the "same" division is mid-flight, which may or may not
+match what the user pictures as "the same category"). **No code changed
+this pass** — shipping another speculative fix on a third unreproduced
+report would be guessing, not debugging.
+
+**Requested next step, needs the user:** ask them to (1) hard-refresh the
+Run tab and confirm the page itself is fresh (rule out a stuck service
+worker / browser cache, distinct from the API-level staleTime already
+ruled out above); (2) open browser DevTools → Network tab → reload the
+Run tab → find the `run/board?eventId=...` request → copy the full raw
+JSON response and share it, along with which category/mat they're
+looking at and roughly how many bouts into it they are. That pinpoints
+in one step whether the *API* is already returning the wrong order
+(→ genuine remaining code/deploy gap) or the API is right and something
+else entirely is wrong (→ a different bug than any of the three fixes
+so far have addressed).
 
 **Follow-up on PR #32: a mid-category division kept dropping out of
 priority (2026-08-22).**
