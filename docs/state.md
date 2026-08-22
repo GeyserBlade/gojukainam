@@ -4,17 +4,25 @@ This file is the handoff between coding agents. It describes what is in flight
 right now, not the permanent architecture (that's
 [`architecture.md`](architecture.md)).
 
-**Last updated:** 2026-08-22 — by Claude Code: **investigated a 3rd report
+**Last updated:** 2026-08-22 — by Claude Code: **mid-investigation update
+narrowed the 3rd report to "only the middle tatami" — tested the fix on
+all three of the seeded event's real mats (one via live reproduction on
+each of Tatami 1 and Tatami 2, one confirmed via Tatami 3's own
+already-in-progress seed data, no manipulation needed) and found
+identical, correct behavior on every mat.** `sortRunQueue` has no
+mat-identity-aware logic at all — reconfirmed by reading, and now by
+three-for-three live testing. Still no code bug found; still no code
+shipped. Added a regression test locking in the exact "one mat, one
+complete + one mid-category + one untouched division" pattern the report
+described. See "In flight" below.
+
+Previously, same day — by Claude Code: **investigated a 3rd report
 that the Run-queue priority fix (PR #32 → PR #34) "still doesn't work on
 production" — found no code bug.** Re-verified PR #34's logic against two
 fresh local reproductions (single bout decided, and multiple bouts
 decided with one currently live), confirmed the frontend does zero
 re-sorting or caching that could mask a working fix, and confirmed
-`e93543d` (PR #34's merge) is HEAD of `origin/main`. No code shipped this
-pass — waiting on a diagnostic from the user (raw `/api/run/board`
-response for the affected event) to find out whether this is a Railway
-deploy lag or a real scenario the local reproductions haven't hit yet.
-See "In flight" below.
+`e93543d` (PR #34's merge) is HEAD of `origin/main`.
 
 Previously, same day — by Claude Code: **PR #32's "active division
 floats to top" fix didn't survive a bout actually being decided** — the
@@ -241,6 +249,92 @@ port; those have since been pushed.) Everything here is verified locally against
 a database, never against production data.
 
 ## In flight (uncommitted)
+
+**Mid-investigation update: "only the middle tatami" — tested all three
+real mats, found no mat-specific bug (2026-08-22).**
+
+Request: a critical update arriving mid-investigation on the 3rd report
+above — the user narrowed it to "looks like it only does this on the
+middle tatami — not the others." Asked to (1) request the middle mat's
+raw queue from the user regardless, (2) in parallel construct a local
+repro matching "one mat, one complete + one in-progress + one untouched
+division," (3) fix if it reproduces, otherwise hand back the same
+diagnostic request, (4) add a unit test for the exact pattern either way.
+
+**Code read first: nothing mat-identity-aware exists.** `sortRunQueue`
+takes a flat array already filtered to one mat by its caller
+(`getBoard`'s `byMat(matId)`); it never reads `matId`, `Mat.order`, or
+anything about which mat a bout is on — only `drawMatOrder` (a division's
+position *within* whatever mat it's on) and `drawId`. There is no
+structural way for "which mat" to change the sort's behavior; each mat's
+queue is computed as a fully independent call.
+
+**Reproduced live on all three of the seeded event's real mats, not just
+one.** Two required deliberate SQL manipulation (decide one bout, with a
+live `startedAt`, in a division sitting behind others on that mat's own
+`matOrder`), one didn't need any:
+- **Tatami 1** (`matOrder`s 0–15, an *outer* mat): decided a bout in
+  `KATA BOYS 12` (`matOrder` 5) — floated to the top ahead of `KATA BOYS
+  7`(0) and `KATA GIRLS 8-9`(2), identical to the Tatami-2 behavior from
+  the previous investigation pass.
+- **Tatami 2** (`matOrder`s 0–15, the *middle* mat — the one actually
+  named in the report): repeated the earlier `KATA GIRLS 12-13` (`matOrder`
+  8) reproduction from scratch. Same correct result.
+- **Tatami 3** (`matOrder`s 0–13, the *other outer* mat): needed no
+  manipulation at all — the seed data already has `KUMITE FEMALE CADET`
+  (`matOrder` 11) and `KUMITE MALE CADET` O55kg/U55kg (`matOrder` 12–13)
+  genuinely `IN_PROGRESS`, sitting *behind* several untouched divisions on
+  paper. The live board already shows all three correctly floated to
+  positions 0–4, ahead of every `matOrder` 0–10 division — a real,
+  pre-existing, un-manipulated confirmation of the exact fix, sitting
+  right there in the seed data the whole time.
+
+All test mutations reverted immediately after each check; confirmed via a
+follow-up query that all three touched rows (`cmsnmfkhk...`,
+`cmsnmfkja...`, `cmsnmfkky...` — one per mat) matched their original
+`winnerEntryId`/`startedAt` values exactly.
+
+**Working theory, now stronger than before:** "only the middle tatami"
+is very likely a description of the *user's specific tournament's current
+state* on production, not a property of the code. If only their middle
+mat currently has a division mid-flight (the others either haven't been
+picked up by an operator yet, or are already fully finished), then it's
+the *only* mat where any reordering — correct or buggy — would be visible
+to a human glancing at the screen; the other two mats would "look right"
+purely because their divisions are all in the same tier regardless of
+which code is running. This doesn't rule out a still-undeployed fix
+(Railway's actual deploy status remains the one thing unverifiable from
+here), but it does rule out a mat-position-specific code defect.
+
+**No code changed beyond the new test.** Added one regression case (see
+Verification) locking in the exact reported pattern; did not touch
+`sortRunQueue`/`getBoard` themselves, since nothing found here contradicts
+their current behavior.
+
+### Verification (run 2026-08-22)
+
+`npx tsc --noEmit` clean in both `backend` and `frontend`. Full regression
+sweep clean on both sides.
+
+Added one new case to `backend/scripts/test-run-order.ts`: one mat with a
+fully-decided division (modeled correctly as contributing *no* input rows
+at all — the same as `getBoard` never handing `sortRunQueue` a completed
+division's bouts in the first place), one mid-category division with a
+live bout plus one still-pending bout of its own, and one untouched
+division scheduled ahead of it on paper. Deliberately built the fixture
+to be bracket-realistic (a round-2 bout is only "ready" once its own
+round-1 feeders are decided, so the still-pending bout is a *different*,
+non-feeding round-1 position, not one that could coexist with a ready
+round-2 sibling in real data) rather than a shape `computeDrawState` could
+never actually produce. 19 checks in the file now, all passing.
+
+**Still waiting on the user for:** if this genuinely persists on
+production after confirming a hard refresh and a fresh deploy, the raw
+`/api/run/board` response (via DevTools → Network tab) for the specific
+event and mat in question — now doubly useful, since if the *API itself*
+still returns the wrong order for their middle mat specifically, that
+would be the first real evidence of a scenario the three live
+reproductions above didn't cover, rather than a deploy-timing question.
 
 **3rd report on the same issue: "PR #34 didn't fix it, still no change on
 production" — investigated, found no code bug, waiting on diagnostic

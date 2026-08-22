@@ -281,6 +281,40 @@ console.log("\n— sortRunQueue: two merely-started divisions (neither currently
   check("both mid-category, ordered by their own matOrder same as usual", order.join(",") === "a-r2,b-r2", order);
 }
 
+console.log("\n— sortRunQueue: one mat, three divisions (complete / mid-category / untouched) — the pattern from a real 3rd report —");
+{
+  // A user reported PR #34 "still didn't work" and, on further digging,
+  // that it only seemed to happen on one specific tatami. Live
+  // reproduction against the real seeded event (not just this fixture)
+  // found no mat-position-specific behavior at all — this locks in the
+  // exact pattern investigated: a mat carrying one division that's fully
+  // decided (getBoard already excludes a completed division's bouts
+  // entirely, so it contributes nothing here — not modeled as an input
+  // row at all, exactly like the real board never gives sortRunQueue one),
+  // one genuinely mid-category division scheduled *behind* it on paper,
+  // and one untouched division scheduled *ahead* of it on paper. The
+  // mid-category division must still float to the very top regardless of
+  // where matOrder would otherwise place it, on any mat.
+  //
+  // MIDCAT's round-2 bout is only "ready" because its own round-1 feeders
+  // (positions 0 and 1) are already decided and excluded — this fixture
+  // sticks to a bracket-realistic shape: round-1 position 2 is a separate,
+  // still-pending bout unrelated to that round-2 bout's feeders.
+  const items = [
+    qitem("untouched-r1", "UNTOUCHED", "MAIN", 1, 0, 8, 0), // matOrder 0 — earliest on paper, never started
+    qitem("midcat-r1-pos2", "MIDCAT", "MAIN", 1, 2, 8, 2, null, null, true), // matOrder 2 — a real result recorded elsewhere in this division, this bout's still to come
+    qitem("midcat-r2-live", "MIDCAT", "MAIN", 2, 0, 8, 2, null, "2026-08-22T10:00:00Z", true), // same division, live right now
+    // COMPLETE's own bouts are deliberately absent — a fully decided
+    // division is invisible to sortRunQueue in practice, never an input.
+  ];
+  const order = sortRunQueue(items).map((i) => i.id);
+  check(
+    "the mid-category division's bouts float entirely ahead of the untouched division, in bracket order",
+    order.join(",") === "midcat-r1-pos2,midcat-r2-live,untouched-r1",
+    order,
+  );
+}
+
 console.log("\n— sortRunQueue: a manual queueOrder still beats an active division —");
 {
   // The drag-to-reorder override is an explicit human decision and stays
