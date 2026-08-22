@@ -4,13 +4,22 @@ This file is the handoff between coding agents. It describes what is in flight
 right now, not the permanent architecture (that's
 [`architecture.md`](architecture.md)).
 
-**Last updated:** 2026-08-22 — by Claude Code: **a currently-active
+**Last updated:** 2026-08-22 — by Claude Code: **final and bronze bouts
+now carry a visible medal badge** everywhere a bout list is shown — gold
+"FINAL" pill, bronze/orange "BRONZE" pill, plus a grayscale-safe ★ marker
+on the printable call-up sheet. New `boutMedalType(bout, size)` in
+`lib/draws.ts`, backing a shared `MedalBadge` component. See "In flight"
+below.
+
+Previously, same day — by Claude Code: **a currently-active
 division could get stuck at the bottom of the coordinator's Run queue**
 — `getBoard` never read `Bout.startedAt` at all, so a bout actually being
 fought had zero effect on ordering; whichever `matOrder` slot a division
 was pre-assigned kept it there even while live. Fixed: the division with
 a live (started, undecided) bout now floats to the top of its mat's
-queue, ahead of `matOrder`. See "In flight" below.
+queue, ahead of `matOrder`.
+
+Previously, same day — by Claude Code: **real regression in the
 
 Previously, same day — by Claude Code: **real regression in the
 run-order fix** — a mat's queue could interleave two divisions' bouts by
@@ -208,6 +217,123 @@ port; those have since been pushed.) Everything here is verified locally against
 a database, never against production data.
 
 ## In flight (uncommitted)
+
+**Medal badges on final/bronze bouts, everywhere a bout list is shown
+(2026-08-22).**
+
+Request: a UX enhancement, not a bug fix — badge final bouts (gold) and
+bronze bouts (bronze/orange) wherever bouts are listed sequentially, so
+they stand out from ordinary bracket bouts at a glance.
+
+**New shared logic.** `lib/draws.ts` gained `boutMedalType(bout, size):
+"final" | "bronze" | null` — "final" for the single MAIN bout in the
+bracket's last round, "bronze" for *any* REPECHAGE bout regardless of
+stage (matching the call-up sheet's own "Bronze 1"/"Bronze 1.2"
+convention: a coordinator sees "the bronze bracket" as one thing, not a
+medal bout plus anonymous qualifiers ahead of it). `isFinalBout` now
+delegates to it (`boutMedalType(bout, draw.size) === "final"`) rather than
+carrying its own copy of the `round === log2(size)` check — a small DRY
+cleanup, no behavior change, confirmed by a new test asserting the two
+functions agree across every size/round/phase combination.
+
+**New shared component.** `components/MedalBadge.tsx` wraps the existing
+shadcn `Badge`, reusing `components/scoreboard/PodiumBanner.tsx`'s exact
+gold (`bg-yellow-400 text-yellow-950`) and bronze (`bg-orange-600
+text-orange-50`) colors — so "this bout matters" looks the same before
+it's fought as it does on the podium afterward, rather than inventing a
+third color scheme.
+
+**Surfaces updated** (all additive — the existing round label, "Round 2"
+or "Repechage", is untouched, the badge sits next to it):
+- `pages/Run.tsx` — the coordinator's Run tab, `BoutCard`.
+- `pages/MatOperator.tsx` — the operator's mat screen, both the current
+  bout card and the "coming up" list.
+- `components/public/MatsTab.tsx` — the public spectator board's mat
+  queues, both the "On now" card and each queue row.
+- `components/public/AthleteSheet.tsx` — found while checking "any other
+  surface where bouts are shown in a list": a spectator's per-athlete bout
+  history. Not named in the original ask but exactly the same pattern, so
+  updated for consistency rather than left inconsistent.
+- `pages/CallupPrint.tsx` / `lib/callup.ts` — see below.
+
+**Checked and confirmed skip:** `components/draws/BracketView.tsx`
+already labels the final and the bronze bracket at the *column/section*
+level (`roundLabel` literally prints "Final" as a column heading; a
+"Repechage — Bronze medal bouts" section heading already exists) — a
+per-bout badge there would be redundant, not additive.
+
+**Type plumbing, not a runtime change:** `lib/run.ts`'s `RunQueueItem`
+interface was missing a `size` field that the backend's `QueueItem` has
+carried since the PR #29 run-order work (`boutRunGroup` needs it) — the
+API payload already included it, this was purely a stale frontend type.
+Added it so `boutMedalType(item, item.size)` type-checks; `PublicQueueItem
+= RunQueueItem` picked it up automatically as a type alias.
+
+**Call-up sheet, two changes:**
+1. `lib/callup.ts`'s `mainBoutRows`/`finalBoutRows`/`bronzeBoutRows`
+   filters (previously ad-hoc `phase`/`round` comparisons) now all filter
+   on `boutMedalType(b, draw.size)` — the same DRY motivation as
+   `isFinalBout` above, no behavior change (confirmed: full existing
+   `test-callup.ts` suite still passes unmodified). `CallupBoutRow`
+   gained a `medalType` field, set once per row at construction, so
+   `CallupPrint.tsx` can badge a row directly off the row itself rather
+   than needing the page to re-derive it or thread a table-level prop.
+2. Since colored ink on a printed sheet is unreliable, `CallupPrint.tsx`'s
+   badge (`MedalMark`) doesn't lean on color alone: a ★ glyph plus a
+   *thicker* border for the final (2px) than for bronze (1px), so the
+   distinction survives a black-and-white photocopy — the coloring is
+   additional, not load-bearing.
+
+Files: `frontend/src/lib/draws.ts`, `frontend/src/components/MedalBadge.tsx`
+(new), `frontend/src/lib/run.ts`, `frontend/src/pages/Run.tsx`,
+`frontend/src/pages/MatOperator.tsx`,
+`frontend/src/components/public/MatsTab.tsx`,
+`frontend/src/components/public/AthleteSheet.tsx`,
+`frontend/src/lib/callup.ts`, `frontend/src/pages/CallupPrint.tsx`,
+`frontend/scripts/test-draws.ts`. No backend changes.
+
+### Verification (run 2026-08-22)
+
+`npx tsc --noEmit` clean in both `frontend` and `backend`. Full frontend
+regression sweep (all 10 pure-logic scripts) clean, including the
+unmodified `test-callup.ts` suite (confirms the `boutMedalType`-based
+filter refactor didn't change behavior).
+
+Extended `frontend/scripts/test-draws.ts` with a dedicated `boutMedalType`
+suite covering the requested edge cases directly: a 2-entry bracket (just
+a final, no possible bronze bracket), a 4-entry bracket (1 final + bronze
+rows), an 8-entry bracket with a multi-stage repechage chain (confirming
+a later repechage stage isn't misclassified just because its round number
+happens to coincide with the MAIN bracket's semi-final round), and a
+16-entry bracket. Plus a cross-check looping every size/round/phase
+combination from 2 to 32 entries asserting `isFinalBout` and
+`boutMedalType` can never disagree, now that one delegates to the other.
+
+**Verified live against the real seeded event** on three of the four
+named surfaces: the Run tab (confirmed a real ready final,
+`KUMITE MALE JUNIOR · O63kg · Round 2`, renders a "Final" badge with the
+exact `bg-yellow-400 text-yellow-950` classes via direct DOM inspection —
+a repeated screenshot-after-scroll glitch on this particular long page
+prevented a clean visual capture there, so this one was confirmed by
+inspecting the live rendered element's classes and text instead of a
+screenshot); the public spectator board's Mats tab (screenshotted,
+showing the same badge on both `O63kg` and `U63kg` finals inline next to
+their round labels); the call-up sheet (screenshotted — the ★-marked,
+thick-bordered "FINAL" badge under the "Final" section heading, plus the
+plain semis row above it for contrast).
+
+**Not independently screenshotted**: the operator's mat screen
+(`MatOperator.tsx`) and the bonus `AthleteSheet.tsx` surface — both use
+the identical `MedalBadge`/`boutMedalType` call already proven correct on
+the two confirmed screens, and neither could be reached quickly in this
+session (the former needs a mat-operator grant, the latter's athlete
+search sheet didn't respond to a scripted click in this pass). No
+seeded division in the current dataset has progressed far enough to
+produce a *ready* bronze bout, so the bronze badge's color/label
+specifically was verified by the unit tests and code reading only, not a
+live screenshot — it shares the exact same component and conditional
+branch as the visually-confirmed gold badge, just a different `type` prop
+and CSS classes.
 
 **A currently-active division floats to the top of the Run queue
 (2026-08-22).**

@@ -9,7 +9,7 @@
 // inventing a second version of either that could drift from what's shown
 // elsewhere.
 
-import { roundLabel, sortBoutsForRunning, type DrawBout, type DrawEntrySummary } from "./draws"
+import { roundLabel, sortBoutsForRunning, boutMedalType, type BoutMedalType, type DrawBout, type DrawEntrySummary } from "./draws"
 
 /** The subset of DrawDetail this module actually needs, kept narrow so a
  * test fixture doesn't have to fake slots/sync/placements it never reads.
@@ -42,6 +42,11 @@ export interface CallupBoutRow {
   boutId: string | null;
   aka: CallupSlot;
   ao: CallupSlot;
+  /** "final" for every row in finalRows, "bronze" for every row in
+   * bronzeRows, null for every row in mainRows — carried per-row (rather
+   * than left for the page to infer from which array a row came from) so
+   * pages/CallupPrint.tsx can badge a row directly off the row itself. */
+  medalType: BoutMedalType;
 }
 
 /**
@@ -121,6 +126,7 @@ function buildMainRow(bout: DrawBout, size: number, totalRounds: number): Callup
     boutId: bout.id,
     aka: bout.aka ? knownSlot(bout.aka) : tbdSlot(feederLabel(0)),
     ao: bout.ao ? knownSlot(bout.ao) : tbdSlot(feederLabel(1)),
+    medalType: boutMedalType(bout, size),
   };
 }
 
@@ -136,7 +142,7 @@ function buildMainRow(bout: DrawBout, size: number, totalRounds: number): Callup
 export function mainBoutRows(draw: CallupDraw): CallupBoutRow[] {
   const totalRounds = Math.log2(draw.size);
   return sortBoutsForRunning(draw.bouts, draw.size)
-    .filter((b) => b.phase === "MAIN" && b.round !== totalRounds)
+    .filter((b) => boutMedalType(b, draw.size) === null)
     .filter(hasSomethingToCallUp)
     .map((bout) => buildMainRow(bout, draw.size, totalRounds));
 }
@@ -150,7 +156,7 @@ export function mainBoutRows(draw: CallupDraw): CallupBoutRow[] {
 export function finalBoutRows(draw: CallupDraw): CallupBoutRow[] {
   const totalRounds = Math.log2(draw.size);
   return sortBoutsForRunning(draw.bouts, draw.size)
-    .filter((b) => b.phase === "MAIN" && b.round === totalRounds)
+    .filter((b) => boutMedalType(b, draw.size) === "final")
     .filter(hasSomethingToCallUp)
     .map((bout) => buildMainRow(bout, draw.size, totalRounds));
 }
@@ -181,7 +187,7 @@ export function bronzeBoutRows(draw: CallupDraw): CallupBoutRow[] {
   }
 
   return sortBoutsForRunning(draw.bouts, draw.size)
-    .filter((b) => b.phase === "REPECHAGE")
+    .filter((b) => boutMedalType(b, draw.size) === "bronze")
     .filter(hasSomethingToCallUp)
     .map((bout) => {
       const multiStage = (stageCountBySide.get(bout.position) ?? 0) > 1;
@@ -192,6 +198,7 @@ export function bronzeBoutRows(draw: CallupDraw): CallupBoutRow[] {
         boutId: bout.id,
         aka: bout.aka ? knownSlot(bout.aka) : tbdSlot("result pending"),
         ao: bout.ao ? knownSlot(bout.ao) : tbdSlot("result pending"),
+        medalType: "bronze" as const,
       };
     });
 }

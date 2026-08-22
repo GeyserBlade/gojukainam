@@ -42,9 +42,10 @@ import {
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { MedalBadge } from "@/components/MedalBadge"
 import { cn } from "@/lib/utils"
 import { EntryService, type Entry } from "@/lib/entries"
-import { setBoutScore, setBoutWinner } from "@/lib/draws"
+import { setBoutScore, setBoutWinner, boutMedalType } from "@/lib/draws"
 import {
   getRunBoard,
   reorderMatQueue,
@@ -216,6 +217,7 @@ function RunTab({ eventId, canManage }: { eventId: string; canManage: boolean })
 
   const BoutCard = ({ item, isNow }: { item: RunQueueItem; isNow: boolean }) => {
     const canAct = canManage && !!item.boutId
+    const medalType = boutMedalType(item, item.size)
     return (
       <Card className={cn(isNow && "border-primary ring-1 ring-primary/40")}>
         <CardContent className="space-y-3 p-3">
@@ -227,6 +229,7 @@ function RunTab({ eventId, canManage }: { eventId: string; canManage: boolean })
               <span className="truncate text-xs text-muted-foreground">
                 {item.category} · {roundLabel(item)}
               </span>
+              {medalType && <MedalBadge type={medalType} />}
             </div>
             <Badge
               variant="outline"

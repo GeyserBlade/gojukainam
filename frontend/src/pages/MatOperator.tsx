@@ -17,8 +17,9 @@ import {
 } from "@/components/ui/dialog"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useApiErrorToast, useToast } from "@/components/Toast"
+import { MedalBadge } from "@/components/MedalBadge"
 import { cn } from "@/lib/utils"
-import { setBoutScore, setBoutWinner } from "@/lib/draws"
+import { setBoutScore, setBoutWinner, boutMedalType } from "@/lib/draws"
 import { getMyMats, type OperatorMat, type RunEntry, type RunQueueItem } from "@/lib/run"
 
 const roundLabel = (i: RunQueueItem) =>
@@ -51,6 +52,8 @@ function CurrentBout({
   onWinner: (side: "aka" | "ao") => void
   onKiken: (absent: "aka" | "ao") => void
 }) {
+  const medalType = boutMedalType(item, item.size)
+
   const Side = ({ side, entry }: { side: "aka" | "ao"; entry: RunEntry }) => (
     <button
       type="button"
@@ -88,6 +91,7 @@ function CurrentBout({
           <span className="min-w-0 flex-1 truncate text-sm text-muted-foreground">
             {item.category} · {roundLabel(item)}
           </span>
+          {medalType && <MedalBadge type={medalType} />}
           <Badge
             variant="outline"
             className={cn(
@@ -213,31 +217,35 @@ function MatPanel({ mat }: { mat: OperatorMat }) {
           </p>
           {/* Read-only on purpose: the running order is the coordinator's, and
               an operator who could reorder it would be planning, not running. */}
-          {upcoming.map((item, i) => (
-            <div
-              key={`${item.drawId}:${item.phase}:${item.round}:${item.position}`}
-              className="flex items-center gap-3 rounded-lg border px-3 py-2"
-            >
-              <span className="w-5 text-center text-xs font-semibold tabular-nums text-muted-foreground">
-                {i + 2}
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm">
-                  <span className="text-flag-red">{item.aka.name}</span>
-                  <span className="mx-1.5 text-muted-foreground">v</span>
-                  <span className="text-belt-blue">{item.ao.name}</span>
-                </p>
-                <p className="truncate text-[11px] text-muted-foreground">
-                  {item.category} · {roundLabel(item)}
-                </p>
+          {upcoming.map((item, i) => {
+            const medalType = boutMedalType(item, item.size)
+            return (
+              <div
+                key={`${item.drawId}:${item.phase}:${item.round}:${item.position}`}
+                className="flex items-center gap-3 rounded-lg border px-3 py-2"
+              >
+                <span className="w-5 text-center text-xs font-semibold tabular-nums text-muted-foreground">
+                  {i + 2}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm">
+                    <span className="text-flag-red">{item.aka.name}</span>
+                    <span className="mx-1.5 text-muted-foreground">v</span>
+                    <span className="text-belt-blue">{item.ao.name}</span>
+                  </p>
+                  <p className="flex items-center gap-1.5 truncate text-[11px] text-muted-foreground">
+                    {item.category} · {roundLabel(item)}
+                    {medalType && <MedalBadge type={medalType} />}
+                  </p>
+                </div>
+                <span className="flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground">
+                  <Users className="size-3" />
+                  <PresenceDot checkedIn={item.aka.checkedIn} />
+                  <PresenceDot checkedIn={item.ao.checkedIn} />
+                </span>
               </div>
-              <span className="flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground">
-                <Users className="size-3" />
-                <PresenceDot checkedIn={item.aka.checkedIn} />
-                <PresenceDot checkedIn={item.ao.checkedIn} />
-              </span>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
 

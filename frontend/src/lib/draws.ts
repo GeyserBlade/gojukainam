@@ -206,9 +206,28 @@ export async function deleteDraw(id: string): Promise<void> {
 // draw.placements.thirds already only fills in an entry once that side of
 // the repechage ladder is fully resolved (see DrawService.computeDrawState).
 
+export type BoutMedalType = "final" | "bronze" | null;
+
+/**
+ * "final" for the single MAIN bout in the bracket's last round, "bronze"
+ * for any REPECHAGE bout, null otherwise. Every repechage bout gets
+ * "bronze" here — including an earlier stage of a WKF double-repechage
+ * chain that only *feeds* the literal medal decider — matching the
+ * call-up sheet's own "Bronze 1"/"Bronze 1.2" labeling (lib/callup.ts):
+ * a coordinator or spectator sees "the bronze bracket" as one thing, not
+ * a medal bout plus some anonymous qualifiers ahead of it. Takes just the
+ * bracket size rather than a full DrawDetail so every bout-list surface
+ * (Run.tsx, MatOperator.tsx, the public board, the call-up sheet) can call
+ * it directly off whatever bout-shaped object it already has.
+ */
+export function boutMedalType(bout: Pick<DrawBout, "phase" | "round">, size: number): BoutMedalType {
+  if (bout.phase === "REPECHAGE") return "bronze";
+  return bout.round === Math.log2(size) ? "final" : null;
+}
+
 /** The single MAIN-bracket bout in the last round — its winner takes gold. */
 export function isFinalBout(draw: DrawDetail, bout: Pick<DrawBout, "phase" | "round">): boolean {
-  return bout.phase === "MAIN" && bout.round === Math.log2(draw.size);
+  return boutMedalType(bout, draw.size) === "final";
 }
 
 /**
