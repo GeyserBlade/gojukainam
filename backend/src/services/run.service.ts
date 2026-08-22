@@ -9,7 +9,38 @@ import { EventService } from "./event.service.js";
 const boutKey = (phase: string, round: number, position: number) =>
   `${phase}:${round}:${position}`;
 
-const PHASE_ORDER: Record<string, number> = { MAIN: 0, REPECHAGE: 1 };
+export interface RunOrderableBout {
+  phase: string;
+  round: number;
+  position: number;
+}
+
+/**
+ * Which run-order group a bout belongs to within its own division: main
+ * bracket rounds up through the semi-finals (0), then the bronze/repechage
+ * bouts (1), then the final (2) — WKF running order, so the final is always
+ * a division's last bout and the medal ceremony can follow immediately
+ * after it. `size` is the draw's bracket size, needed only to know which
+ * MAIN round is the final; REPECHAGE is always group 1 regardless of size.
+ */
+function boutRunGroup(bout: RunOrderableBout, size: number): number {
+  if (bout.phase === "REPECHAGE") return 1;
+  return bout.round === Math.log2(size) ? 2 : 0;
+}
+
+/**
+ * Sorts one division's bouts into WKF running order. The queue below sorts
+ * a *merged* multi-division board, so it calls boutRunGroup directly as one
+ * of several tie-break keys rather than this — but single-division
+ * surfaces (and frontend/src/lib/callup.ts's call-up sheet, which
+ * reimplements this exact rule since the two projects share no code) use
+ * this directly, so the running order is never hand-rolled twice.
+ */
+export function sortBoutsForRunning<T extends RunOrderableBout>(bouts: readonly T[], size: number): T[] {
+  return [...bouts].sort(
+    (a, b) => boutRunGroup(a, size) - boutRunGroup(b, size) || a.round - b.round || a.position - b.position,
+  );
+}
 
 const SLOT_ENTRY_INCLUDE = {
   entry: {
@@ -44,6 +75,7 @@ interface QueueItem {
   phase: string;
   round: number;
   position: number;
+  size: number;
   category: string;
   gender: string;
   isKumite: boolean;
@@ -100,6 +132,7 @@ export class RunService {
           phase: cb.phase,
           round: cb.round,
           position: cb.position,
+          size: draw.size,
           category,
           gender: draw.division.gender,
           isKumite: draw.division.category === "KUMITE",
@@ -113,11 +146,14 @@ export class RunService {
     }
 
     // Manual per-bout queueOrder wins (nulls last); otherwise the natural
-    // category/bracket order stands.
+    // category/bracket order stands — WKF running order within a division
+    // (boutRunGroup: main up through semis, then bronze, then the final
+    // last), divisions kept together by their own place in the mat's
+    // running order (drawMatOrder).
     const sortQueue = (a: QueueItem, b: QueueItem) =>
       (a.queueOrder ?? Number.MAX_SAFE_INTEGER) - (b.queueOrder ?? Number.MAX_SAFE_INTEGER) ||
       (a.drawMatOrder ?? Number.MAX_SAFE_INTEGER) - (b.drawMatOrder ?? Number.MAX_SAFE_INTEGER) ||
-      (PHASE_ORDER[a.phase] ?? 0) - (PHASE_ORDER[b.phase] ?? 0) ||
+      boutRunGroup(a, a.size) - boutRunGroup(b, b.size) ||
       a.round - b.round ||
       a.position - b.position ||
       a.category.localeCompare(b.category);
