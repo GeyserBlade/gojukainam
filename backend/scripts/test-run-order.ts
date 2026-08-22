@@ -132,7 +132,8 @@ const qitem = (
   size: number,
   drawMatOrder: number | null,
   queueOrder: number | null = null,
-): QItem => ({ id, drawId, phase, round, position, size, drawMatOrder, queueOrder });
+  startedAt: string | null = null,
+): QItem => ({ id, drawId, phase, round, position, size, drawMatOrder, queueOrder, startedAt });
 
 console.log("\n— sortRunQueue: regression — divisions must run to completion, not phase-by-phase across the mat —");
 {
@@ -196,6 +197,53 @@ console.log("\n— sortRunQueue: a manual queueOrder overrides division grouping
   ];
   const order = sortRunQueue(items).map((i) => i.id);
   check("the coordinator's manual order (b before a) wins over drawMatOrder", order.join(",") === "b-r1,a-r1", order);
+}
+
+console.log("\n— sortRunQueue: regression — a currently-active division floats to the top, out of matOrder —");
+{
+  // The exact reported bug: an operator started a bout in the division
+  // scheduled LAST on this mat (drawMatOrder 2, behind two others). Its
+  // whole division — including bouts that haven't started yet — must float
+  // ahead of both earlier-scheduled divisions, not sit wherever matOrder
+  // would otherwise place it.
+  const items = [
+    qitem("a-r1", "A", "MAIN", 1, 0, 4, 0),
+    qitem("b-r1", "B", "MAIN", 1, 0, 4, 1),
+    qitem("c-semi1", "C", "MAIN", 1, 0, 4, 2, null, "2026-08-22T10:00:00Z"), // live now
+    qitem("c-semi2", "C", "MAIN", 1, 1, 4, 2), // same division, not yet started itself
+  ];
+  const order = sortRunQueue(items).map((i) => i.id);
+  check(
+    "division C (currently live, matOrder 2) floats entirely ahead of A and B",
+    order.join(",") === "c-semi1,c-semi2,a-r1,b-r1",
+    order,
+  );
+}
+
+console.log("\n— sortRunQueue: among two active divisions, the one that started earliest goes first —");
+{
+  // Isolates the rule from plain matOrder by disagreeing with it: B has
+  // the *later* matOrder but the *earlier* start time, and must still win.
+  const items = [
+    qitem("a-r1", "A", "MAIN", 1, 0, 4, 0, null, "2026-08-22T10:05:00Z"), // earlier matOrder, started later
+    qitem("b-r1", "B", "MAIN", 1, 0, 4, 1, null, "2026-08-22T10:00:00Z"), // later matOrder, started first — furthest along
+  ];
+  const order = sortRunQueue(items).map((i) => i.id);
+  check("B (started 10:00, furthest along) outranks A (started 10:05) despite A's earlier matOrder", order.join(",") === "b-r1,a-r1", order);
+}
+
+console.log("\n— sortRunQueue: a manual queueOrder still beats an active division —");
+{
+  // The drag-to-reorder override is an explicit human decision and stays
+  // the single highest-priority key, even over "this division is live" —
+  // deliberately set up so the two signals disagree: B is the live
+  // division, but A has the lower (winning) queueOrder.
+  const items = [
+    qitem("a-r1", "A", "MAIN", 1, 0, 4, 0, 0), // queueOrder 0, not live
+    qitem("b-r1", "B", "MAIN", 1, 0, 4, 1, 1, "2026-08-22T10:00:00Z"), // queueOrder 1, but live
+  ];
+  const order = sortRunQueue(items).map((i) => i.id);
+  check("queueOrder 0 sorts first even though the other item is the live division", order.join(",") === "a-r1,b-r1", order);
 }
 
 console.log("\n— sortRunQueue: does not mutate the input array —");
