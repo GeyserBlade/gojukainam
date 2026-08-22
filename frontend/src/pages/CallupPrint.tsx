@@ -139,10 +139,16 @@ function DivisionSheet({
         </div>
       </header>
 
+      {/* WKF running order: main bracket up through the semis, then bronze,
+          then the final last — printed as three sections in that order so
+          the coordinator's sheet matches what the operator will actually be
+          asked to call, not bracket-index order (which would put the final
+          right after the semis, ahead of bronze). */}
       <BoutTable rows={sheet.mainRows} />
       <BoutTable rows={sheet.bronzeRows} heading={sheet.bronzeRows.length > 0 ? "Bronze bouts" : undefined} />
+      <BoutTable rows={sheet.finalRows} heading={sheet.finalRows.length > 0 ? "Final" : undefined} />
 
-      {sheet.mainRows.length === 0 && sheet.bronzeRows.length === 0 && (
+      {sheet.mainRows.length === 0 && sheet.bronzeRows.length === 0 && sheet.finalRows.length === 0 && (
         <p className="rounded border border-dashed p-3 text-center text-muted-foreground">
           Nothing to call up yet — this bracket has no bouts ready.
         </p>

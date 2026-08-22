@@ -4,12 +4,22 @@ This file is the handoff between coding agents. It describes what is in flight
 right now, not the permanent architecture (that's
 [`architecture.md`](architecture.md)).
 
-**Last updated:** 2026-08-21 — by Claude Code: **the public spectator
+**Last updated:** 2026-08-22 — by Claude Code: **fixed the tatami
+operator's bout running order** — the final was being called right after
+the semis, ahead of the bronze (repechage) bouts. Correct WKF order is
+main bracket through the semis → bronze → final last, so the medal
+ceremony can follow immediately after the final. New shared
+`sortBoutsForRunning` helper (reimplemented identically on both frontend
+and backend, which share no code) now backs the operator's queue, the
+Run tab, and the call-up sheet, so none of the three can drift apart on
+what "next" means. See "In flight" below.
+
+Previously, same day — by Claude Code: **the public spectator
 board rebuilt for phones**. Four tabs (Results / Mats / Times / Clubs) with
 results on top, tatamis on a swipeable pager, one-line bout rows instead of
 cards, and an **athlete search** so a parent can find their own child and
 see when they are on or how they did. Three new public endpoints behind the
-same share token. See "In flight" below.
+same share token.
 
 Previously, same day — by Claude Code: **draws now keep club-mates
 apart**. Unseeded athletes are no longer placed by a plain shuffle: the
@@ -174,6 +184,135 @@ port; those have since been pushed.) Everything here is verified locally against
 a database, never against production data.
 
 ## In flight (uncommitted)
+
+**Tatami operator: fixed the bout running order — bronze before the final,
+not after (2026-08-22).**
+
+Request: the operator's screen (the queue they pull the next bout from to
+score on their mat) was running WKF divisions out of order. The bug: the
+"ready to fight" queue sorted by phase (MAIN before REPECHAGE) then round
+ascending — which puts the MAIN bracket's *final* ahead of the bronze
+bouts, since the final's round number is the highest MAIN round but still
+sorts before any REPECHAGE row regardless of round. Correct WKF order is
+main bracket through the semis → bronze (repechage) → final last, so the
+medal ceremony can happen immediately after the final bout, not with two
+bronze bouts still to fight afterward.
+
+**Where the bug actually lived:** `backend/src/services/run.service.ts`'s
+`getBoard` — the per-mat "ready bout" queue behind `/run/board` (the Run
+tab, organizer view of every mat) and `/run/my-mats` (the operator's own
+screen, `MatOperator.tsx`, which reuses `getBoard` verbatim via
+`getOperatorBoard`). Both consume the same `queue` array with no
+client-side re-sort, so fixing the one backend comparator fixes both
+surfaces. The `PHASE_ORDER: { MAIN: 0, REPECHAGE: 1 }` constant was the
+actual bug — it never distinguished "an ordinary MAIN round" from "the
+MAIN round that happens to be the final."
+
+**Fix:** replaced `PHASE_ORDER` with `boutRunGroup(bout, size)`, returning
+0 (MAIN, not the final round) / 1 (REPECHAGE) / 2 (MAIN, is the final
+round — `round === Math.log2(size)`), and use that as the primary
+bracket-order tie-break instead. The queue's other tie-break keys are
+unchanged and still take priority: a manual `queueOrder` (drag-to-reorder
+in the Run tab) always wins, then `drawMatOrder` keeps each division's
+bouts contiguous rather than interleaving two divisions on the same mat.
+
+**Shared helper, not hand-rolled twice:** added `sortBoutsForRunning(bouts,
+size)` — exported from both `backend/src/services/run.service.ts` and
+`frontend/src/lib/draws.ts`, wrapping the same `boutRunGroup` rule as a
+plain "sort one division's bouts into WKF running order" function. The two
+are a **deliberate, matching reimplementation, not a shared import** — this
+repo has no package boundary between the frontend and backend TypeScript
+projects (`shared/types` exists but is an unrelated, unused scaffold from a
+different app template, confirmed unreferenced by either project), so
+there is no way to literally share the function. Both copies are
+unit-tested against the identical fixture shapes precisely so they can't
+quietly drift apart.
+
+**Call-up sheet updated to match:** `frontend/src/lib/callup.ts`'s
+`CallupSheet` gained a third array, `finalRows` (previously the final lived
+inside `mainRows`, printed *before* the bronze section — exactly the
+now-fixed bug, just on paper instead of on the operator's screen).
+`mainBoutRows`/`bronzeBoutRows`/`finalBoutRows` all now derive their order
+from `sortBoutsForRunning` instead of each hand-rolling its own
+`.sort((a,b) => a.round - b.round || ...)`. One behavior change worth
+flagging: `bronzeBoutRows` used to iterate side 0's stages then side 1's
+stages ("Bronze 1.1, Bronze 1.2, Bronze 2.1, Bronze 2.2"); it now follows
+true WKF running order instead (every side's stage 1 before either side's
+stage 2 — "Bronze 1.1, Bronze 2.1, Bronze 1.2, Bronze 2.2"), since the
+whole point of this fix is that the *printed* order should match what the
+operator will actually be asked to call. The per-bout labels themselves
+are unchanged (still "Bronze N.M" by side+stage), only the row order
+changed. `pages/CallupPrint.tsx` now prints three sections in the corrected
+order: main bracket, then "Bronze bouts", then "Final" — previously two
+sections with the final folded into the first.
+
+**Other surfaces checked, confirmed unaffected (no change needed):**
+- `components/draws/BracketView.tsx` — lays a bracket out positionally by
+  round/column, not as a sequential list; nothing to reorder.
+- `draw.service.ts`'s athlete-search "your status" (`next` /
+  `AthleteBout[]`) — picks a *single* athlete's own next pending bout. An
+  athlete is never simultaneously in both a pending MAIN final and a
+  pending REPECHAGE bout (repechage is only for that side's semi-final
+  losers), so the MAIN-vs-REPECHAGE ordering bug could never actually
+  surface there regardless of `state.bouts`' own internal order.
+- The estimator (`Estimator.tsx`, `lib/schedule.ts`) and standings
+  (`competition.service.ts`) only *count* bouts (including bronze) for
+  duration/medal totals — counting is order-independent, so unaffected,
+  exactly as flagged as a possibility up front.
+
+Files: `backend/src/services/run.service.ts`,
+`backend/scripts/test-run-order.ts` (new),
+`frontend/src/lib/draws.ts`, `frontend/scripts/test-draws.ts`,
+`frontend/src/lib/callup.ts`, `frontend/src/pages/CallupPrint.tsx`,
+`frontend/scripts/test-callup.ts`.
+
+### Verification (run 2026-08-22)
+
+`npx tsc --noEmit` clean in both `backend` and `frontend`.
+
+`backend/scripts/test-run-order.ts` (new, 6 checks) — main-only bracket
+(final still sorts after two out-of-order semis), a full bracket with a
+two-stage bronze chain per side (asserts the exact expected order end to
+end, and that the final is strictly last), a 2-entry bracket with no
+bronze at all (trivial single-bout case), and that the sort doesn't mutate
+its input. Runs with zero DB dependency — deliberately written like the
+frontend's pure test-script convention rather than backend's usual
+DB-integration style, since `sortBoutsForRunning` genuinely has no DB
+dependency and importing `run.service.ts` doesn't eagerly connect
+(`PrismaClient` only connects on first query).
+
+`frontend/scripts/test-draws.ts` — added the equivalent 4-check
+`sortBoutsForRunning` suite (mirrors the backend one exactly, same
+fixtures) plus a full regression pass of the file's existing
+`isFinalBout`/`finalBronzeMedalists` tests, all still passing.
+
+`frontend/scripts/test-callup.ts` — rewritten around the new
+`mainBoutRows`/`finalBoutRows` split: the final is asserted absent from
+`mainBoutRows` and present (alone) in `finalBoutRows`; a new end-to-end
+scenario (4 quarter-finals → 2 semis → 2 bronze → 1 pending final) asserts
+the complete grouping; bronze-row order is asserted stage-major
+("Bronze 1, Bronze 2.1, Bronze 2.2", not side-major) to lock in the
+deliberate ordering change described above. Every other frontend
+pure-logic test script re-run clean as a full regression sweep
+(`test-autoschedule`, `test-eligibility`, `test-estimator`, `test-kata`,
+`test-schedule`, `test-schedule-print`, `test-scoreboard`, `test-timing`).
+
+Checked against the seeded event's real, further-along-than-drawn
+divisions (several `IN_PROGRESS`/`COMPLETED` KUMITE brackets) via
+`/api/run/board`: the endpoint still returns a valid, correctly-shaped
+queue post-change with no errors. Could not find or easily construct a
+seeded division currently sitting in the *exact* race window this bug
+needed (a division whose semis just decided, producing a ready final and
+a ready multi-stage bronze bout in the same instant) — reproducing it live
+would mean hand-editing bout results in the seed data. The unit tests
+above construct that exact scenario directly and are the real evidence the
+fix works; the live check only confirms the change didn't break the
+endpoint against real data.
+
+**Not verified in-browser** — the operator's screen (`MatOperator.tsx`) and
+the Run tab were not opened and visually checked against a live queue in
+the corrected order; verification here is unit tests plus one non-visual
+API check, per this task's own stated bar.
 
 **Public spectator board rebuilt for mobile (2026-08-21).**
 

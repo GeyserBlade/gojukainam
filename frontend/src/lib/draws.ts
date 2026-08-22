@@ -236,3 +236,41 @@ export function finalBronzeMedalists(draw: DrawDetail): [DrawEntrySummary, DrawE
   if (thirds.length < 2) return null;
   return [thirds[0], thirds[1]];
 }
+
+// ---------------------------------------------------------------------------
+// Running order: what sequence a division's bouts actually run in on the
+// mat, as opposed to the bracket's own round/position indexing.
+
+export interface RunOrderableBout {
+  phase: "MAIN" | "REPECHAGE";
+  round: number;
+  position: number;
+}
+
+/**
+ * Which run-order group a bout belongs to within its division: main
+ * bracket rounds through the semi-finals (0), then the bronze/repechage
+ * bouts (1), then the final (2). WKF running order — the final is always
+ * the division's last bout, so the medal ceremony can follow immediately
+ * after it, rather than the naive "MAIN round ascending (incl. the final),
+ * then REPECHAGE" order a plain round/position sort would produce.
+ */
+function boutRunGroup(bout: RunOrderableBout, size: number): number {
+  if (bout.phase === "REPECHAGE") return 1;
+  return bout.round === Math.log2(size) ? 2 : 0;
+}
+
+/**
+ * Sorts one division's bouts into WKF running order. Mirrors
+ * backend/src/services/run.service.ts's identical rule for the tatami
+ * operator's queue — reimplemented rather than imported since the frontend
+ * and backend are separate TypeScript projects with no shared package, but
+ * kept deliberately in lockstep so the coordinator's printed call-up order
+ * (lib/callup.ts) never disagrees with what the operator will actually be
+ * asked to call next.
+ */
+export function sortBoutsForRunning<T extends RunOrderableBout>(bouts: readonly T[], size: number): T[] {
+  return [...bouts].sort(
+    (a, b) => boutRunGroup(a, size) - boutRunGroup(b, size) || a.round - b.round || a.position - b.position,
+  );
+}
