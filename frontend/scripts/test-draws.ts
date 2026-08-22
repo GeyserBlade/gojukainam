@@ -151,6 +151,26 @@ console.log("\n— sortBoutsForRunning: 2-entry bracket, no bronze at all —");
   check("the sole bout — trivially the final — survives untouched", sorted.length === 1 && sorted[0].id === "only", sorted);
 }
 
+console.log("\n— sortBoutsForRunning: never drops a bout, the final included —");
+{
+  interface B extends RunOrderableBout { id: string }
+  const bout = (id: string, phase: "MAIN" | "REPECHAGE", round: number, position: number): B => ({ id, phase, round, position });
+  // The exact shape of a real report: "the final bout isn't showing up." A
+  // separate live check found the actual cause was a UI truncation on the
+  // public spectator board, not this sorter — but this pins the stronger
+  // guarantee directly: nothing that goes in ever fails to come back out.
+  const bouts = [
+    bout("r1-a", "MAIN", 1, 0),
+    bout("r1-b", "MAIN", 1, 1),
+    bout("semi", "MAIN", 2, 0),
+    bout("bronze", "REPECHAGE", 1, 0),
+    bout("final", "MAIN", 3, 0),
+  ];
+  const sorted = sortBoutsForRunning(bouts, 8);
+  check("every input bout comes back out — none silently dropped", sorted.length === bouts.length, sorted);
+  check("the final specifically is present in the output", sorted.some((b) => b.id === "final"), sorted);
+}
+
 console.log("\n— sortBoutsForRunning: does not mutate the input array —");
 {
   interface B extends RunOrderableBout { id: string }

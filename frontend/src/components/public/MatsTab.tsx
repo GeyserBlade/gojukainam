@@ -1,14 +1,20 @@
+import { useState } from "react"
+
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { cn } from "@/lib/utils"
-import { roundLabel } from "@/lib/draws"
 import type { PublicQueueItem, PublicRunBoard } from "@/lib/public"
 import { MatPager, type MatPage } from "./MatPager"
 
 /**
- * How many queued bouts a floor shows before it stops. A tatami can hold
- * thirty-odd ready bouts at the start of a day; a spectator wants the next
- * few, and the schedule tab for the rest of the morning.
+ * How many queued bouts a floor shows before collapsing the rest behind a
+ * "Show more" button. A tatami can hold thirty-odd ready bouts at the start
+ * of a day; a spectator wants the next few at a glance. This only ever
+ * shortens the *initial* view — every bout, including a division's final,
+ * stays one tap away rather than being dropped from the page, since a
+ * spectator has no other way to confirm a specific bout (their own child's
+ * final, say) is really coming up.
  */
 const QUEUE_LIMIT = 8
 
@@ -78,6 +84,12 @@ function QueueRow({ item, index }: { item: PublicQueueItem; index: number }) {
 }
 
 function MatColumn({ queue, isLiveFloor }: { queue: PublicQueueItem[]; isLiveFloor: boolean }) {
+  // Collapsed by default (the whole point of QUEUE_LIMIT), but never a dead
+  // end: every bout a mat has queued — including a division's final, which
+  // is exactly as real a bout as any other and has no other page that lists
+  // it — is one tap away rather than dropped from the page entirely.
+  const [expanded, setExpanded] = useState(false)
+
   if (queue.length === 0) {
     return (
       <Card>
@@ -91,8 +103,9 @@ function MatColumn({ queue, isLiveFloor }: { queue: PublicQueueItem[]; isLiveFlo
   // Only a real floor has a bout "on now" — the unassigned pool is a to-do
   // list, not a mat, and calling its first row "on now" would be a lie.
   const [head, ...rest] = queue
-  const shown = isLiveFloor ? rest.slice(0, QUEUE_LIMIT) : queue.slice(0, QUEUE_LIMIT)
-  const hidden = (isLiveFloor ? rest.length : queue.length) - shown.length
+  const full = isLiveFloor ? rest : queue
+  const shown = expanded ? full : full.slice(0, QUEUE_LIMIT)
+  const hidden = full.length - shown.length
 
   return (
     <div className="space-y-3">
@@ -113,9 +126,11 @@ function MatColumn({ queue, isLiveFloor }: { queue: PublicQueueItem[]; isLiveFlo
               ))}
             </ul>
             {hidden > 0 && (
-              <p className="pt-2 text-center text-xs text-muted-foreground">
-                + {hidden} more · see the Schedule tab for the rest of the day
-              </p>
+              <div className="pt-2 text-center">
+                <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setExpanded(true)}>
+                  Show {hidden} more
+                </Button>
+              </div>
             )}
           </CardContent>
         </Card>

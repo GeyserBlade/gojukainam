@@ -4,7 +4,15 @@ This file is the handoff between coding agents. It describes what is in flight
 right now, not the permanent architecture (that's
 [`architecture.md`](architecture.md)).
 
-**Last updated:** 2026-08-22 — by Claude Code: **fixed the tatami
+**Last updated:** 2026-08-22 — by Claude Code: **the final bout wasn't
+visible on the public spectator board** — not a regression in the run-order
+fix below (verified live: the operator's screen and the Run tab both
+already showed it correctly), but a pre-existing truncation on the
+spectator board's "Up next" preview that could silently swallow any deep
+queue item, including a division's final. Fixed by making the cut-off
+expandable instead of a dead end. See "In flight" below.
+
+Previously, same day — by Claude Code: **fixed the tatami
 operator's bout running order** — the final was being called right after
 the semis, ahead of the bronze (repechage) bouts. Correct WKF order is
 main bracket through the semis → bronze → final last, so the medal
@@ -12,7 +20,7 @@ ceremony can follow immediately after the final. New shared
 `sortBoutsForRunning` helper (reimplemented identically on both frontend
 and backend, which share no code) now backs the operator's queue, the
 Run tab, and the call-up sheet, so none of the three can drift apart on
-what "next" means. See "In flight" below.
+what "next" means.
 
 Previously, same day — by Claude Code: **the public spectator
 board rebuilt for phones**. Four tabs (Results / Mats / Times / Clubs) with
@@ -184,6 +192,94 @@ port; those have since been pushed.) Everything here is verified locally against
 a database, never against production data.
 
 ## In flight (uncommitted)
+
+**Follow-up: the final bout wasn't visible on the public spectator board
+(2026-08-22).**
+
+Request: after the run-order fix below, the user reported the final bout
+wasn't showing on "the run screens" — named all three: the operator's mat
+screen, the coordinator's Run tab, and the public spectator board. Asked
+for a real check of what each screen actually renders today, not
+inference, before fixing.
+
+**What I actually found, checked live against the seeded event (not
+inferred):**
+- **Operator's screen (`pages/MatOperator.tsx`) and the Run tab
+  (`pages/Run.tsx`)** — both already correctly show the final. Verified
+  directly: granted the dev-auth user a Tatami 2 operator grant, loaded
+  `/mat` and `/hub/run`, and found `KUMITE MALE JUNIOR · O63kg · Round 2`
+  (a real, ready final bout in the seed data — both `aka`/`ao` known,
+  `winnerEntryId` null) rendered in both screens' full queue text, at its
+  correct position (#20 of Tatami 2's 28-item queue). Neither screen
+  truncates — both render every item Prisma/`RunService.getBoard` returns,
+  full stop, so there was nothing to fix here. My run-order fix's own
+  change (`boutRunGroup`) had zero effect on this specific division besides
+  confirming this — it has no repechage bracket at all (size 4, no bronze),
+  so its final's position wasn't touched by that fix either way.
+- **Public spectator board's Mats tab (`components/public/MatsTab.tsx`,
+  built in the *separate*, unrelated PR #28) — this is where the bug
+  actually lives.** `MatColumn` slices each mat's ready-queue to
+  `QUEUE_LIMIT = 8` items for the "Up next" preview and replaces everything
+  past that with static, dead text: `+ N more · see the Schedule tab for
+  the rest of the day`. On a mat with a deep queue (this seed's Tatami 2
+  has 28 ready bouts across ~10 divisions, all drawn at once — an unusually
+  deep queue a real single-day event would rarely produce, but not an
+  impossible one), a bout sitting past position 8 — the final included —
+  is simply never rendered, and the "Schedule tab" the message points to
+  shows *estimated start times* built from `lib/schedule.ts`, not "what's
+  actually next in the ready queue," so it doesn't actually answer the
+  question a parent has. **Confirmed live**: with Tatami 2's real queue,
+  the final sat at position 20, past the cut, invisible with no way to
+  reach it.
+
+**Root cause was NOT the run-order fix (PR #29) itself** — `QUEUE_LIMIT`
+truncation predates it (from the PR #28 spectator-board rebuild) and is
+independent of bout ordering; it would have hidden any bout sitting past
+position 8 on a busy mat, final or not. Correcting the record here since
+the report was filed as a follow-up to PR #29.
+
+**Fix**: `MatColumn` keeps its collapsed default (a spectator glancing at
+their phone still sees a short list, matching PR #28's whole reason for
+existing — "ten screens of scrolling on a phone" was the old board's
+problem), but the cut-off is no longer a dead end. The static "+ N more"
+text became a "Show N more" button; tapping it reveals the rest of that
+mat's queue in full, with no re-sort or filtering — the exact same rows
+that were always in `board.mats[].queue`, just not initially rendered. No
+bout gets special-cased to "always show" (the final gets no bespoke
+treatment anywhere in this fix) — every bout, including the final, is
+reachable by the same one generic mechanism. Also dropped an unused
+`roundLabel` import from `lib/draws.ts` in this file (the file already
+defines its own identical local `boutRound` — dead code from PR #28,
+noticed while editing the same lines, not otherwise related).
+
+Files: `frontend/src/components/public/MatsTab.tsx`. No backend changes —
+`RunService.getBoard`'s readiness filter and `sortBoutsForRunning`'s
+ordering were both already correct.
+
+### Verification (run 2026-08-22)
+
+`npx tsc --noEmit` clean in both `frontend` and `backend`. Full frontend
+pure-logic regression sweep clean.
+
+Added an explicit "never drops a bout, the final included" check to both
+`backend/scripts/test-run-order.ts` and `frontend/scripts/test-draws.ts`'s
+`sortBoutsForRunning` suites — asserts output length equals input length
+and that a bout named "final" is specifically present in the result. This
+pins the guarantee the report actually needed, even though the live
+investigation found `sortBoutsForRunning` itself was never the culprit.
+
+**Verified live against the real, deep Tatami 2 queue in the seeded
+event** (not a synthetic fixture): before the fix, the public board's Mats
+tab showed "Up next" through position 9 then "+ 19 more" with the final
+(`KUMITE MALE JUNIOR · O63kg · Round 2`, position 20) unreachable. After
+the fix, clicking "Show 19 more" reveals the complete 28-item queue
+including that exact final bout, on both the desktop grid layout
+(screenshotted) and via full page-text extraction confirming its row
+content; the other two mats' own "Show N more" buttons were left
+untouched/collapsed, confirming the expand state is scoped per mat, not
+global. Re-confirmed the operator's screen and Run tab were already
+correct (see above) before making any change, per the "verify each screen
+today" ask.
 
 **Tatami operator: fixed the bout running order — bronze before the final,
 not after (2026-08-22).**
