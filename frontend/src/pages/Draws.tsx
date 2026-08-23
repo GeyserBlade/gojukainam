@@ -237,8 +237,65 @@ export default function DrawsPage() {
     onError: (err) => apiError(err, "Could not save the result"),
   })
 
-  const handleSetWinner = (bout: DrawBout, winnerEntryId: string | null) => {
+  /**
+   * Clicking a fighter in the bracket puts them through. When the bout is
+   * still open that is a one-click action; when it already carries a result
+   * or a score, that detail is about to be destroyed — by this write and,
+   * through the bracket recompute, potentially in later rounds too — so it
+   * is spelled out and confirmed first.
+   */
+  const handleSetWinner = async (bout: DrawBout, winnerEntryId: string | null) => {
     if (!bout.id) return
+
+    const hasScore = bout.akaScore !== null || bout.aoScore !== null
+    const hasResult = bout.isUserResult
+    if (!hasResult && !hasScore) {
+      winnerMutation.mutate({ boutId: bout.id, winnerEntryId })
+      return
+    }
+
+    // Anything decided *downstream* of this bout was built on its result:
+    // the recompute rewrites those fighters and drops any result or score
+    // that no longer describes the matchup it was captured for. Same rule
+    // the backend uses to stop an operator overwriting a result mid-bracket
+    // (assertOperatorMayWrite in draw.service.ts).
+    const downstream = (draw?.bouts ?? []).filter(
+      (b) =>
+        b.id !== bout.id &&
+        b.isUserResult &&
+        (b.phase === bout.phase
+          ? b.round > bout.round
+          : bout.phase === "MAIN" && b.phase === "REPECHAGE"),
+    ).length
+
+    const throughName =
+      winnerEntryId && winnerEntryId === bout.aka?.entryId
+        ? bout.aka.name
+        : winnerEntryId && winnerEntryId === bout.ao?.entryId
+          ? bout.ao.name
+          : null
+
+    const existing = hasScore
+      ? `a recorded score (${bout.akaScore}\u2013${bout.aoScore})`
+      : "a recorded result"
+
+    const ok = await confirm({
+      title: throughName ? `Put ${throughName} through?` : "Clear this result?",
+      description: (
+        <>
+          This bout already has {existing}, and continuing erases it
+          {throughName ? `, putting ${throughName} through to the next round` : ""}.
+          {downstream > 0 &&
+            ` ${downstream} later ${downstream === 1 ? "bout" : "bouts"} in this draw ${
+              downstream === 1 ? "was" : "were"
+            } decided on the back of this one — ${downstream === 1 ? "its" : "their"} result and score will be cleared too.`}
+        </>
+      ),
+      confirmText: throughName ? "Erase and put through" : "Clear result",
+      destructive: true,
+    })
+    if (!ok) return
+
     winnerMutation.mutate({ boutId: bout.id, winnerEntryId })
   }
 
