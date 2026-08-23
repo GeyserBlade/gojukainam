@@ -94,6 +94,11 @@ export async function reorderMatQueue(matId: string, boutIds: string[]): Promise
   await api.put(`/run/mats/${matId}/order`, { boutIds })
 }
 
+// Drop a mat's manual running order and go back to the automatic one.
+export async function clearMatQueueOrder(matId: string): Promise<void> {
+  await api.delete(`/run/mats/${matId}/order`)
+}
+
 // ---------------------------------------------------------------------------
 // Tatami operator
 //
