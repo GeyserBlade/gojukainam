@@ -4,7 +4,44 @@ This file is the handoff between coding agents. It describes what is in flight
 right now, not the permanent architecture (that's
 [`architecture.md`](architecture.md)).
 
-**Last updated:** 2026-08-22 — by Claude Code: **PR #32's "active division
+**Last updated:** 2026-08-23 — by Claude Code: **the Run-queue
+ordering issue is diagnosed and confirmed against the production data of
+the 2026-08-22 tournament. It was never a bug in `sortRunQueue`. The
+cause is `Bout.queueOrder`: one drag-to-reorder on the Run tab
+permanently pins that mat's queue above every priority tier, and only
+for the bouts that were on screen at that moment.** Replaying the real
+day mat by mat: **Tatami 2 was dragged 17 times and its queue was wrong
+for 469 of the day's minutes; Tatami 1 was dragged once, at 14:48, and
+every one of its faults starts at 14:48:47; Tatami 3 was never dragged
+and was correct all day, 0 faults.** That is the user's "only the middle
+tatami" report, exactly. **Fix implemented and measured against that
+same data: reality now outranks the plan in `sortRunQueue` (live, then
+mid-category, then the manual pin), a pin is read as a division-level
+rank so a division's later bouts travel with it, and a mat's manual
+order can finally be cleared. Replaying the same day against the fixed
+code drops every ordering fault to zero.**
+
+Previously, 2026-08-22 — by Claude Code: **mid-investigation update
+narrowed the 3rd report to "only the middle tatami" — tested the fix on
+all three of the seeded event's real mats (one via live reproduction on
+each of Tatami 1 and Tatami 2, one confirmed via Tatami 3's own
+already-in-progress seed data, no manipulation needed) and found
+identical, correct behavior on every mat.** `sortRunQueue` has no
+mat-identity-aware logic at all — reconfirmed by reading, and now by
+three-for-three live testing. Still no code bug found; still no code
+shipped. Added a regression test locking in the exact "one mat, one
+complete + one mid-category + one untouched division" pattern the report
+described. See "In flight" below.
+
+Previously, same day — by Claude Code: **investigated a 3rd report
+that the Run-queue priority fix (PR #32 → PR #34) "still doesn't work on
+production" — found no code bug.** Re-verified PR #34's logic against two
+fresh local reproductions (single bout decided, and multiple bouts
+decided with one currently live), confirmed the frontend does zero
+re-sorting or caching that could mask a working fix, and confirmed
+`e93543d` (PR #34's merge) is HEAD of `origin/main`.
+
+Previously, same day — by Claude Code: **PR #32's "active division
 floats to top" fix didn't survive a bout actually being decided** — the
 priority signal was only ever "a ready bout has `startedAt` set," and a
 decided bout is never "ready" (so it drops out of the queue entirely,
@@ -12,7 +49,7 @@ carrying its `startedAt` with it); if the division's *next* bout hadn't
 itself been started yet, the whole division fell back to `matOrder` mid-
 category. Fixed with a durable second signal — "this division has
 recorded at least one real result" — so it stays on top for the whole
-category, not just its currently-airing bout. See "In flight" below.
+category, not just its currently-airing bout.
 
 Previously, same day — by Claude Code: **final and bronze bouts
 now carry a visible medal badge** everywhere a bout list is shown — gold
@@ -229,6 +266,433 @@ port; those have since been pushed.) Everything here is verified locally against
 a database, never against production data.
 
 ## In flight (uncommitted)
+
+**Run-day replay harness, and a reproduction of the ordering symptom that
+does not involve `sortRunQueue` being wrong (2026-08-23).**
+
+Request: the user offered an extract of the production data from the
+tournament they ran on 2026-08-22 — the event behind the three
+"mid-category division doesn't stay on top" reports — and asked to
+simulate it, experience the ordering problems first-hand, and recommend
+improvements.
+
+**Three new scripts, no `src/` changes.**
+
+- `backend/scripts/export-event.ts` — read-only extract of one event:
+  every row that belongs to it, the referenced athletes/clubs/belts/katas,
+  **and the AuditLog rows for its entities**, which are the only record of
+  the *sequence* the day ran in (`Bout` has no `updatedAt`, and
+  `startedAt` is overwritten in place). Athlete/user personal data is
+  redacted by default (`--with-names` to keep it); billing and documents
+  are never exported. Prints the three counts that matter to this
+  investigation: bouts with a manual `queueOrder`, bouts with a per-bout
+  `matId` override, and how many of those contradict their own draw's mat.
+- `backend/scripts/import-event.ts` — loads an extract into the local
+  database, **preserving row ids**, so a bout id from a screenshot or a
+  `/api/run/board` response still matches. Refuses any non-localhost
+  `DATABASE_URL`. Idempotent with `--replace`.
+- `backend/scripts/replay-run-day.ts` — winds every bout back to the start
+  of the day, then re-applies each result in audit-trail order, calling
+  the real `RunService.getBoard` twice per step (bout on the clock, result
+  recorded) and inspecting each mat's queue for `LIVE_NOT_TOP`,
+  `MIDCATEGORY_DROPPED`, `SPLIT_DIVISION`, `TWO_LIVE_DIVISIONS`,
+  `PARTIAL_MANUAL_PINS`, `FULLY_MANUAL_QUEUE` and — from the result
+  timeline rather than the queue — `CATEGORY_INTERRUPTED`. Restores the
+  event exactly as found (verified, not assumed) unless
+  `--leave-replayed`.
+
+**The finding, confirmed against production.** The user supplied an
+extract of the 2026-08-22 tournament (`Goju Kai National Championships
+2026`, 520 bouts, 3 mats, 579 audit rows). Replaying it reproduces the
+reported symptom in full, and the correlation with drag-to-reorder is
+exact:
+
+| Mat | Drags | Pinned bouts | Faults | Queue wrong for |
+|-----|-------|--------------|--------|-----------------|
+| Tatami 1 | 1, at 14:48 | 8 | 18, **all from 14:48:47** | 52 min |
+| Tatami 2 | **17**, 08:04–15:40 | 58 | 158 | **469 min** (08:04–15:53) |
+| Tatami 3 | **0** | 0 | **0** | **none, all day** |
+
+Tatami 3 ran the same code on the same event for the same nine hours and
+never misbehaved. Tatami 1 was perfect until the minute it was dragged.
+This is not a mat-position bug and never was — it is `queueOrder`.
+
+Three properties combine:
+
+1. `queueOrder` is rule 1 of `sortRunQueue` and outranks the live and
+   mid-category tiers entirely — by design, but the design assumed a
+   deliberate, current override.
+2. `reorderMatQueue` stamps `queueOrder` **only on the bouts that were
+   ready at the moment of the drag**. Every bout that becomes ready later
+   — the whole rest of the bracket — has `queueOrder: null`, which sorts
+   as `MAX_SAFE_INTEGER`, i.e. behind all pinned bouts no matter what is
+   live.
+3. Nothing ever clears it. It deliberately survives recompute, there is no
+   "reset order" affordance, and the pinned state is invisible on screen
+   afterwards.
+
+That explains "only the middle tatami" completely: only the mat someone
+dragged is affected, so the symptom follows the mat, not a code path.
+
+There is also a feedback loop visible in the timestamps — three drags
+within 22 seconds at 08:29, two more seconds apart at 12:16 and 12:34.
+The coordinator was dragging *because* the order looked wrong, and every
+drag made the next one more necessary.
+
+**Why three previous investigations found nothing:**
+`seed-test-tournament.ts` produces zero `queueOrder` and zero per-bout
+`matId` values, so the local tournament could never exhibit this. The
+code was read correctly every time; the data was the part that differed.
+
+**Replay caveats, stated honestly.** 87 of 401 audit results could not be
+placed in sequence (the day also contains 35 `REGENERATE` events, which
+delete and rebuild bout rows, so older audit rows point at ids that no
+longer exist — and incidentally discard any `queueOrder` on them). Bout
+start times are modelled as 90s before their result, since `startedAt` is
+overwritten in place and never audited. Neither affects the conclusion:
+the fault windows line up with the drag timestamps to the second.
+
+### The fix (implemented 2026-08-23, on the user's go-ahead)
+
+**`sortRunQueue`'s key order is now reality first, then the plan**
+(`backend/src/services/run.service.ts`): live division → mid-category
+division → manual pin → mat schedule → within-division bracket order.
+Two changes, both needed:
+
+1. **A live or mid-category division now outranks a manual pin.** A pin
+   is a plan made earlier; a running clock is what is happening on the
+   floor. This deliberately inverts the previous rule — the test that
+   asserted "a manual queueOrder still beats an active division" was
+   rewritten to assert the opposite.
+2. **A pin is read as a division-level rank** — the lowest `queueOrder`
+   among a division's own bouts — instead of a per-bout position. This is
+   the structural half: *a drag can only ever stamp the bouts that are
+   ready at that moment*, and a later round's bouts do not exist in the
+   queue yet, so they can never be pinned. Under the old per-bout rule
+   they sorted as `MAX_SAFE_INTEGER`, behind every pinned bout on the
+   mat. Note this makes "stamp the whole queue on a drag" — the obvious
+   first idea, and one of the original recommendations — both impossible
+   and unnecessary.
+
+**Clearing a manual order** is now possible at all:
+`RunService.clearMatQueueOrder`, `DELETE /run/mats/:matId/order`
+(audited as `CLEAR_QUEUE_ORDER`), surfaced in the Run tab as a
+"Manually ordered / Clear" row that appears only on a mat that actually
+carries pins. Before this, a drag was permanent and invisible.
+
+**Measured against the same production day**: replaying all 401 recorded
+results through the fixed code drops `LIVE_NOT_TOP` (36 → 0),
+`MIDCATEGORY_DROPPED` (592 → 0) and `SPLIT_DIVISION` (214 → 0) to
+nothing. The only remaining output is informational — which mats carry a
+manual order at all.
+
+**Deliberately still not done**, from the original recommendation list:
+add `queueOrder` and per-bout `matId` values to
+`seed-test-tournament.ts`, so the seeded tournament stops being
+systematically easier than a real run day. Everything in this
+investigation was invisible locally for exactly that reason.
+
+### Category contiguity, confirmed (2026-08-23)
+
+Asked to confirm that a mat never calls a bout from another category while
+the current one still has bouts to run. It holds, and for a structural
+reason rather than by luck: **every sort key ahead of `drawId` is a
+property of the division**, identical across all its bouts (live,
+activeSince, divisionStarted, manualRank, drawMatOrder). So for any two
+divisions the whole key prefix either separates them or ties, and
+`drawId.localeCompare` then breaks the tie the same way for every pairing
+— there is no way for one division's bout to land between two of
+another's. `scripts/test-run-order.ts` now brute-forces this over 500
+randomised mats mixing live/started/partially-pinned/tied-matOrder
+fixtures (25 checks in the file).
+
+The real day agrees: replaying the audit trail, **all three mats ran every
+category start to finish** — 12, 13 and 16 category stretches for 12, 13
+and 16 distinct categories. No category was ever returned to.
+
+**The one way to break it, by design:** `Bout.matId` is a per-bout mat
+override, and `getBoard` buckets by `row?.matId ?? draw.matId`, so moving
+a *single bout* to another mat splits its division across two queues.
+Yesterday's event had zero such overrides. Note also that the queue
+*recommends* an order; nothing stops an operator scoring whatever bout
+they like, so this is a guarantee about the screen, not an interlock.
+
+### Put-through from the bracket, with a destructive-write warning (2026-08-23)
+
+Clicking a fighter in `BracketView` already set them as the winner and let
+the recompute advance them; clicking the current winner cleared the
+result. Neither warned, though both destroy stored detail. `handleSetWinner`
+in `frontend/src/pages/Draws.tsx` now confirms first whenever the bout
+already carries a result or a score, naming what will be erased, who goes
+through, and **how many later bouts were decided on the back of this one**
+(same downstream rule the backend uses in `assertOperatorMayWrite`) — those
+lose their result and score to the recompute. A bout with nothing recorded
+is still a single click, unchanged. The toggle-to-clear behaviour was kept
+(it is the only way to undo a result from the bracket) and now warns too.
+
+### Rest between bouts, and repechage before finals (2026-08-23)
+
+**Repechage before the final was already enforced** and needed no change:
+`boutRunGroup` puts main-bracket-through-semis at 0, REPECHAGE at 1 and
+the final at 2, and `sortRunQueue` applies it within each division. Now
+covered at the queue level too, not just in `sortBoutsForRunning`.
+
+**New: an athlete is not called straight back on.** `sortRunQueue` takes
+an optional `justFought` (the competitors from the bout that has only just
+finished on that mat) and runs a `spaceOutRepeatFighters` pass after the
+sort. When the queue's next bout involves someone who just fought, the next
+bout **of the same category** that does not involve them is pulled forward.
+`getBoard` supplies `justFought` per mat by finding the decided bout with
+the latest `startedAt` — `Bout` has no "decided at", but `startedAt` is
+stamped when the mat opens a bout and survives the result.
+
+Bounded by three rules, each with a test:
+- **same `drawId`** — categories still run to completion, so spacing can
+  never borrow a bout from another category;
+- **same `boutRunGroup`** — a final is never pulled ahead of a bronze bout
+  to give somebody a rest;
+- **never touches a bout on the clock** — the mat has started it.
+
+When the category has nothing else to run the clash stands: a four-entry
+bracket with no bronze is semi, semi, final, and there is nothing to put
+in between. Spacing is a preference; the bracket is not.
+
+**Worth knowing for anyone reading `spaceOutRepeatFighters`:** within any
+single queue an athlete can only ever appear once — a bout is queued only
+while undecided, and an athlete reaches their next bout only by winning
+the previous one, which decides it and drops it out. So the pass's scan
+over adjacent queue entries is a **guard that real `getBoard` input cannot
+trip**; `justFought` is the signal that actually fires. Confirmed against
+the production data — no snapshot in the whole day had two queued bouts
+sharing a competitor.
+
+**Measured on the real day**: the audit trail shows **27 times** an athlete
+fought two consecutive bouts on the same mat, once only **22 seconds**
+after the previous one finished — spread across all three mats, so this is
+independent of the `queueOrder` problem, and Tatami 3 (clean of every
+ordering fault) had 16 of them. Replaying the day, 3 of those were
+avoidable by reordering within the category at that moment and the fix
+removes all 3; the other 24 had nothing else ready in that category to run
+instead. Note this understates the benefit and cannot be made to state it
+properly: the replay follows the order the day *actually* ran, whereas a
+day run off the fixed queue would space bouts out proactively and reach
+fewer of those dead ends in the first place.
+
+### Verification (run 2026-08-23)
+
+`npx tsc --noEmit` clean in both projects, `npm run build` clean in
+`frontend`. Backend suites `test-run-order` (32 checks), `test-draws`, `test-plan`, `test-event-timing`,
+`test-bout-scoring`, `test-kata-results` and `test-athlete-belt` all
+pass; all eight frontend pure suites pass.
+
+**Both new UI flows were driven end to end in a browser** (2026-08-23).
+Note for future sessions: the long-running `tsx watch` dev servers on this
+machine were started with `ALLOW_DEV_AUTH=true` **in their shell
+environment**, not in `.env` — so header auth (`x-role: SUPERADMIN`, or
+`localStorage.role` from the frontend) already works, and grepping `.env`
+alone will wrongly suggest it does not.
+
+- *Run tab.* Pinned five bouts on the seeded event's Tatami 1 through the
+  real `reorderMatQueue`. The "Manually ordered / Clear" row appeared on
+  that mat and on neither other mat; clicking Clear removed it, re-sorted
+  the queue to the automatic order (Tatami 1's head went from the pinned
+  `KATA GIRLS 8-9` back to `KATA BOYS 7`), zeroed the pins in the database
+  and wrote `CLEAR_QUEUE_ORDER {"clearedCount":5}`.
+- *Bracket put-through.* On the production copy's `KUMITE GIRLS 12-13`,
+  clicked the loser of a 6–3 quarter-final. The dialog read: *"Put Athlete
+  181 (One Tribe) through? This bout already has a recorded score (6–3),
+  and continuing erases it, putting Athlete 181 (One Tribe) through to the
+  next round. 5 later bouts in this draw were decided on the back of this
+  one — their result and score will be cleared too."* Cancel left the row
+  byte-identical; confirming set the new winner, nulled the score and
+  outcome, advanced them into the next-round bout, and cleared the
+  downstream result the recompute invalidated.
+
+Both events' data was restored afterwards (the production copy re-imported
+from the extract; the seeded event's pins were ones this test created, and
+its two test audit rows removed).
+
+The production extract is imported into the local database as event
+`cmsw1qyrn0000qi01uu12u36v` and can be clicked through in the app; the
+replay restores it exactly as found on every run (verified, including the
+plan-board layout that replaying `PLAN_REORDER` rewrites).
+
+`npx tsc --noEmit` clean in `backend`. `scripts/test-run-order.ts` (19
+checks) and `scripts/test-draws.ts` pass unchanged — no `src/` code was
+touched. The harness was validated by a full round trip on the seeded
+event: export → import → replay → export, with bout counts, decided
+counts and the audit timeline identical before and after, and two
+consecutive replays producing byte-identical reports. Two defects in the
+harness itself were found and fixed this way (the replay leaked its own
+audit rows into the timeline it was measuring, and its restore path
+assumed bout ids survive a bracket recompute — they do not).
+
+
+**Mid-investigation update: "only the middle tatami" — tested all three
+real mats, found no mat-specific bug (2026-08-22).**
+
+Request: a critical update arriving mid-investigation on the 3rd report
+above — the user narrowed it to "looks like it only does this on the
+middle tatami — not the others." Asked to (1) request the middle mat's
+raw queue from the user regardless, (2) in parallel construct a local
+repro matching "one mat, one complete + one in-progress + one untouched
+division," (3) fix if it reproduces, otherwise hand back the same
+diagnostic request, (4) add a unit test for the exact pattern either way.
+
+**Code read first: nothing mat-identity-aware exists.** `sortRunQueue`
+takes a flat array already filtered to one mat by its caller
+(`getBoard`'s `byMat(matId)`); it never reads `matId`, `Mat.order`, or
+anything about which mat a bout is on — only `drawMatOrder` (a division's
+position *within* whatever mat it's on) and `drawId`. There is no
+structural way for "which mat" to change the sort's behavior; each mat's
+queue is computed as a fully independent call.
+
+**Reproduced live on all three of the seeded event's real mats, not just
+one.** Two required deliberate SQL manipulation (decide one bout, with a
+live `startedAt`, in a division sitting behind others on that mat's own
+`matOrder`), one didn't need any:
+- **Tatami 1** (`matOrder`s 0–15, an *outer* mat): decided a bout in
+  `KATA BOYS 12` (`matOrder` 5) — floated to the top ahead of `KATA BOYS
+  7`(0) and `KATA GIRLS 8-9`(2), identical to the Tatami-2 behavior from
+  the previous investigation pass.
+- **Tatami 2** (`matOrder`s 0–15, the *middle* mat — the one actually
+  named in the report): repeated the earlier `KATA GIRLS 12-13` (`matOrder`
+  8) reproduction from scratch. Same correct result.
+- **Tatami 3** (`matOrder`s 0–13, the *other outer* mat): needed no
+  manipulation at all — the seed data already has `KUMITE FEMALE CADET`
+  (`matOrder` 11) and `KUMITE MALE CADET` O55kg/U55kg (`matOrder` 12–13)
+  genuinely `IN_PROGRESS`, sitting *behind* several untouched divisions on
+  paper. The live board already shows all three correctly floated to
+  positions 0–4, ahead of every `matOrder` 0–10 division — a real,
+  pre-existing, un-manipulated confirmation of the exact fix, sitting
+  right there in the seed data the whole time.
+
+All test mutations reverted immediately after each check; confirmed via a
+follow-up query that all three touched rows (`cmsnmfkhk...`,
+`cmsnmfkja...`, `cmsnmfkky...` — one per mat) matched their original
+`winnerEntryId`/`startedAt` values exactly.
+
+**Working theory, now stronger than before:** "only the middle tatami"
+is very likely a description of the *user's specific tournament's current
+state* on production, not a property of the code. If only their middle
+mat currently has a division mid-flight (the others either haven't been
+picked up by an operator yet, or are already fully finished), then it's
+the *only* mat where any reordering — correct or buggy — would be visible
+to a human glancing at the screen; the other two mats would "look right"
+purely because their divisions are all in the same tier regardless of
+which code is running. This doesn't rule out a still-undeployed fix
+(Railway's actual deploy status remains the one thing unverifiable from
+here), but it does rule out a mat-position-specific code defect.
+
+**No code changed beyond the new test.** Added one regression case (see
+Verification) locking in the exact reported pattern; did not touch
+`sortRunQueue`/`getBoard` themselves, since nothing found here contradicts
+their current behavior.
+
+### Verification (run 2026-08-22)
+
+`npx tsc --noEmit` clean in both `backend` and `frontend`. Full regression
+sweep clean on both sides.
+
+Added one new case to `backend/scripts/test-run-order.ts`: one mat with a
+fully-decided division (modeled correctly as contributing *no* input rows
+at all — the same as `getBoard` never handing `sortRunQueue` a completed
+division's bouts in the first place), one mid-category division with a
+live bout plus one still-pending bout of its own, and one untouched
+division scheduled ahead of it on paper. Deliberately built the fixture
+to be bracket-realistic (a round-2 bout is only "ready" once its own
+round-1 feeders are decided, so the still-pending bout is a *different*,
+non-feeding round-1 position, not one that could coexist with a ready
+round-2 sibling in real data) rather than a shape `computeDrawState` could
+never actually produce. 19 checks in the file now, all passing.
+
+**Still waiting on the user for:** if this genuinely persists on
+production after confirming a hard refresh and a fresh deploy, the raw
+`/api/run/board` response (via DevTools → Network tab) for the specific
+event and mat in question — now doubly useful, since if the *API itself*
+still returns the wrong order for their middle mat specifically, that
+would be the first real evidence of a scenario the three live
+reproductions above didn't cover, rather than a deploy-timing question.
+
+**3rd report on the same issue: "PR #34 didn't fix it, still no change on
+production" — investigated, found no code bug, waiting on diagnostic
+info (2026-08-22).**
+
+Request: after PR #34 merged, the user reported no change in behavior on
+production — the third report on this exact "mid-category division
+doesn't stay on top" issue (PR #32 → PR #34 → this). Explicitly asked to
+rule out the trivial stuff (deploy status, frontend caching/re-sort)
+before re-touching the fix logic, and not to ship speculative code
+changes if the bug can't be reproduced.
+
+**Deploy status, confirmed.** `git log origin/main -5 --oneline` has
+`e93543d` (PR #34's merge commit) at HEAD, with `783fcd0` (the fix
+itself) directly beneath it. `railway.json` uses Nixpacks with the
+backend's own `build`/`start` scripts (`tsc` then `node dist/server.js`)
+— Railway builds fresh from whatever's pushed, it does not run a stale
+local `dist/` (which is gitignored, never pushed, and irrelevant here
+regardless). I cannot see Railway's own deploy log or dashboard from
+here, so I cannot independently confirm *when* Railway last deployed or
+whether that deploy succeeded — this is the one link in the chain I
+can't verify myself.
+
+**Frontend, confirmed clean.** `pages/Run.tsx` calls
+`getRunBoard(eventId)` (`lib/run.ts`) which is a bare `api.get("/run/board",
+...); return res.data` — no `.sort(` anywhere in `Run.tsx`, no
+post-processing in `getRunBoard`. The global `QueryClient` has a 30s
+`staleTime`, but both `winnerMutation` and `kikenMutation` call
+`invalidate()` on success, forcing an immediate refetch regardless — a
+coordinator who just scored a bout gets the fresh order on the next
+render, not up to 30s later. `divisionStarted` (PR #34's new field) is
+consumed entirely inside `sortRunQueue` server-side; the frontend never
+needs to know it exists, so this is conclusively a backend-only question
+— confirms the report's own hypothesis #5.
+
+**Fix logic, re-verified fresh, twice.** Reproduced two variants live
+against the real seeded event (not just the original PR #34 fixture):
+(1) the original single-bout-decided case, re-run from scratch — the
+division correctly floated into the mid-category tier; (2) a closer match
+to "we are halfway through a category" — two of a fresh division's four
+round-1 bouts decided (one with a live `startedAt`, one without, matching
+"some done, one in progress, some still to come") — the division's 3
+remaining bouts (2 round-1 stragglers + the newly-ready round-2) correctly
+sat together near the top. Reverted both test mutations immediately after
+each check, confirmed via a follow-up query that the exact rows matched
+their original values. Also directly re-read `computeDrawState`'s bye
+handling (hypothesis #4): a bye's `isUserResult` is never set to `true`
+(only the `stored && (stored === aka || stored === ao)` branch — a real
+two-fighter decision — sets it), so `hasUserResults`/`state.status` cannot
+be tricked into "IN_PROGRESS" by byes alone; a bye-only division stays
+correctly un-prioritized. No duplicate `getBoard`/`sortRunQueue`
+implementation exists anywhere else in the codebase, and no caching layer
+sits between `/run/board`'s route handler and `RunService.getBoard`.
+
+**Conclusion: no code bug found.** Everything independently checkable
+from this end — the merged commit, the frontend, and the sort logic
+itself under two different reproductions — checks out correct. The
+remaining gap is exactly what's described as unverifiable in this
+environment: whether Railway has actually deployed `e93543d`, and/or
+whether the user's exact real-world scenario has a property the local
+reproductions haven't captured (e.g., what they mean by "category" —
+if a division has multiple weight classes, each is a *separate* `Draw`
+with its own `drawId`, and the fix operates strictly per-draw; a
+still-`DRAWN` sibling weight class would not float just because another
+weight class of the "same" division is mid-flight, which may or may not
+match what the user pictures as "the same category"). **No code changed
+this pass** — shipping another speculative fix on a third unreproduced
+report would be guessing, not debugging.
+
+**Requested next step, needs the user:** ask them to (1) hard-refresh the
+Run tab and confirm the page itself is fresh (rule out a stuck service
+worker / browser cache, distinct from the API-level staleTime already
+ruled out above); (2) open browser DevTools → Network tab → reload the
+Run tab → find the `run/board?eventId=...` request → copy the full raw
+JSON response and share it, along with which category/mat they're
+looking at and roughly how many bouts into it they are. That pinpoints
+in one step whether the *API* is already returning the wrong order
+(→ genuine remaining code/deploy gap) or the API is right and something
+else entirely is wrong (→ a different bug than any of the three fixes
+so far have addressed).
 
 **Follow-up on PR #32: a mid-category division kept dropping out of
 priority (2026-08-22).**

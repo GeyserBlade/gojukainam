@@ -134,6 +134,14 @@ router.put("/mats/:matId/order", requireEventManager({ in: "lookup", key: "matId
   } catch (err: any) { handle(res, next, err); }
 });
 
+// Drop the manual running order on a mat and go back to the automatic one
+router.delete("/mats/:matId/order", requireEventManager({ in: "lookup", key: "matId", via: "mat" }), async (req, res, next) => {
+  try {
+    const row = await RunService.clearMatQueueOrder(getParam(req.params.matId), { id: req.user!.id });
+    res.json(row);
+  } catch (err: any) { handle(res, next, err); }
+});
+
 // Persist the running order of the categories assigned to a mat
 router.put("/mats/:matId/category-order", requireEventManager({ in: "lookup", key: "matId", via: "mat" }), validate(ReorderMatDraws), async (req, res, next) => {
   try {
