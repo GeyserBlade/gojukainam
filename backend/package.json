@@ -4,6 +4,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
+    "//postinstall": "Prisma 7 dropped @prisma/client's automatic postinstall generate. Without this the production image installs the stock package, which exports no PrismaClient, and the server dies at import with a SyntaxError that names the export rather than the missing step.",
+    "postinstall": "prisma generate",
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
     "start": "node dist/server.js",

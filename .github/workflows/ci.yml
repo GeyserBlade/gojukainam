@@ -50,10 +50,13 @@ jobs:
           cache: npm
           cache-dependency-path: backend/package-lock.json
 
+      # Runs `postinstall`, which is what generates the Prisma client. There is
+      # deliberately no separate generate step: Prisma 7 removed the automatic
+      # postinstall from @prisma/client, and a CI that generated the client by
+      # hand would go on passing while production shipped an ungenerated one —
+      # which is exactly how the first Prisma 7 deploy failed. CI now installs
+      # the way the deployment does, so a broken postinstall fails here.
       - run: npm ci
-
-      - name: Generate Prisma client
-        run: npx prisma generate
 
       - name: Apply migrations
         # deploy, not dev: it applies the committed migration files exactly and
