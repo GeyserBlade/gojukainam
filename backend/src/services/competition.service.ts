@@ -607,7 +607,13 @@ export class CompetitionService {
       returned: categories.length,
       /** Nothing at all has been run yet — say so rather than reporting empty podiums. */
       anyResults: matched.some((r) => r.state.status !== "DRAWN"),
-      categories,
+      // BEFORE `categories`, and that ordering is load-bearing. This payload is
+      // pasted into a model's context and truncated there at a fixed character
+      // budget; a 41-category event fills it. With the tally last, the one
+      // field that answers "which club won" was the first thing cut, and the
+      // agent correctly reported that it could not rank clubs from what it
+      // could see. Summary before detail means truncation costs detail.
+      //
       // Tallied over the returned categories only, so it agrees with what is
       // shown rather than describing rows the caller cannot see.
       clubTally: [...tally.values()]
@@ -619,6 +625,7 @@ export class CompetitionService {
             b.bronze - a.bronze ||
             a.clubName.localeCompare(b.clubName),
         ),
+      categories,
     };
   }
   // -------------------------------------------------------------------------
