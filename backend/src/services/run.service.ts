@@ -9,7 +9,261 @@ import { EventService } from "./event.service.js";
 const boutKey = (phase: string, round: number, position: number) =>
   `${phase}:${round}:${position}`;
 
-const PHASE_ORDER: Record<string, number> = { MAIN: 0, REPECHAGE: 1 };
+export interface RunOrderableBout {
+  phase: string;
+  round: number;
+  position: number;
+}
+
+/**
+ * Which run-order group a bout belongs to within its own division: main
+ * bracket rounds up through the semi-finals (0), then the bronze/repechage
+ * bouts (1), then the final (2) — WKF running order, so the final is always
+ * a division's last bout and the medal ceremony can follow immediately
+ * after it. `size` is the draw's bracket size, needed only to know which
+ * MAIN round is the final; REPECHAGE is always group 1 regardless of size.
+ */
+function boutRunGroup(bout: RunOrderableBout, size: number): number {
+  if (bout.phase === "REPECHAGE") return 1;
+  return bout.round === Math.log2(size) ? 2 : 0;
+}
+
+/**
+ * Sorts one division's bouts into WKF running order. Single-division
+ * surfaces (and frontend/src/lib/callup.ts's call-up sheet, which
+ * reimplements this exact rule since the two projects share no code) use
+ * this directly, so the within-division running order is never hand-rolled
+ * twice. getBoard's queue below is a *merged, multi-division* board — see
+ * sortRunQueue, which reuses boutRunGroup for the same within-division rule
+ * but adds the cross-division grouping this function has no notion of.
+ */
+export function sortBoutsForRunning<T extends RunOrderableBout>(bouts: readonly T[], size: number): T[] {
+  return [...bouts].sort(
+    (a, b) => boutRunGroup(a, size) - boutRunGroup(b, size) || a.round - b.round || a.position - b.position,
+  );
+}
+
+export interface QueueSortableBout extends RunOrderableBout {
+  /** Uniquely identifies the division/bracket a bout belongs to. */
+  drawId: string;
+  size: number;
+  /** This division's place in its mat's running order — same field on
+   * every bout of the same draw. Divisions with no explicit order (or two
+   * divisions that happen to share one) sort after those that have one,
+   * broken by drawId — see sortRunQueue. */
+  drawMatOrder: number | null;
+  /** A manual per-bout override (drag-to-reorder in the Run tab). Read as a
+   * division-level rank rather than a per-bout position — see sortRunQueue. */
+  queueOrder: number | null;
+  /** Non-null while this exact bout's clock is running and undecided —
+   * Bout.startedAt, the mat-side scoreboard's "in progress" ping. Cleared
+   * once the *next* bout starts fresh, so this is only ever true for the
+   * single bout currently on the clock — see divisionStarted below for the
+   * signal that outlives it. */
+  startedAt: Date | string | null;
+  /** The two competitors, so the queue can keep one athlete off two
+   * consecutive bouts — see spaceOutRepeatFighters. Null only for a slot
+   * that is not filled, which getBoard never queues anyway. */
+  akaEntryId: string | null;
+  aoEntryId: string | null;
+  /** True once this division has at least one real, operator-recorded
+   * result (not an auto-resolved bye) — same value on every bout of the
+   * same draw, mirroring drawMatOrder. A division stays "mid-category" in
+   * the gap between one bout ending and the next being picked up, when no
+   * bout currently has startedAt set — this is what keeps it there. See
+   * sortRunQueue. */
+  divisionStarted: boolean;
+}
+
+/**
+ * Sorts a whole mat's *merged, multi-division* ready-queue.
+ *
+ * The ordering principle is **reality first, then the plan**: what is
+ * physically happening on the mat outranks anything decided earlier, and a
+ * coordinator's manual order outranks the default schedule. In key order:
+ *
+ * 1. Whichever division has a bout actually being fought right now (a ready
+ *    bout with startedAt set) floats to the top. If more than one division
+ *    somehow has a live bout at once, the one that started earliest —
+ *    furthest along — sorts first.
+ * 2. Then any division that has already recorded a real result
+ *    (divisionStarted), even though nothing of its is currently on the
+ *    clock — the gap between one bout ending and the operator picking up
+ *    the next. Without this tier, the moment a division's live bout is
+ *    decided it drops out of tier 1 (a decided bout is never "ready", so it
+ *    can't carry startedAt into this function at all) and visibly, wrongly
+ *    "finishes" a division that is still mid-category.
+ * 3. Then the coordinator's manual order, taken as a **division-level
+ *    rank**: a division's rank is the lowest queueOrder among its own
+ *    bouts. Its remaining bouts travel with it whether they were pinned or
+ *    not.
+ * 4. Then divisions that have neither started nor been ordered by hand run
+ *    where they are scheduled on the mat (drawMatOrder), with drawId as an
+ *    explicit tiebreak so two divisions that tie on (or both lack) a
+ *    drawMatOrder never interleave — most commonly both simply lacking one,
+ *    which `?? Number.MAX_SAFE_INTEGER` otherwise collapses into one large
+ *    tied group that would fall straight through to the next key with no
+ *    notion of which division a bout belongs to.
+ * 5. Only *within* a division: an explicit per-bout queueOrder first, then
+ *    WKF running order (boutRunGroup: main through the semis, then bronze,
+ *    then the final).
+ *
+ * **Why a manual pin ranks below what is live, and why it is division-level
+ * — both learned from a real tournament.** `queueOrder` used to be the
+ * outright first key, per bout. Two consequences, neither intended:
+ *
+ * - A drag can only ever stamp the bouts that are *ready at that moment*;
+ *   a later round's bouts do not exist in the queue yet and can never be
+ *   pinned. As the outright first key, per bout, every one of them then
+ *   sorted as MAX_SAFE_INTEGER — behind every pinned bout on the mat, no
+ *   matter what was live. One drag in the morning therefore mis-sorted a
+ *   mat for the rest of the day, invisibly, and nothing ever cleared it.
+ * - Ranking the pin above "this division is live" meant the screen argued
+ *   with the floor. A pin is a plan made earlier; a running clock is what
+ *   is happening.
+ *
+ * Replaying a real event's audit trail (see `scripts/replay-run-day.ts`)
+ * measured the cost: on the one mat that was dragged all day, the queue
+ * contradicted the floor for 469 of the day's minutes; the mat nobody
+ * dragged was correct for all nine hours.
+ *
+ * A fully completed division contributes no items here at all — getBoard
+ * only ever includes a bout once both fighters are known and no result is
+ * recorded yet, so there is nothing to specially sort "last": it is simply
+ * absent once every one of its bouts is decided.
+ */
+const fightersOf = (bout: QueueSortableBout) =>
+  [bout.akaEntryId, bout.aoEntryId].filter((id): id is string => !!id);
+
+/**
+ * Keeps one athlete off two bouts in a row.
+ *
+ * An athlete who has just won is immediately eligible for their next bout —
+ * the round they advanced into, or the repechage they dropped into — and
+ * the bracket order alone will happily call them straight back on. On the
+ * mat that means either fighting them with no recovery or stopping the
+ * tatami to wait, and a mat that stops is the expensive one: every other
+ * category behind it stops too.
+ *
+ * So when a bout's competitor also fought the bout before it, the next bout
+ * of the *same category* that doesn't involve them is pulled forward
+ * instead. Two constraints bound the search, and neither is negotiable:
+ *
+ * - **Same division** (`drawId`), so a category still runs to completion
+ *   before the next one starts. The sort above guarantees a division's
+ *   bouts are contiguous; only ever reordering *within* that block keeps
+ *   it that way.
+ * - **Same run group** (`boutRunGroup`), so the WKF order holds: main
+ *   bracket through the semis, then the repechage/bronze bouts, then the
+ *   final last. A final can never be pulled ahead of a bronze bout to give
+ *   somebody a rest.
+ *
+ * When nothing in the division qualifies the clash simply stands — a
+ * four-entry bracket with no bronze has semi, semi, final and nothing to
+ * put between the last semi and the final. Spacing is a preference; the
+ * bracket is not negotiable.
+ *
+ * `justFought` is whoever came off this mat in the bout that has only just
+ * finished, and is the signal that actually fires here. **Within any single
+ * queue an athlete can only ever appear once**: a bout is queued only while
+ * both fighters are known and no result is recorded, and an athlete reaches
+ * their next bout only by winning the previous one — which decides it and
+ * drops it out. So the scan over adjacent queue entries below is a guard
+ * that real getBoard input cannot trip; the live case is always "the bout
+ * they just won is gone, and the bout they advanced into is now at the
+ * head of the queue", which only `justFought` can see.
+ *
+ * Measured on a real tournament: 27 times in one day an athlete was called
+ * straight back on for the next bout on their mat, once only 22 seconds
+ * after the previous one finished.
+ *
+ * A bout already on the clock is never moved and never displaced — the mat
+ * has started it, and the queue does not get to argue.
+ */
+function spaceOutRepeatFighters<T extends QueueSortableBout>(
+  queue: T[],
+  justFought: readonly string[],
+): T[] {
+  const out = [...queue];
+  for (let i = 0; i < out.length; i++) {
+    const previous = i === 0 ? justFought : fightersOf(out[i - 1]!);
+    if (previous.length === 0) continue;
+    const clashes = (bout: T) => fightersOf(bout).some((f) => previous.includes(f));
+    if (!clashes(out[i]!)) continue;
+
+    const current = out[i]!;
+    if (current.startedAt) continue;
+    const group = boutRunGroup(current, current.size);
+    const swapIndex = out.findIndex(
+      (candidate, j) =>
+        j > i &&
+        !candidate.startedAt &&
+        candidate.drawId === current.drawId &&
+        boutRunGroup(candidate, candidate.size) === group &&
+        !clashes(candidate),
+    );
+    if (swapIndex === -1) continue;
+
+    // Move rather than swap: the displaced bout keeps its place relative to
+    // everything else, and gets re-checked on the next pass of this loop.
+    const [moved] = out.splice(swapIndex, 1);
+    out.splice(i, 0, moved!);
+  }
+  return out;
+}
+
+export function sortRunQueue<T extends QueueSortableBout>(
+  items: readonly T[],
+  justFought: readonly string[] = [],
+): T[] {
+  // Everything below is a property of a *division*, shared by every one of
+  // its bouts, so each is derived once here rather than per comparison.
+  const activeSinceByDraw = new Map<string, number>();
+  const startedDraws = new Set<string>();
+  const manualRankByDraw = new Map<string, number>();
+  for (const item of items) {
+    if (item.divisionStarted) startedDraws.add(item.drawId);
+    if (item.queueOrder !== null) {
+      const rank = manualRankByDraw.get(item.drawId);
+      if (rank === undefined || item.queueOrder < rank) manualRankByDraw.set(item.drawId, item.queueOrder);
+    }
+    if (!item.startedAt) continue;
+    const startedMs = new Date(item.startedAt).getTime();
+    const current = activeSinceByDraw.get(item.drawId);
+    if (current === undefined || startedMs < current) activeSinceByDraw.set(item.drawId, startedMs);
+  }
+  const manualRank = (drawId: string) => manualRankByDraw.get(drawId) ?? Number.MAX_SAFE_INTEGER;
+
+  const sorted = [...items].sort((a, b) => {
+    const aLive = activeSinceByDraw.has(a.drawId);
+    const bLive = activeSinceByDraw.has(b.drawId);
+    if (aLive !== bLive) return aLive ? -1 : 1;
+    if (aLive && bLive) {
+      const gap = activeSinceByDraw.get(a.drawId)! - activeSinceByDraw.get(b.drawId)!;
+      // Equal only for the same division, or two that started in the same
+      // millisecond — either way, fall through to the rules below.
+      if (gap !== 0) return gap;
+    }
+
+    const aStarted = startedDraws.has(a.drawId);
+    const bStarted = startedDraws.has(b.drawId);
+    if (aStarted !== bStarted) return aStarted ? -1 : 1;
+
+    const manual = manualRank(a.drawId) - manualRank(b.drawId);
+    if (manual !== 0) return manual;
+
+    return (
+      (a.drawMatOrder ?? Number.MAX_SAFE_INTEGER) - (b.drawMatOrder ?? Number.MAX_SAFE_INTEGER) ||
+      a.drawId.localeCompare(b.drawId) ||
+      (a.queueOrder ?? Number.MAX_SAFE_INTEGER) - (b.queueOrder ?? Number.MAX_SAFE_INTEGER) ||
+      boutRunGroup(a, a.size) - boutRunGroup(b, b.size) ||
+      a.round - b.round ||
+      a.position - b.position
+    );
+  });
+
+  return spaceOutRepeatFighters(sorted, justFought);
+}
 
 const SLOT_ENTRY_INCLUDE = {
   entry: {
@@ -44,14 +298,19 @@ interface QueueItem {
   phase: string;
   round: number;
   position: number;
+  size: number;
   category: string;
   gender: string;
   isKumite: boolean;
   aka: ReturnType<typeof summarise>;
   ao: ReturnType<typeof summarise>;
+  akaEntryId: string | null;
+  aoEntryId: string | null;
   matId: string | null;
   drawMatOrder: number | null;
   queueOrder: number | null;
+  startedAt: Date | null;
+  divisionStarted: boolean;
 }
 
 export class RunService {
@@ -71,6 +330,12 @@ export class RunService {
     ]);
 
     const items: QueueItem[] = [];
+    // Who came off each mat most recently, so the queue can avoid calling
+    // them straight back on. Bout has no "decided at", but startedAt is
+    // stamped when the mat's scoreboard opens the bout and survives the
+    // result, so the decided bout with the latest startedAt is the one that
+    // has just been fought.
+    const lastFinished = new Map<string | null, { at: number; fighters: string[] }>();
     for (const draw of draws) {
       const slotByPosition = new Map<number, string>();
       const entryById = new Map<string, ReturnType<typeof summarise>>();
@@ -85,10 +350,27 @@ export class RunService {
         if (b.winnerEntryId) storedWinners.set(boutKey(b.phase, b.round, b.position), b.winnerEntryId);
       }
 
+      for (const b of draw.bouts) {
+        if (!b.winnerEntryId || !b.startedAt) continue;
+        const mat = b.matId ?? draw.matId ?? null;
+        const at = b.startedAt.getTime();
+        const seen = lastFinished.get(mat);
+        if (!seen || at > seen.at) {
+          lastFinished.set(mat, {
+            at,
+            fighters: [b.akaEntryId, b.aoEntryId].filter((id): id is string => !!id),
+          });
+        }
+      }
+
       const state = computeDrawState(draw.size, slotByPosition, storedWinners);
       const category = draw.weightClass
         ? `${draw.division.name} · ${draw.weightClass.name}`
         : draw.division.name;
+      // DRAWN = no real result captured yet anywhere in this bracket — see
+      // computeDrawState's own status derivation, which this reuses rather
+      // than trusting the possibly-stale stored Draw.status column.
+      const divisionStarted = state.status !== "DRAWN";
 
       for (const cb of state.bouts) {
         // Ready = both fighters known and no result yet.
@@ -100,30 +382,28 @@ export class RunService {
           phase: cb.phase,
           round: cb.round,
           position: cb.position,
+          size: draw.size,
           category,
           gender: draw.division.gender,
           isKumite: draw.division.category === "KUMITE",
           aka: entryById.get(cb.akaEntryId)!,
           ao: entryById.get(cb.aoEntryId)!,
+          akaEntryId: cb.akaEntryId,
+          aoEntryId: cb.aoEntryId,
           matId: row?.matId ?? draw.matId ?? null,
           drawMatOrder: draw.matOrder ?? null,
           queueOrder: row?.queueOrder ?? null,
+          startedAt: row?.startedAt ?? null,
+          divisionStarted,
         });
       }
     }
 
-    // Manual per-bout queueOrder wins (nulls last); otherwise the natural
-    // category/bracket order stands.
-    const sortQueue = (a: QueueItem, b: QueueItem) =>
-      (a.queueOrder ?? Number.MAX_SAFE_INTEGER) - (b.queueOrder ?? Number.MAX_SAFE_INTEGER) ||
-      (a.drawMatOrder ?? Number.MAX_SAFE_INTEGER) - (b.drawMatOrder ?? Number.MAX_SAFE_INTEGER) ||
-      (PHASE_ORDER[a.phase] ?? 0) - (PHASE_ORDER[b.phase] ?? 0) ||
-      a.round - b.round ||
-      a.position - b.position ||
-      a.category.localeCompare(b.category);
-
     const byMat = (matId: string | null) =>
-      items.filter((i) => i.matId === matId).sort(sortQueue);
+      sortRunQueue(
+        items.filter((i) => i.matId === matId),
+        lastFinished.get(matId)?.fighters ?? [],
+      );
 
     return {
       mats: mats.map((m) => ({ id: m.id, name: m.name, order: m.order, queue: byMat(m.id) })),
@@ -445,6 +725,32 @@ export class RunService {
     ]);
 
     return { updatedCount: boutIds.length };
+  }
+
+  /**
+   * Drop the manual running order on a mat, returning it to the automatic
+   * one. The counterpart to reorderMatQueue: a drag is otherwise permanent
+   * and invisible, and a coordinator who ordered the queue at 08:00 has no
+   * way to say "never mind, follow the plan again" six hours later.
+   */
+  static async clearMatQueueOrder(matId: string, user: { id: string }) {
+    const mat = await prisma.mat.findUnique({ where: { id: matId } });
+    if (!mat) throw { status: 404, message: "Mat not found" };
+
+    const { count } = await prisma.bout.updateMany({
+      where: { queueOrder: { not: null }, draw: { eventId: mat.eventId, matId } },
+      data: { queueOrder: null },
+    });
+    await prisma.auditLog.create({
+      data: {
+        userId: user.id,
+        entityType: "Mat",
+        entityId: matId,
+        action: "CLEAR_QUEUE_ORDER",
+        diffJson: JSON.stringify({ clearedCount: count }),
+      },
+    });
+    return { updatedCount: count };
   }
 
   // ---- Check-in ----

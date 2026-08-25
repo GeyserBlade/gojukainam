@@ -34,6 +34,61 @@ export interface ComputedBout {
   isUserResult: boolean;
 }
 
+/**
+ * Where one athlete stands in one category, as a spectator needs it stated:
+ *
+ * - `NOT_DRAWN`  — entered and approved, but the category has no bracket yet
+ * - `READY`      — their next bout is fully paired and waiting on a mat
+ * - `WAITING`    — they are through, but their opponent is not decided yet
+ * - `REPECHAGE_HOPE` — knocked out, and still in with a WKF repechage chance
+ *   because the athlete who beat them can still reach the final
+ * - `OUT`        — finished, no medal
+ * - `MEDAL`      — finished on the podium
+ */
+export type AthleteRunStatus =
+  | "NOT_DRAWN"
+  | "READY"
+  | "WAITING"
+  | "REPECHAGE_HOPE"
+  | "OUT"
+  | "MEDAL";
+
+/** One bout from a single athlete's point of view — scores are theirs first. */
+export interface AthleteBout {
+  phase: "MAIN" | "REPECHAGE";
+  round: number;
+  /** Awarded by the bracket with nobody to fight; not a win they earned. */
+  bye: boolean;
+  /** null when the opponent is still being decided upstream. */
+  opponentName: string | null;
+  opponentClubName: string | null;
+  /** null while undecided. */
+  won: boolean | null;
+  scoreFor: number | null;
+  scoreAgainst: number | null;
+  outcome: string | null;
+  startedAt: Date | null;
+}
+
+/** One athlete's run through one category. */
+export interface AthleteRun {
+  /** null before the category has been drawn. */
+  drawId: string | null;
+  entryId: string;
+  /** Division, plus the weight class where the category uses one. */
+  category: string;
+  discipline: "KATA" | "KUMITE";
+  size: number;
+  drawStatus: "DRAWN" | "IN_PROGRESS" | "COMPLETED";
+  matId: string | null;
+  matName: string | null;
+  /** 1, 2 or 3 once the podium is decided. */
+  place: number | null;
+  status: AthleteRunStatus;
+  next: { phase: "MAIN" | "REPECHAGE"; round: number; opponentName: string | null } | null;
+  bouts: AthleteBout[];
+}
+
 interface DrawState {
   bouts: ComputedBout[];
   placements: {
@@ -80,7 +135,12 @@ function bracketSize(n: number): number {
   return size;
 }
 
-export type SeedableEntry = { id: string; seed: number | null };
+/**
+ * `clubId` is optional so that the pure seeding helpers stay callable from
+ * tests and callers that only care about ranks; when it is present the draw
+ * also keeps club-mates apart (see spreadUnseededByClub).
+ */
+export type SeedableEntry = { id: string; seed: number | null; clubId?: string | null };
 
 /**
  * Dense ranks 1..N over the seeded members of a set.
@@ -114,13 +174,137 @@ function seedTiers(count: number): [number, number][] {
 }
 
 /**
+ * First round in which two 1-based bracket positions can face each other:
+ * positions 1 and 2 meet in round 1, 1 and 3 in round 2, and so on. Infinity
+ * is unreachable for two distinct positions inside one bracket, but is the
+ * honest answer for a position compared with itself.
+ */
+function meetRound(p1: number, p2: number, size: number): number {
+  for (let r = 1; r <= Math.log2(size); r++) {
+    if (Math.floor((p1 - 1) / 2 ** r) === Math.floor((p2 - 1) / 2 ** r)) return r;
+  }
+  return Infinity;
+}
+
+/**
+ * What it costs to have two club-mates able to meet in round `r`. Steeply
+ * front-loaded: one round-1 club clash is worse than any number of clashes in
+ * later rounds, which is the actual complaint — two athletes travel to a
+ * championship and are knocked out by each other before they have fought
+ * anyone else. By the semi-final nobody minds.
+ */
+function clashCost(r: number, totalRounds: number): number {
+  if (!Number.isFinite(r)) return 0;
+  return 4 ** (totalRounds - r);
+}
+
+/** One competitor as the spreader sees it: where they sit, and who they are with. */
+type Placed = { position: number; clubId: string | null };
+
+/**
+ * Spread unseeded entries across the free bracket indices so that club-mates
+ * meet as late as possible.
+ *
+ * The seeded entries are already placed and must not move — seeding protection
+ * outranks club separation — so they take part only as fixed obstacles. What is
+ * free is which unseeded entry goes to which leftover index.
+ *
+ * Method: start from the uniform shuffle that this function used to return
+ * outright, then hill-climb by swapping pairs of unseeded entries whenever the
+ * swap strictly lowers the total clash cost. Fields are small (a large karate
+ * category is tens of athletes, not thousands), so a few O(n^2) passes with an
+ * O(n) delta per candidate swap is cheap, and the randomised start keeps the
+ * draw non-deterministic: among arrangements that are equally good, which one
+ * comes out is still luck.
+ *
+ * Nothing here can fail. When separation is impossible — one club filling the
+ * category, or every free index adjacent to a club-mate — the cost simply
+ * cannot be improved and the original shuffle stands.
+ *
+ * @param free     free k indices, with the bracket position each maps to
+ * @param unseeded unseeded entries, pre-shuffled; assigned to `free` in order
+ * @param fixed    already-placed seeded entries, as immovable obstacles
+ * @returns the unseeded entries reordered to align with `free`
+ */
+function spreadUnseededByClub<T extends { clubId?: string | null }>(
+  free: { position: number }[],
+  unseeded: T[],
+  fixed: Placed[],
+  size: number
+): T[] {
+  const totalRounds = Math.log2(size);
+  const assigned = [...unseeded];
+  if (assigned.length < 2) return assigned;
+
+  // Nothing to separate unless at least one club is represented twice across
+  // the whole field. Bailing here keeps the common small-category case free.
+  const counts = new Map<string, number>();
+  for (const c of [...assigned.map((e) => e.clubId ?? null), ...fixed.map((f) => f.clubId)]) {
+    if (c) counts.set(c, (counts.get(c) ?? 0) + 1);
+  }
+  if (![...counts.values()].some((n) => n > 1)) return assigned;
+
+  const pairCost = (a: Placed, b: Placed): number =>
+    a.clubId && a.clubId === b.clubId
+      ? clashCost(meetRound(a.position, b.position, size), totalRounds)
+      : 0;
+
+  /**
+   * Cost of the entry sitting at free index `i` against everything except the
+   * occupants of `skip`. Used for swap deltas, where the two swapped entries'
+   * mutual cost is invariant (same clubs, same pair of positions) and so must
+   * be excluded from both sides of the comparison rather than counted twice.
+   */
+  const costAt = (i: number, clubId: string | null, skip: number): number => {
+    const self: Placed = { position: free[i].position, clubId };
+    let total = 0;
+    for (const f of fixed) total += pairCost(self, f);
+    for (let j = 0; j < assigned.length; j++) {
+      if (j === i || j === skip) continue;
+      total += pairCost(self, { position: free[j].position, clubId: assigned[j].clubId ?? null });
+    }
+    return total;
+  };
+
+  // Passes are capped rather than run to a fixed point: hill-climbing on a
+  // field this small settles in one or two passes, and the cap means a
+  // pathological field can never spin here.
+  for (let pass = 0; pass < 8; pass++) {
+    let improved = false;
+    // Shuffled pair order so that a tie between two swaps is not always broken
+    // the same way, which would bias the draw towards low indices.
+    const pairs: [number, number][] = [];
+    for (let i = 0; i < assigned.length; i++)
+      for (let j = i + 1; j < assigned.length; j++) pairs.push([i, j]);
+
+    for (const [i, j] of shuffle(pairs)) {
+      const ci = assigned[i].clubId ?? null;
+      const cj = assigned[j].clubId ?? null;
+      if (ci === cj) continue; // swapping two club-mates changes nothing
+      const before = costAt(i, ci, j) + costAt(j, cj, i);
+      const after = costAt(i, cj, j) + costAt(j, ci, i);
+      if (after < before) {
+        [assigned[i], assigned[j]] = [assigned[j], assigned[i]];
+        improved = true;
+      }
+    }
+    if (!improved) break;
+  }
+
+  return assigned;
+}
+
+/**
  * Order entries for bracketPositions(): result[k] takes bracket position
  * bracketPositions(size)[k], i.e. it plays the bracket's "seed k+1" slot.
  *
  * Seeds 1 and 2 are placed exactly, which puts them in opposite halves so they
  * can only meet in the final. Seeds 3-4, 5-8, 9-16 ... are randomised within
  * their tier, per standard WKF/tennis practice: protected from each other, but
- * not predetermined. Unseeded entries fill whatever indices are left.
+ * not predetermined. Unseeded entries fill whatever indices are left, arranged
+ * so that club-mates meet as late as the bracket allows — see
+ * spreadUnseededByClub. Seeded placement always wins: a seed is never moved to
+ * avoid a club clash.
  *
  * Byes need no special handling: they are the unused tail indices, which
  * bracketPositions maps to the top seeds' round-1 partners, so the byes land on
@@ -130,8 +314,10 @@ export function seededOrder(
   entries: SeedableEntry[]
 ): { id: string; rank: number | null }[] {
   const n = entries.length;
+  const size = bracketSize(n);
   const ranks = denseSeedRanks(entries);
   const idByRank = new Map([...ranks].map(([id, r]) => [r, id]));
+  const clubById = new Map(entries.map((e) => [e.id, e.clubId ?? null]));
   const seededCount = ranks.size;
 
   const order = new Array<{ id: string; rank: number | null } | undefined>(n);
@@ -154,11 +340,30 @@ export function seededOrder(
     });
   }
 
-  const rest = shuffle(entries.filter((e) => !ranks.has(e.id)));
-  let next = 0;
+  // Unseeded entries fill whatever indices the seeds left. A plain shuffle
+  // would do, and is where this starts, but it regularly drew two athletes
+  // from the same club against each other in round 1 — so the shuffle is then
+  // rearranged to push club-mates apart. Where clubs are unknown (callers that
+  // pass only ids and seeds) this degrades to exactly the old shuffle.
+  const free: { k: number; position: number }[] = [];
+  const positions = bracketPositions(size);
+  for (let k = 0; k < n; k++) if (!used.has(k)) free.push({ k, position: positions[k] });
+
+  const fixed: Placed[] = [];
   for (let k = 0; k < n; k++) {
-    if (!used.has(k)) order[k] = { id: rest[next++].id, rank: null };
+    const seat = order[k];
+    if (seat) fixed.push({ position: positions[k], clubId: clubById.get(seat.id) ?? null });
   }
+
+  const rest = spreadUnseededByClub(
+    free,
+    shuffle(entries.filter((e) => !ranks.has(e.id))),
+    fixed,
+    size
+  );
+  free.forEach(({ k }, i) => {
+    order[k] = { id: rest[i].id, rank: null };
+  });
 
   return order as { id: string; rank: number | null }[];
 }
@@ -672,7 +877,9 @@ export class DrawService {
 
     const entries = await prisma.entry.findMany({
       where: eligibleEntryWhere(data.eventId, data.divisionId, weightClassId),
-      select: { id: true, seed: true },
+      // clubId is selected for the draw itself, not for display: seededOrder
+      // uses it to keep club-mates out of each other's early rounds.
+      select: { id: true, seed: true, clubId: true },
     });
     if (entries.length < 2)
       throw { status: 422, message: "At least 2 approved entries are needed for a draw" };
@@ -721,7 +928,7 @@ export class DrawService {
 
     const entries = await prisma.entry.findMany({
       where: eligibleEntryWhere(draw.eventId, draw.divisionId, draw.weightClassId),
-      select: { id: true, seed: true },
+      select: { id: true, seed: true, clubId: true },
     });
     if (entries.length < 2)
       throw { status: 422, message: "At least 2 approved entries are needed for a draw" };
@@ -1289,4 +1496,233 @@ export class DrawService {
 
     return { categories, clubTally };
   }
+  /**
+   * Every competitor in an event with the story of each category they entered:
+   * the bouts they have fought, what is next, and where they finished.
+   *
+   * This is the spectator's index — "find my daughter, tell me when she is on"
+   * — so it is organised by *person*, not by bracket. It is the same
+   * computation `eventResults` does (one pass over every draw, replayed
+   * through `computeDrawState`), turned inside out: instead of asking each
+   * bracket who its medallists are, it asks each athlete what happened to
+   * them.
+   *
+   * Kept here rather than in `public.service.ts` because it is bracket
+   * reasoning — repechage eligibility below is a WKF rule, not a display
+   * choice — and because it must stay next to the compute it depends on.
+   */
+  static async eventAthletes(eventId: string) {
+    const [draws, mats, approved] = await Promise.all([
+      prisma.draw.findMany({
+        where: { eventId },
+        include: {
+          division: true,
+          weightClass: true,
+          slots: { include: { entry: { include: ENTRY_INCLUDE } } },
+          bouts: true,
+        },
+        orderBy: [{ division: { category: "asc" } }, { division: { name: "asc" } }],
+      }),
+      prisma.mat.findMany({
+        where: { eventId },
+        select: { id: true, name: true },
+        orderBy: [{ order: "asc" }, { createdAt: "asc" }],
+      }),
+      // Approved entries as well as drawn ones. On the morning of a
+      // tournament nothing is drawn yet, which is exactly when parents are
+      // searching for their child — an index built only from bracket slots
+      // would tell every one of them "no such athlete".
+      prisma.entry.findMany({
+        where: { eventId, status: { in: [...ELIGIBLE_STATUSES] } },
+        include: { ...ENTRY_INCLUDE, division: true, weightClass: true },
+      }),
+    ]);
+    const matNameById = new Map(mats.map((m) => [m.id, m.name]));
+
+    type Person = {
+      id: string;
+      name: string;
+      clubId: string;
+      clubName: string;
+      runs: AthleteRun[];
+    };
+    const people = new Map<string, Person>();
+
+    for (const draw of draws) {
+      const slotByPosition = new Map<number, string>();
+      const entryById = new Map<string, (typeof draw.slots)[number]["entry"]>();
+      for (const s of draw.slots) {
+        slotByPosition.set(s.position, s.entryId);
+        entryById.set(s.entryId, s.entry);
+      }
+      const storedWinners = new Map<BoutKey, string>();
+      const boutRowByKey = new Map<string, (typeof draw.bouts)[number]>();
+      for (const b of draw.bouts) {
+        boutRowByKey.set(boutKey(b.phase, b.round, b.position), b);
+        if (b.winnerEntryId) storedWinners.set(boutKey(b.phase, b.round, b.position), b.winnerEntryId);
+      }
+
+      const state = computeDrawState(draw.size, slotByPosition, storedWinners);
+      const category = draw.weightClass
+        ? `${draw.division.name} · ${draw.weightClass.name}`
+        : draw.division.name;
+
+      const placeByEntry = new Map<string, number>();
+      if (state.placements.firstEntryId) placeByEntry.set(state.placements.firstEntryId, 1);
+      if (state.placements.secondEntryId) placeByEntry.set(state.placements.secondEntryId, 2);
+      for (const id of state.placements.thirdEntryIds) placeByEntry.set(id, 3);
+
+      // Who lost a main-bracket bout, and to whom. Both halves are needed for
+      // the repechage rule below: a beaten athlete is only still in with a
+      // chance while the athlete who beat them can still reach the final, and
+      // the one thing that ends that is a main-bracket loss of their own.
+      const lostMain = new Set<string>();
+      const beatenBy = new Map<string, string>();
+      for (const b of state.bouts) {
+        if (b.phase !== "MAIN" || !b.isUserResult || !b.winnerEntryId) continue;
+        const loser = b.winnerEntryId === b.akaEntryId ? b.aoEntryId : b.akaEntryId;
+        if (!loser) continue;
+        lostMain.add(loser);
+        beatenBy.set(loser, b.winnerEntryId);
+      }
+
+      for (const slot of draw.slots) {
+        const entry = slot.entry;
+        // One row per person, not per entry: an athlete in three categories is
+        // one search result with three runs under it.
+        const personId = entry.athlete?.id ?? entry.id;
+        const person =
+          people.get(personId) ??
+          {
+            id: personId,
+            name: entry.athlete
+              ? `${entry.athlete.firstName} ${entry.athlete.lastName}`
+              : entry.team?.name ?? "Unknown",
+            clubId: entry.club?.id ?? "",
+            clubName: entry.club?.name ?? "",
+            runs: [],
+          };
+        people.set(personId, person);
+
+        const mine = state.bouts.filter(
+          (b) => b.akaEntryId === slot.entryId || b.aoEntryId === slot.entryId
+        );
+
+        const bouts: AthleteBout[] = mine.map((b) => {
+          const isAka = b.akaEntryId === slot.entryId;
+          const opponentId = isAka ? b.aoEntryId : b.akaEntryId;
+          const opponent = opponentId ? entryById.get(opponentId) : null;
+          const row = boutRowByKey.get(boutKey(b.phase, b.round, b.position));
+          // A bye is a bout the bracket awarded without anyone fighting it —
+          // shown as such rather than as a win the athlete never earned.
+          const bye = !!b.winnerEntryId && !b.isUserResult;
+          return {
+            phase: b.phase,
+            round: b.round,
+            bye,
+            opponentName: opponent
+              ? opponent.athlete
+                ? `${opponent.athlete.firstName} ${opponent.athlete.lastName}`
+                : opponent.team?.name ?? "Unknown"
+              : null,
+            opponentClubName: opponent?.club?.name ?? null,
+            won: b.winnerEntryId ? b.winnerEntryId === slot.entryId : null,
+            // Scores are reported from this athlete's side, so "3 - 5" always
+            // reads as theirs first regardless of which corner they were in.
+            scoreFor: row ? (isAka ? row.akaScore : row.aoScore) : null,
+            scoreAgainst: row ? (isAka ? row.aoScore : row.akaScore) : null,
+            outcome: row?.outcome ?? null,
+            startedAt: row?.startedAt ?? null,
+          };
+        });
+
+        const next = mine.find((b) => !b.winnerEntryId) ?? null;
+        const place = placeByEntry.get(slot.entryId) ?? null;
+
+        // Beaten, no medal, no bout pending — but WKF repechage can still pull
+        // them back in if the athlete who knocked them out reaches the final.
+        const conqueror = beatenBy.get(slot.entryId);
+        const repechagePossible =
+          !place && !next && !!conqueror && !lostMain.has(conqueror) && state.status !== "COMPLETED";
+
+        const status: AthleteRunStatus = place
+          ? "MEDAL"
+          : next
+          ? next.akaEntryId && next.aoEntryId
+            ? "READY"
+            : "WAITING"
+          : repechagePossible
+          ? "REPECHAGE_HOPE"
+          : "OUT";
+
+        person.runs.push({
+          drawId: draw.id,
+          entryId: slot.entryId,
+          category,
+          discipline: draw.division.category as "KATA" | "KUMITE",
+          size: draw.size,
+          drawStatus: state.status,
+          matId: draw.matId,
+          matName: draw.matId ? matNameById.get(draw.matId) ?? null : null,
+          place,
+          status,
+          next: next
+            ? {
+                phase: next.phase,
+                round: next.round,
+                opponentName: (() => {
+                  const oppId = next.akaEntryId === slot.entryId ? next.aoEntryId : next.akaEntryId;
+                  const opp = oppId ? entryById.get(oppId) : null;
+                  if (!opp) return null;
+                  return opp.athlete
+                    ? `${opp.athlete.firstName} ${opp.athlete.lastName}`
+                    : opp.team?.name ?? "Unknown";
+                })(),
+              }
+            : null,
+          bouts,
+        });
+      }
+    }
+
+    // Entries whose category has not been drawn yet. They carry no bracket, so
+    // they get a run with nothing but a name and "not drawn yet" — enough to
+    // be found, and honest about there being nothing more to say.
+    const drawnEntryIds = new Set(draws.flatMap((d) => d.slots.map((s) => s.entryId)));
+    for (const entry of approved) {
+      if (drawnEntryIds.has(entry.id)) continue;
+      const personId = entry.athlete?.id ?? entry.id;
+      const person =
+        people.get(personId) ??
+        {
+          id: personId,
+          name: entry.athlete
+            ? `${entry.athlete.firstName} ${entry.athlete.lastName}`
+            : entry.team?.name ?? "Unknown",
+          clubId: entry.club?.id ?? "",
+          clubName: entry.club?.name ?? "",
+          runs: [],
+        };
+      people.set(personId, person);
+      person.runs.push({
+        drawId: null,
+        entryId: entry.id,
+        category: entry.weightClass
+          ? `${entry.division.name} · ${entry.weightClass.name}`
+          : entry.division.name,
+        discipline: entry.division.category as "KATA" | "KUMITE",
+        size: 0,
+        drawStatus: "DRAWN",
+        matId: null,
+        matName: null,
+        place: null,
+        status: "NOT_DRAWN",
+        next: null,
+        bouts: [],
+      });
+    }
+
+    return [...people.values()].sort((a, b) => a.name.localeCompare(b.name));
+  }
 }
+

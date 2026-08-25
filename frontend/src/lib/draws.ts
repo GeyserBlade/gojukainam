@@ -206,9 +206,28 @@ export async function deleteDraw(id: string): Promise<void> {
 // draw.placements.thirds already only fills in an entry once that side of
 // the repechage ladder is fully resolved (see DrawService.computeDrawState).
 
+export type BoutMedalType = "final" | "bronze" | null;
+
+/**
+ * "final" for the single MAIN bout in the bracket's last round, "bronze"
+ * for any REPECHAGE bout, null otherwise. Every repechage bout gets
+ * "bronze" here — including an earlier stage of a WKF double-repechage
+ * chain that only *feeds* the literal medal decider — matching the
+ * call-up sheet's own "Bronze 1"/"Bronze 1.2" labeling (lib/callup.ts):
+ * a coordinator or spectator sees "the bronze bracket" as one thing, not
+ * a medal bout plus some anonymous qualifiers ahead of it. Takes just the
+ * bracket size rather than a full DrawDetail so every bout-list surface
+ * (Run.tsx, MatOperator.tsx, the public board, the call-up sheet) can call
+ * it directly off whatever bout-shaped object it already has.
+ */
+export function boutMedalType(bout: Pick<DrawBout, "phase" | "round">, size: number): BoutMedalType {
+  if (bout.phase === "REPECHAGE") return "bronze";
+  return bout.round === Math.log2(size) ? "final" : null;
+}
+
 /** The single MAIN-bracket bout in the last round — its winner takes gold. */
 export function isFinalBout(draw: DrawDetail, bout: Pick<DrawBout, "phase" | "round">): boolean {
-  return bout.phase === "MAIN" && bout.round === Math.log2(draw.size);
+  return boutMedalType(bout, draw.size) === "final";
 }
 
 /**
@@ -235,4 +254,42 @@ export function finalBronzeMedalists(draw: DrawDetail): [DrawEntrySummary, DrawE
   const { thirds } = draw.placements;
   if (thirds.length < 2) return null;
   return [thirds[0], thirds[1]];
+}
+
+// ---------------------------------------------------------------------------
+// Running order: what sequence a division's bouts actually run in on the
+// mat, as opposed to the bracket's own round/position indexing.
+
+export interface RunOrderableBout {
+  phase: "MAIN" | "REPECHAGE";
+  round: number;
+  position: number;
+}
+
+/**
+ * Which run-order group a bout belongs to within its division: main
+ * bracket rounds through the semi-finals (0), then the bronze/repechage
+ * bouts (1), then the final (2). WKF running order — the final is always
+ * the division's last bout, so the medal ceremony can follow immediately
+ * after it, rather than the naive "MAIN round ascending (incl. the final),
+ * then REPECHAGE" order a plain round/position sort would produce.
+ */
+function boutRunGroup(bout: RunOrderableBout, size: number): number {
+  if (bout.phase === "REPECHAGE") return 1;
+  return bout.round === Math.log2(size) ? 2 : 0;
+}
+
+/**
+ * Sorts one division's bouts into WKF running order. Mirrors
+ * backend/src/services/run.service.ts's identical rule for the tatami
+ * operator's queue — reimplemented rather than imported since the frontend
+ * and backend are separate TypeScript projects with no shared package, but
+ * kept deliberately in lockstep so the coordinator's printed call-up order
+ * (lib/callup.ts) never disagrees with what the operator will actually be
+ * asked to call next.
+ */
+export function sortBoutsForRunning<T extends RunOrderableBout>(bouts: readonly T[], size: number): T[] {
+  return [...bouts].sort(
+    (a, b) => boutRunGroup(a, size) - boutRunGroup(b, size) || a.round - b.round || a.position - b.position,
+  );
 }

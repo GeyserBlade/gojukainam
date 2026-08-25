@@ -13,6 +13,10 @@ export interface RunQueueItem {
   phase: "MAIN" | "REPECHAGE"
   round: number
   position: number
+  /** Bracket size — needed to tell a final round from an ordinary one
+   * (lib/draws.ts's boutMedalType). Already present on the API payload;
+   * this was just missing from the type. */
+  size: number
   category: string
   gender: "Male" | "Female"
   isKumite: boolean
@@ -88,6 +92,11 @@ export async function setBoutMat(boutId: string, matId: string | null): Promise<
 // Persist the manual running order for a mat (boutIds in the desired order).
 export async function reorderMatQueue(matId: string, boutIds: string[]): Promise<void> {
   await api.put(`/run/mats/${matId}/order`, { boutIds })
+}
+
+// Drop a mat's manual running order and go back to the automatic one.
+export async function clearMatQueueOrder(matId: string): Promise<void> {
+  await api.delete(`/run/mats/${matId}/order`)
 }
 
 // ---------------------------------------------------------------------------

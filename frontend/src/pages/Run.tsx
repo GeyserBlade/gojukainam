@@ -5,6 +5,7 @@ import {
   Check,
   Flag,
   GripVertical,
+  ListRestart,
   MonitorPlay,
   MoveRight,
   Search,
@@ -42,10 +43,12 @@ import {
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { MedalBadge } from "@/components/MedalBadge"
 import { cn } from "@/lib/utils"
 import { EntryService, type Entry } from "@/lib/entries"
-import { setBoutScore, setBoutWinner } from "@/lib/draws"
+import { setBoutScore, setBoutWinner, boutMedalType } from "@/lib/draws"
 import {
+  clearMatQueueOrder,
   getRunBoard,
   reorderMatQueue,
   setBoutMat,
@@ -169,6 +172,12 @@ function RunTab({ eventId, canManage }: { eventId: string; canManage: boolean })
     onSettled: invalidate,
   })
 
+  const clearOrderMutation = useMutation({
+    mutationFn: (matId: string) => clearMatQueueOrder(matId),
+    onError: (e) => apiError(e, "Could not clear the running order"),
+    onSettled: invalidate,
+  })
+
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
 
   // Reorder a mat's queue: optimistic local move, then persist the new order.
@@ -216,6 +225,7 @@ function RunTab({ eventId, canManage }: { eventId: string; canManage: boolean })
 
   const BoutCard = ({ item, isNow }: { item: RunQueueItem; isNow: boolean }) => {
     const canAct = canManage && !!item.boutId
+    const medalType = boutMedalType(item, item.size)
     return (
       <Card className={cn(isNow && "border-primary ring-1 ring-primary/40")}>
         <CardContent className="space-y-3 p-3">
@@ -227,6 +237,7 @@ function RunTab({ eventId, canManage }: { eventId: string; canManage: boolean })
               <span className="truncate text-xs text-muted-foreground">
                 {item.category} · {roundLabel(item)}
               </span>
+              {medalType && <MedalBadge type={medalType} />}
             </div>
             <Badge
               variant="outline"
@@ -366,6 +377,26 @@ function RunTab({ eventId, canManage }: { eventId: string; canManage: boolean })
               {col.queue.length} {col.queue.length === 1 ? "bout" : "bouts"}
             </span>
           </div>
+          {/* A drag-to-reorder is otherwise invisible and permanent: the mat
+              keeps following an order someone set hours ago with no way to
+              tell, and no way back. */}
+          {canManage && col.id !== null && col.queue.some((i) => i.queueOrder !== null) ? (
+            <div className="flex items-center justify-between gap-2 rounded-md border border-dashed px-2 py-1">
+              <span className="text-[11px] leading-tight text-muted-foreground">
+                Manually ordered
+              </span>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 shrink-0 px-2 text-[11px]"
+                onClick={() => clearOrderMutation.mutate(col.id as string)}
+                disabled={clearOrderMutation.isPending}
+              >
+                <ListRestart className="mr-1 size-3" />
+                Clear
+              </Button>
+            </div>
+          ) : null}
           {col.queue.length === 0 ? (
             <Card>
               <CardContent className="py-8 text-center text-xs text-muted-foreground">

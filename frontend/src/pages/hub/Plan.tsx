@@ -35,6 +35,7 @@ import { createMat, deleteMat, updateMat } from "@/lib/run"
 import { updateEventTiming } from "@/lib/events"
 import {
   categoryTitle,
+  toScheduleCategory,
   createPlanBlock,
   deletePlanBlock,
   getPlanBoard,
@@ -86,16 +87,6 @@ function buildLanes(board: PlanBoardData | undefined): Lanes {
   }
   return lanes
 }
-
-const toScheduleCategory = (c: PlanCategory): ScheduleCategoryInput => ({
-  drawId: c.drawId!,
-  title: categoryTitle(c),
-  isKata: c.category === "KATA",
-  entryCount: c.entryCount,
-  drawEntryCount: c.drawEntryCount,
-  boutDurationSec: c.boutDurationSec,
-  bufferPct: c.bufferPct,
-})
 
 // ---------------------------------------------------------------------------
 

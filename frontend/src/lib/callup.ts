@@ -4,10 +4,12 @@
 // (scripts/test-callup.ts), same convention as lib/schedule.ts.
 //
 // Reuses lib/draws.ts's roundLabel (the same "Final"/"Semi-finals"/"Round of
-// N" naming already shown on the bracket view) rather than inventing a
-// second round-naming convention that could drift from what's on screen.
+// N" naming already shown on the bracket view) and sortBoutsForRunning (the
+// same WKF running-order rule the tatami operator's queue uses) rather than
+// inventing a second version of either that could drift from what's shown
+// elsewhere.
 
-import { roundLabel, type DrawBout, type DrawEntrySummary } from "./draws"
+import { roundLabel, sortBoutsForRunning, boutMedalType, type BoutMedalType, type DrawBout, type DrawEntrySummary } from "./draws"
 
 /** The subset of DrawDetail this module actually needs, kept narrow so a
  * test fixture doesn't have to fake slots/sync/placements it never reads.
@@ -40,11 +42,27 @@ export interface CallupBoutRow {
   boutId: string | null;
   aka: CallupSlot;
   ao: CallupSlot;
+  /** "final" for every row in finalRows, "bronze" for every row in
+   * bronzeRows, null for every row in mainRows — carried per-row (rather
+   * than left for the page to infer from which array a row came from) so
+   * pages/CallupPrint.tsx can badge a row directly off the row itself. */
+  medalType: BoutMedalType;
 }
 
+/**
+ * mainRows / bronzeRows / finalRows are three separate arrays (not one
+ * flat, pre-sorted list) so the printed page can give the final its own
+ * clearly separated section after the bronze bouts — the whole reason for
+ * splitting it out is that WKF running order plays the final *after*
+ * bronze, which a single "MAIN bracket, then bronze" layout would get
+ * backwards. finalRows is usually 0 or 1 rows (a bracket has exactly one
+ * final), kept as an array for symmetry with the other two rather than a
+ * single nullable row.
+ */
 export interface CallupSheet {
   mainRows: CallupBoutRow[];
   bronzeRows: CallupBoutRow[];
+  finalRows: CallupBoutRow[];
 }
 
 const knownSlot = (entry: DrawEntrySummary): CallupSlot => ({
@@ -89,80 +107,103 @@ function mainPredecessorLabel(size: number, totalRounds: number, round: number, 
   return feederRoundBouts === 1 ? label : `${label} — Bout ${feederPosition + 1}`;
 }
 
-/**
- * The main bracket, round 1 first, in fight order — one row per bout, aka
- * and ao side by side. Applies identically to kumite and kata: both run as
- * a real head-to-head bracket (kata just decides the winner by flags
- * instead of points), so both are seated and called up the same way. Byes
- * and other rows with nothing to call up are omitted — see
- * hasSomethingToCallUp.
- */
-export function mainBoutRows(draw: CallupDraw): CallupBoutRow[] {
-  const totalRounds = Math.log2(draw.size);
-  const mainBouts = draw.bouts
-    .filter((b) => b.phase === "MAIN")
-    .sort((a, b) => a.round - b.round || a.position - b.position);
-
-  const rows: CallupBoutRow[] = [];
-  for (const bout of mainBouts) {
-    if (!hasSomethingToCallUp(bout)) continue;
-    const roundBouts = boutsInRound(draw.size, bout.round);
-    const base = roundLabel(bout.round, totalRounds, draw.size);
-    const label = roundBouts === 1 ? base : `${base} — Bout ${bout.position + 1}`;
-    // Round 1 has no predecessor bout — an empty round-1 slot with no
-    // winner yet is not a shape this draw engine produces (a real bye
-    // auto-resolves immediately), but the fallback keeps this honest
-    // rather than mislabeling an edge case it can't actually explain.
-    const feederLabel = (side: 0 | 1) =>
-      bout.round === 1 ? "an earlier stage" : mainPredecessorLabel(draw.size, totalRounds, bout.round, bout.position, side);
-    rows.push({
-      label,
-      section: "MAIN",
-      boutId: bout.id,
-      aka: bout.aka ? knownSlot(bout.aka) : tbdSlot(feederLabel(0)),
-      ao: bout.ao ? knownSlot(bout.ao) : tbdSlot(feederLabel(1)),
-    });
-  }
-  return rows;
+/** Builds one MAIN-bracket row (used for both the pre-final rounds and the
+ * final itself — the two callers differ only in which round they filter
+ * for, not in how a row is built). */
+function buildMainRow(bout: DrawBout, size: number, totalRounds: number): CallupBoutRow {
+  const roundBouts = boutsInRound(size, bout.round);
+  const base = roundLabel(bout.round, totalRounds, size);
+  const label = roundBouts === 1 ? base : `${base} — Bout ${bout.position + 1}`;
+  // Round 1 has no predecessor bout — an empty round-1 slot with no winner
+  // yet is not a shape this draw engine produces (a real bye auto-resolves
+  // immediately), but the fallback keeps this honest rather than
+  // mislabeling an edge case it can't actually explain.
+  const feederLabel = (side: 0 | 1) =>
+    bout.round === 1 ? "an earlier stage" : mainPredecessorLabel(size, totalRounds, bout.round, bout.position, side);
+  return {
+    label,
+    section: "MAIN",
+    boutId: bout.id,
+    aka: bout.aka ? knownSlot(bout.aka) : tbdSlot(feederLabel(0)),
+    ao: bout.ao ? knownSlot(bout.ao) : tbdSlot(feederLabel(1)),
+    medalType: boutMedalType(bout, size),
+  };
 }
 
 /**
- * The repechage/bronze bracket, one labeled sub-bracket per side ("Bronze
- * 1", "Bronze 2"). A side can be a single bout or a whole chain of stages
- * (WKF double repechage) — a chain gets "Bronze 1.1", "Bronze 1.2", ... so
- * every stage is still individually identifiable.
+ * The main bracket up through the semi-finals — round 1 first, in fight
+ * order, one row per bout, aka and ao side by side. The final is
+ * deliberately excluded here; see finalBoutRows. Applies identically to
+ * kumite and kata: both run as a real head-to-head bracket (kata just
+ * decides the winner by flags instead of points), so both are seated and
+ * called up the same way. Byes and other rows with nothing to call up are
+ * omitted — see hasSomethingToCallUp.
+ */
+export function mainBoutRows(draw: CallupDraw): CallupBoutRow[] {
+  const totalRounds = Math.log2(draw.size);
+  return sortBoutsForRunning(draw.bouts, draw.size)
+    .filter((b) => boutMedalType(b, draw.size) === null)
+    .filter(hasSomethingToCallUp)
+    .map((bout) => buildMainRow(bout, draw.size, totalRounds));
+}
+
+/**
+ * The final — WKF running order plays it last in the division, after the
+ * bronze bouts, so the medal ceremony can follow immediately after. Kept
+ * as its own array (rather than folded into mainBoutRows) precisely so the
+ * page can print it as a clearly separate, final section.
+ */
+export function finalBoutRows(draw: CallupDraw): CallupBoutRow[] {
+  const totalRounds = Math.log2(draw.size);
+  return sortBoutsForRunning(draw.bouts, draw.size)
+    .filter((b) => boutMedalType(b, draw.size) === "final")
+    .filter(hasSomethingToCallUp)
+    .map((bout) => buildMainRow(bout, draw.size, totalRounds));
+}
+
+/**
+ * The repechage/bronze bouts, in WKF running order (every stage-1 bout
+ * before any stage-2 bout, across both sides — see
+ * lib/draws.ts's sortBoutsForRunning) but labeled per side: a side can be a
+ * single bout ("Bronze 1", "Bronze 2") or a whole chain of stages (WKF
+ * double repechage), which gets "Bronze 1.1", "Bronze 1.2", ... so every
+ * stage is still individually identifiable even though the printed order
+ * interleaves the two sides' stages rather than grouping a side's stages
+ * together.
  *
- * Unlike the main bracket, an empty repechage slot is *not* traced to an
- * exact predecessor bout: stage 1's `aka` in particular is sourced from
- * "whichever main-bracket round the eventual finalist happened to beat
- * someone in", a trace that only exists in DrawService's backend-only
- * finalist-path walk. Reproducing that here would mean duplicating real
- * backend logic for a print-only label, so a pending repechage slot reads
- * "TBD (result pending)" instead of a precise bout reference.
+ * An empty repechage slot is *not* traced to an exact predecessor bout:
+ * stage 1's `aka` in particular is sourced from "whichever main-bracket
+ * round the eventual finalist happened to beat someone in", a trace that
+ * only exists in DrawService's backend-only finalist-path walk.
+ * Reproducing that here would mean duplicating real backend logic for a
+ * print-only label, so a pending repechage slot reads "TBD (result
+ * pending)" instead of a precise bout reference.
  */
 export function bronzeBoutRows(draw: CallupDraw): CallupBoutRow[] {
-  const rows: CallupBoutRow[] = [];
-  for (const side of [0, 1] as const) {
-    const sideBouts = draw.bouts
-      .filter((b) => b.phase === "REPECHAGE" && b.position === side)
-      .sort((a, b) => a.round - b.round);
-    const multiStage = sideBouts.length > 1;
-    for (const bout of sideBouts) {
-      if (!hasSomethingToCallUp(bout)) continue;
-      const label = multiStage ? `Bronze ${side + 1}.${bout.round}` : `Bronze ${side + 1}`;
-      rows.push({
+  const stageCountBySide = new Map<number, number>();
+  for (const b of draw.bouts) {
+    if (b.phase !== "REPECHAGE") continue;
+    stageCountBySide.set(b.position, (stageCountBySide.get(b.position) ?? 0) + 1);
+  }
+
+  return sortBoutsForRunning(draw.bouts, draw.size)
+    .filter((b) => boutMedalType(b, draw.size) === "bronze")
+    .filter(hasSomethingToCallUp)
+    .map((bout) => {
+      const multiStage = (stageCountBySide.get(bout.position) ?? 0) > 1;
+      const label = multiStage ? `Bronze ${bout.position + 1}.${bout.round}` : `Bronze ${bout.position + 1}`;
+      return {
         label,
-        section: "BRONZE",
+        section: "BRONZE" as const,
         boutId: bout.id,
         aka: bout.aka ? knownSlot(bout.aka) : tbdSlot("result pending"),
         ao: bout.ao ? knownSlot(bout.ao) : tbdSlot("result pending"),
-      });
-    }
-  }
-  return rows;
+        medalType: "bronze" as const,
+      };
+    });
 }
 
 /** The one entry point pages/CallupPrint.tsx actually needs. */
 export function buildCallupSheet(draw: CallupDraw): CallupSheet {
-  return { mainRows: mainBoutRows(draw), bronzeRows: bronzeBoutRows(draw) };
+  return { mainRows: mainBoutRows(draw), bronzeRows: bronzeBoutRows(draw), finalRows: finalBoutRows(draw) };
 }

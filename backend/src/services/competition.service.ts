@@ -709,6 +709,12 @@ export class CompetitionService {
         approvedEntries: approvedByCat.get(catKey(draw.divisionId, draw.weightClassId)) ?? 0,
         status: resolved.state.status,
         locked: draw.locked,
+        /**
+         * Contested bouts with a captured result, INCLUDING repechage and
+         * bronze bouts. So this can exceed mainDrawBoutsExpected below, which
+         * counts the main bracket only — the two are not a progress fraction
+         * and must never be reported as one.
+         */
         boutsFought: contested.length,
         /**
          * Bouts that could be called to the mat right now: both competitors
@@ -719,11 +725,13 @@ export class CompetitionService {
          */
         boutsReady: bouts.filter((b) => !b.isUserResult && b.akaEntryId && b.aoEntryId).length,
         /**
-         * How many contested bouts the main bracket will produce in total:
-         * a single-elimination field of N settles in N-1. Excludes repechage,
-         * which depends on who loses to whom and cannot be known in advance.
+         * How many contested bouts the MAIN bracket produces in total: a
+         * single-elimination field of N settles in N-1. Named "expected"
+         * because it is arithmetic, not a count of anything that happened,
+         * and it excludes repechage — which depends on who loses to whom and
+         * cannot be known in advance.
          */
-        mainDrawBouts: Math.max(resolved.byEntry.size - 1, 0),
+        mainDrawBoutsExpected: Math.max(resolved.byEntry.size - 1, 0),
         mat: draw.mat ? { id: draw.mat.id, name: draw.mat.name } : null,
         matOrder: draw.matOrder,
         podium: resolved.podium,
@@ -756,7 +764,7 @@ export class CompetitionService {
           locked: false,
           boutsFought: null,
           boutsReady: null,
-          mainDrawBouts: null,
+          mainDrawBoutsExpected: null,
           mat: null,
           matOrder: null,
           podium: null,

@@ -28,6 +28,13 @@ const sizeFor = (n: number) => { let s = 2; while (s < n) s *= 2; return s; };
 const mkEntries = (n: number, seeds: (number | null)[] = []) =>
   Array.from({ length: n }, (_, i) => ({ id: `e${i}`, seed: seeds[i] ?? null }));
 
+/** n entries with clubs: clubs[i] is entry i's club, seeds[i] its seed. */
+const mkClubEntries = (clubs: string[], seeds: (number | null)[] = []) =>
+  clubs.map((clubId, i) => ({ id: `e${i}`, seed: seeds[i] ?? null, clubId }));
+
+/** `count` entries all from club `clubId`. */
+const fromClub = (count: number, clubId: string) => Array.from({ length: count }, () => clubId);
+
 /** Bracket position that the entry holding `rank` ended up in. */
 const posOfRank = (order: { rank: number | null }[], size: number, rank: number) =>
   bracketPositions(size)[order.findIndex((o) => o.rank === rank)];
@@ -156,6 +163,106 @@ function runSeedingChecks() {
     }
   }
   check("byes land on the top seeds (n=5,6,7 in a size-8 bracket)", byesOk);
+
+  // --- club separation ---------------------------------------------------
+  // The complaint this answers: two athletes from one club travel to a
+  // championship and knock each other out in round 1, before either has
+  // fought anybody else.
+
+  /** How many pairs of club-mates are drawn against each other in round 1. */
+  const round1ClubClashes = (clubs: string[], seeds: (number | null)[] = []) => {
+    const size = sizeFor(clubs.length);
+    const order = seededOrder(mkClubEntries(clubs, seeds));
+    const posById = new Map(order.map((o, k) => [o.id, bracketPositions(size)[k]]));
+    let clashes = 0;
+    for (let i = 0; i < clubs.length; i++)
+      for (let j = i + 1; j < clubs.length; j++)
+        if (clubs[i] === clubs[j] && meetRound(posById.get(`e${i}`)!, posById.get(`e${j}`)!, size) === 1)
+          clashes++;
+    return clashes;
+  };
+
+  const worstOver = (iters: number, clubs: string[], seeds: (number | null)[] = []) => {
+    let worst = 0;
+    for (let iter = 0; iter < iters; iter++)
+      worst = Math.max(worst, round1ClubClashes(clubs, seeds));
+    return worst;
+  };
+
+  // Every one of these fields can be drawn with no club clash at all, so
+  // "usually avoids it" is not good enough — the worst run must be zero.
+  const separable: [string, string[]][] = [
+    ["8 athletes, 2 clubs of 4", [...fromClub(4, "A"), ...fromClub(4, "B")]],
+    ["12 athletes, 3 clubs of 4", [...fromClub(4, "A"), ...fromClub(4, "B"), ...fromClub(4, "C")]],
+    ["16 athletes, 2 clubs of 8", [...fromClub(8, "A"), ...fromClub(8, "B")]],
+    ["5 athletes, clubs A,A,B,B,C", ["A", "A", "B", "B", "C"]],
+    ["32 athletes over 8 clubs", Array.from({ length: 32 }, (_, i) => `C${i % 8}`)],
+  ];
+  for (const [label, clubs] of separable)
+    check(`no round-1 club clash where one is avoidable — ${label}`, worstOver(60, clubs) === 0);
+
+  // Seeding outranks club separation: seeds keep their protected slots and the
+  // unseeded field is arranged around them.
+  const seededClubs = [...fromClub(4, "A"), ...fromClub(4, "B"), ...fromClub(4, "C"), ...fromClub(4, "D")];
+  const oneSeedPerClub = seededClubs.map((_, i) => (i % 4 === 0 ? i / 4 + 1 : null));
+  check(
+    "club separation still holds with seeds 1-4 placed",
+    worstOver(60, seededClubs, oneSeedPerClub) === 0
+  );
+  let seedsStillProtected = true;
+  for (let iter = 0; iter < 60; iter++) {
+    const order = seededOrder(mkClubEntries(seededClubs, oneSeedPerClub));
+    if (meetRound(posOfRank(order, 16, 1), posOfRank(order, 16, 2), 16) !== 4)
+      seedsStillProtected = false;
+  }
+  check("seeds 1 and 2 still only meet in the final once clubs are considered", seedsStillProtected);
+
+  // When separation is impossible the draw must still come out, at the best
+  // achievable count rather than erroring or looping.
+  check(
+    "a club too big to split settles at the unavoidable minimum (A x5, B x2)",
+    worstOver(60, [...fromClub(5, "A"), ...fromClub(2, "B")]) === 1
+  );
+  check(
+    "a single-club category still draws (6 of one club in a size-8 bracket)",
+    worstOver(60, fromClub(6, "A")) === 2
+  );
+
+  // Separating clubs must not quietly turn the draw into a fixed arrangement:
+  // among equally club-clean brackets, which one comes out is still luck.
+  const clubPositions = new Map<string, Set<number>>();
+  const round1Opponents = new Set<string>();
+  const pairClubs = ["A", "A", "B", "B", "C", "C", "D", "D"];
+  for (let iter = 0; iter < 200; iter++) {
+    const order = seededOrder(mkClubEntries(pairClubs));
+    const positions = order.map((o, k) => bracketPositions(8)[k]);
+    order.forEach((o, k) => {
+      if (!clubPositions.has(o.id)) clubPositions.set(o.id, new Set());
+      clubPositions.get(o.id)!.add(positions[k]);
+    });
+    const byPos = new Map(order.map((o, k) => [positions[k], o.id]));
+    const p = positions[order.findIndex((o) => o.id === "e0")];
+    round1Opponents.add(byPos.get(p % 2 === 1 ? p + 1 : p - 1)!);
+  }
+  check(
+    "club-separated draws stay random: every athlete still reaches every position",
+    [...clubPositions.values()].every((s) => s.size === 8),
+    [...clubPositions].map(([id, s]) => `${id}:${s.size}`)
+  );
+  check(
+    "and still draws every legal opponent (all 6 non-club-mates)",
+    round1Opponents.size === 6 && !round1Opponents.has("e1"),
+    [...round1Opponents].sort()
+  );
+
+  // Callers that pass no clubs at all (the pure seeding tests above, and any
+  // future caller selecting only id+seed) must behave exactly as before.
+  let clublessOk = true;
+  for (let iter = 0; iter < 100; iter++) {
+    const order = seededOrder(mkEntries(8, [1, 2]));
+    if (new Set(order.map((o) => o.id)).size !== 8) clublessOk = false;
+  }
+  check("entries without a club fall back to a plain shuffle", clublessOk);
 }
 
 async function main() {

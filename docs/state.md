@@ -14,11 +14,115 @@ order). `assertAgentClub` is now writes-only and `assertAgentClubRead` is its
 read counterpart — the write path is deliberately untouched, and was verified
 refused over HTTP with a federation key. See "In flight" below.
 
-Previously, 2026-08-21 — by Claude Code: **call-up sheets — kata now
+Previously, 2026-08-23 — by Claude Code: **the Run-queue
+ordering issue is diagnosed and confirmed against the production data of
+the 2026-08-22 tournament. It was never a bug in `sortRunQueue`. The
+cause is `Bout.queueOrder`: one drag-to-reorder on the Run tab
+permanently pins that mat's queue above every priority tier, and only
+for the bouts that were on screen at that moment.** Replaying the real
+day mat by mat: **Tatami 2 was dragged 17 times and its queue was wrong
+for 469 of the day's minutes; Tatami 1 was dragged once, at 14:48, and
+every one of its faults starts at 14:48:47; Tatami 3 was never dragged
+and was correct all day, 0 faults.** That is the user's "only the middle
+tatami" report, exactly. **Fix implemented and measured against that
+same data: reality now outranks the plan in `sortRunQueue` (live, then
+mid-category, then the manual pin), a pin is read as a division-level
+rank so a division's later bouts travel with it, and a mat's manual
+order can finally be cleared. Replaying the same day against the fixed
+code drops every ordering fault to zero.**
+
+Previously, 2026-08-22 — by Claude Code: **mid-investigation update
+narrowed the 3rd report to "only the middle tatami" — tested the fix on
+all three of the seeded event's real mats (one via live reproduction on
+each of Tatami 1 and Tatami 2, one confirmed via Tatami 3's own
+already-in-progress seed data, no manipulation needed) and found
+identical, correct behavior on every mat.** `sortRunQueue` has no
+mat-identity-aware logic at all — reconfirmed by reading, and now by
+three-for-three live testing. Still no code bug found; still no code
+shipped. Added a regression test locking in the exact "one mat, one
+complete + one mid-category + one untouched division" pattern the report
+described. See "In flight" below.
+
+Previously, same day — by Claude Code: **investigated a 3rd report
+that the Run-queue priority fix (PR #32 → PR #34) "still doesn't work on
+production" — found no code bug.** Re-verified PR #34's logic against two
+fresh local reproductions (single bout decided, and multiple bouts
+decided with one currently live), confirmed the frontend does zero
+re-sorting or caching that could mask a working fix, and confirmed
+`e93543d` (PR #34's merge) is HEAD of `origin/main`.
+
+Previously, same day — by Claude Code: **PR #32's "active division
+floats to top" fix didn't survive a bout actually being decided** — the
+priority signal was only ever "a ready bout has `startedAt` set," and a
+decided bout is never "ready" (so it drops out of the queue entirely,
+carrying its `startedAt` with it); if the division's *next* bout hadn't
+itself been started yet, the whole division fell back to `matOrder` mid-
+category. Fixed with a durable second signal — "this division has
+recorded at least one real result" — so it stays on top for the whole
+category, not just its currently-airing bout.
+
+Previously, same day — by Claude Code: **final and bronze bouts
+now carry a visible medal badge** everywhere a bout list is shown — gold
+"FINAL" pill, bronze/orange "BRONZE" pill, plus a grayscale-safe ★ marker
+on the printable call-up sheet. New `boutMedalType(bout, size)` in
+`lib/draws.ts`, backing a shared `MedalBadge` component.
+
+Previously, same day — by Claude Code: **a currently-active
+division could get stuck at the bottom of the coordinator's Run queue**
+
+Previously, same day — by Claude Code: **a currently-active
+division could get stuck at the bottom of the coordinator's Run queue**
+— `getBoard` never read `Bout.startedAt` at all, so a bout actually being
+fought had zero effect on ordering; whichever `matOrder` slot a division
+was pre-assigned kept it there even while live. Fixed: the division with
+a live (started, undecided) bout now floats to the top of its mat's
+queue, ahead of `matOrder`.
+
+Previously, same day — by Claude Code: **real regression in the
+
+Previously, same day — by Claude Code: **real regression in the
+run-order fix** — a mat's queue could interleave two divisions' bouts by
+phase (every division's non-finals, then every division's bronze bouts,
+then every division's finals) instead of running one division to
+completion before the next starts, whenever those divisions tied on (or
+both lacked) `Draw.matOrder`. Fixed by making division grouping itself an
+explicit sort key, extracted into a new testable `sortRunQueue`.
+
+Previously, same day — by Claude Code: **the final bout wasn't
+visible on the public spectator board** — not a regression in the run-order
+fix below (verified live: the operator's screen and the Run tab both
+already showed it correctly), but a pre-existing truncation on the
+spectator board's "Up next" preview that could silently swallow any deep
+queue item, including a division's final. Fixed by making the cut-off
+expandable instead of a dead end.
+
+Previously, same day — by Claude Code: **fixed the tatami
+operator's bout running order** — the final was being called right after
+the semis, ahead of the bronze (repechage) bouts. Correct WKF order is
+main bracket through the semis → bronze → final last, so the medal
+ceremony can follow immediately after the final. New shared
+`sortBoutsForRunning` helper (reimplemented identically on both frontend
+and backend, which share no code) now backs the operator's queue, the
+Run tab, and the call-up sheet, so none of the three can drift apart on
+what "next" means.
+
+Previously, same day — by Claude Code: **the public spectator
+board rebuilt for phones**. Four tabs (Results / Mats / Times / Clubs) with
+results on top, tatamis on a swipeable pager, one-line bout rows instead of
+cards, and an **athlete search** so a parent can find their own child and
+see when they are on or how they did. Three new public endpoints behind the
+same share token.
+
+Previously, same day — by Claude Code: **draws now keep club-mates
+apart**. Unseeded athletes are no longer placed by a plain shuffle: the
+shuffle is rearranged so two athletes from the same club meet as late in the
+bracket as it allows, instead of knocking each other out in round 1.
+
+Previously, same day — by Claude Code: **call-up sheets — kata now
 uses the same AKA/AO two-column table as kumite**, not a simplified
 single-column list. Kata divisions in this app are a real head-to-head
 bracket (won by flag majority, not points), so the coordinator's process
-is identical either way. See "In flight" below.
+is identical either way.
 
 Previously, same day — by Claude Code: **call-up sheets** — one
 printable page per division for the tatami coordinator gathering athletes
@@ -206,6 +310,1312 @@ grading history**. `Athlete` carries a current `beltId` and `lastGraded` and
 nothing else, so `gradedAt` is the date of the grade held *now* — "when did she
 get her green belt" is unanswerable unless green is current. The API and the
 tool descriptions both say so rather than implying a history exists.
+
+**Run-day replay harness, and a reproduction of the ordering symptom that
+does not involve `sortRunQueue` being wrong (2026-08-23).**
+
+Request: the user offered an extract of the production data from the
+tournament they ran on 2026-08-22 — the event behind the three
+"mid-category division doesn't stay on top" reports — and asked to
+simulate it, experience the ordering problems first-hand, and recommend
+improvements.
+
+**Three new scripts, no `src/` changes.**
+
+- `backend/scripts/export-event.ts` — read-only extract of one event:
+  every row that belongs to it, the referenced athletes/clubs/belts/katas,
+  **and the AuditLog rows for its entities**, which are the only record of
+  the *sequence* the day ran in (`Bout` has no `updatedAt`, and
+  `startedAt` is overwritten in place). Athlete/user personal data is
+  redacted by default (`--with-names` to keep it); billing and documents
+  are never exported. Prints the three counts that matter to this
+  investigation: bouts with a manual `queueOrder`, bouts with a per-bout
+  `matId` override, and how many of those contradict their own draw's mat.
+- `backend/scripts/import-event.ts` — loads an extract into the local
+  database, **preserving row ids**, so a bout id from a screenshot or a
+  `/api/run/board` response still matches. Refuses any non-localhost
+  `DATABASE_URL`. Idempotent with `--replace`.
+- `backend/scripts/replay-run-day.ts` — winds every bout back to the start
+  of the day, then re-applies each result in audit-trail order, calling
+  the real `RunService.getBoard` twice per step (bout on the clock, result
+  recorded) and inspecting each mat's queue for `LIVE_NOT_TOP`,
+  `MIDCATEGORY_DROPPED`, `SPLIT_DIVISION`, `TWO_LIVE_DIVISIONS`,
+  `PARTIAL_MANUAL_PINS`, `FULLY_MANUAL_QUEUE` and — from the result
+  timeline rather than the queue — `CATEGORY_INTERRUPTED`. Restores the
+  event exactly as found (verified, not assumed) unless
+  `--leave-replayed`.
+
+**The finding, confirmed against production.** The user supplied an
+extract of the 2026-08-22 tournament (`Goju Kai National Championships
+2026`, 520 bouts, 3 mats, 579 audit rows). Replaying it reproduces the
+reported symptom in full, and the correlation with drag-to-reorder is
+exact:
+
+| Mat | Drags | Pinned bouts | Faults | Queue wrong for |
+|-----|-------|--------------|--------|-----------------|
+| Tatami 1 | 1, at 14:48 | 8 | 18, **all from 14:48:47** | 52 min |
+| Tatami 2 | **17**, 08:04–15:40 | 58 | 158 | **469 min** (08:04–15:53) |
+| Tatami 3 | **0** | 0 | **0** | **none, all day** |
+
+Tatami 3 ran the same code on the same event for the same nine hours and
+never misbehaved. Tatami 1 was perfect until the minute it was dragged.
+This is not a mat-position bug and never was — it is `queueOrder`.
+
+Three properties combine:
+
+1. `queueOrder` is rule 1 of `sortRunQueue` and outranks the live and
+   mid-category tiers entirely — by design, but the design assumed a
+   deliberate, current override.
+2. `reorderMatQueue` stamps `queueOrder` **only on the bouts that were
+   ready at the moment of the drag**. Every bout that becomes ready later
+   — the whole rest of the bracket — has `queueOrder: null`, which sorts
+   as `MAX_SAFE_INTEGER`, i.e. behind all pinned bouts no matter what is
+   live.
+3. Nothing ever clears it. It deliberately survives recompute, there is no
+   "reset order" affordance, and the pinned state is invisible on screen
+   afterwards.
+
+That explains "only the middle tatami" completely: only the mat someone
+dragged is affected, so the symptom follows the mat, not a code path.
+
+There is also a feedback loop visible in the timestamps — three drags
+within 22 seconds at 08:29, two more seconds apart at 12:16 and 12:34.
+The coordinator was dragging *because* the order looked wrong, and every
+drag made the next one more necessary.
+
+**Why three previous investigations found nothing:**
+`seed-test-tournament.ts` produces zero `queueOrder` and zero per-bout
+`matId` values, so the local tournament could never exhibit this. The
+code was read correctly every time; the data was the part that differed.
+
+**Replay caveats, stated honestly.** 87 of 401 audit results could not be
+placed in sequence (the day also contains 35 `REGENERATE` events, which
+delete and rebuild bout rows, so older audit rows point at ids that no
+longer exist — and incidentally discard any `queueOrder` on them). Bout
+start times are modelled as 90s before their result, since `startedAt` is
+overwritten in place and never audited. Neither affects the conclusion:
+the fault windows line up with the drag timestamps to the second.
+
+### The fix (implemented 2026-08-23, on the user's go-ahead)
+
+**`sortRunQueue`'s key order is now reality first, then the plan**
+(`backend/src/services/run.service.ts`): live division → mid-category
+division → manual pin → mat schedule → within-division bracket order.
+Two changes, both needed:
+
+1. **A live or mid-category division now outranks a manual pin.** A pin
+   is a plan made earlier; a running clock is what is happening on the
+   floor. This deliberately inverts the previous rule — the test that
+   asserted "a manual queueOrder still beats an active division" was
+   rewritten to assert the opposite.
+2. **A pin is read as a division-level rank** — the lowest `queueOrder`
+   among a division's own bouts — instead of a per-bout position. This is
+   the structural half: *a drag can only ever stamp the bouts that are
+   ready at that moment*, and a later round's bouts do not exist in the
+   queue yet, so they can never be pinned. Under the old per-bout rule
+   they sorted as `MAX_SAFE_INTEGER`, behind every pinned bout on the
+   mat. Note this makes "stamp the whole queue on a drag" — the obvious
+   first idea, and one of the original recommendations — both impossible
+   and unnecessary.
+
+**Clearing a manual order** is now possible at all:
+`RunService.clearMatQueueOrder`, `DELETE /run/mats/:matId/order`
+(audited as `CLEAR_QUEUE_ORDER`), surfaced in the Run tab as a
+"Manually ordered / Clear" row that appears only on a mat that actually
+carries pins. Before this, a drag was permanent and invisible.
+
+**Measured against the same production day**: replaying all 401 recorded
+results through the fixed code drops `LIVE_NOT_TOP` (36 → 0),
+`MIDCATEGORY_DROPPED` (592 → 0) and `SPLIT_DIVISION` (214 → 0) to
+nothing. The only remaining output is informational — which mats carry a
+manual order at all.
+
+**Deliberately still not done**, from the original recommendation list:
+add `queueOrder` and per-bout `matId` values to
+`seed-test-tournament.ts`, so the seeded tournament stops being
+systematically easier than a real run day. Everything in this
+investigation was invisible locally for exactly that reason.
+
+### Category contiguity, confirmed (2026-08-23)
+
+Asked to confirm that a mat never calls a bout from another category while
+the current one still has bouts to run. It holds, and for a structural
+reason rather than by luck: **every sort key ahead of `drawId` is a
+property of the division**, identical across all its bouts (live,
+activeSince, divisionStarted, manualRank, drawMatOrder). So for any two
+divisions the whole key prefix either separates them or ties, and
+`drawId.localeCompare` then breaks the tie the same way for every pairing
+— there is no way for one division's bout to land between two of
+another's. `scripts/test-run-order.ts` now brute-forces this over 500
+randomised mats mixing live/started/partially-pinned/tied-matOrder
+fixtures (25 checks in the file).
+
+The real day agrees: replaying the audit trail, **all three mats ran every
+category start to finish** — 12, 13 and 16 category stretches for 12, 13
+and 16 distinct categories. No category was ever returned to.
+
+**The one way to break it, by design:** `Bout.matId` is a per-bout mat
+override, and `getBoard` buckets by `row?.matId ?? draw.matId`, so moving
+a *single bout* to another mat splits its division across two queues.
+Yesterday's event had zero such overrides. Note also that the queue
+*recommends* an order; nothing stops an operator scoring whatever bout
+they like, so this is a guarantee about the screen, not an interlock.
+
+### Put-through from the bracket, with a destructive-write warning (2026-08-23)
+
+Clicking a fighter in `BracketView` already set them as the winner and let
+the recompute advance them; clicking the current winner cleared the
+result. Neither warned, though both destroy stored detail. `handleSetWinner`
+in `frontend/src/pages/Draws.tsx` now confirms first whenever the bout
+already carries a result or a score, naming what will be erased, who goes
+through, and **how many later bouts were decided on the back of this one**
+(same downstream rule the backend uses in `assertOperatorMayWrite`) — those
+lose their result and score to the recompute. A bout with nothing recorded
+is still a single click, unchanged. The toggle-to-clear behaviour was kept
+(it is the only way to undo a result from the bracket) and now warns too.
+
+### Rest between bouts, and repechage before finals (2026-08-23)
+
+**Repechage before the final was already enforced** and needed no change:
+`boutRunGroup` puts main-bracket-through-semis at 0, REPECHAGE at 1 and
+the final at 2, and `sortRunQueue` applies it within each division. Now
+covered at the queue level too, not just in `sortBoutsForRunning`.
+
+**New: an athlete is not called straight back on.** `sortRunQueue` takes
+an optional `justFought` (the competitors from the bout that has only just
+finished on that mat) and runs a `spaceOutRepeatFighters` pass after the
+sort. When the queue's next bout involves someone who just fought, the next
+bout **of the same category** that does not involve them is pulled forward.
+`getBoard` supplies `justFought` per mat by finding the decided bout with
+the latest `startedAt` — `Bout` has no "decided at", but `startedAt` is
+stamped when the mat opens a bout and survives the result.
+
+Bounded by three rules, each with a test:
+- **same `drawId`** — categories still run to completion, so spacing can
+  never borrow a bout from another category;
+- **same `boutRunGroup`** — a final is never pulled ahead of a bronze bout
+  to give somebody a rest;
+- **never touches a bout on the clock** — the mat has started it.
+
+When the category has nothing else to run the clash stands: a four-entry
+bracket with no bronze is semi, semi, final, and there is nothing to put
+in between. Spacing is a preference; the bracket is not.
+
+**Worth knowing for anyone reading `spaceOutRepeatFighters`:** within any
+single queue an athlete can only ever appear once — a bout is queued only
+while undecided, and an athlete reaches their next bout only by winning
+the previous one, which decides it and drops it out. So the pass's scan
+over adjacent queue entries is a **guard that real `getBoard` input cannot
+trip**; `justFought` is the signal that actually fires. Confirmed against
+the production data — no snapshot in the whole day had two queued bouts
+sharing a competitor.
+
+**Measured on the real day**: the audit trail shows **27 times** an athlete
+fought two consecutive bouts on the same mat, once only **22 seconds**
+after the previous one finished — spread across all three mats, so this is
+independent of the `queueOrder` problem, and Tatami 3 (clean of every
+ordering fault) had 16 of them. Replaying the day, 3 of those were
+avoidable by reordering within the category at that moment and the fix
+removes all 3; the other 24 had nothing else ready in that category to run
+instead. Note this understates the benefit and cannot be made to state it
+properly: the replay follows the order the day *actually* ran, whereas a
+day run off the fixed queue would space bouts out proactively and reach
+fewer of those dead ends in the first place.
+
+### Verification (run 2026-08-23)
+
+`npx tsc --noEmit` clean in both projects, `npm run build` clean in
+`frontend`. Backend suites `test-run-order` (32 checks), `test-draws`, `test-plan`, `test-event-timing`,
+`test-bout-scoring`, `test-kata-results` and `test-athlete-belt` all
+pass; all eight frontend pure suites pass.
+
+**Both new UI flows were driven end to end in a browser** (2026-08-23).
+Note for future sessions: the long-running `tsx watch` dev servers on this
+machine were started with `ALLOW_DEV_AUTH=true` **in their shell
+environment**, not in `.env` — so header auth (`x-role: SUPERADMIN`, or
+`localStorage.role` from the frontend) already works, and grepping `.env`
+alone will wrongly suggest it does not.
+
+- *Run tab.* Pinned five bouts on the seeded event's Tatami 1 through the
+  real `reorderMatQueue`. The "Manually ordered / Clear" row appeared on
+  that mat and on neither other mat; clicking Clear removed it, re-sorted
+  the queue to the automatic order (Tatami 1's head went from the pinned
+  `KATA GIRLS 8-9` back to `KATA BOYS 7`), zeroed the pins in the database
+  and wrote `CLEAR_QUEUE_ORDER {"clearedCount":5}`.
+- *Bracket put-through.* On the production copy's `KUMITE GIRLS 12-13`,
+  clicked the loser of a 6–3 quarter-final. The dialog read: *"Put Athlete
+  181 (One Tribe) through? This bout already has a recorded score (6–3),
+  and continuing erases it, putting Athlete 181 (One Tribe) through to the
+  next round. 5 later bouts in this draw were decided on the back of this
+  one — their result and score will be cleared too."* Cancel left the row
+  byte-identical; confirming set the new winner, nulled the score and
+  outcome, advanced them into the next-round bout, and cleared the
+  downstream result the recompute invalidated.
+
+Both events' data was restored afterwards (the production copy re-imported
+from the extract; the seeded event's pins were ones this test created, and
+its two test audit rows removed).
+
+The production extract is imported into the local database as event
+`cmsw1qyrn0000qi01uu12u36v` and can be clicked through in the app; the
+replay restores it exactly as found on every run (verified, including the
+plan-board layout that replaying `PLAN_REORDER` rewrites).
+
+`npx tsc --noEmit` clean in `backend`. `scripts/test-run-order.ts` (19
+checks) and `scripts/test-draws.ts` pass unchanged — no `src/` code was
+touched. The harness was validated by a full round trip on the seeded
+event: export → import → replay → export, with bout counts, decided
+counts and the audit timeline identical before and after, and two
+consecutive replays producing byte-identical reports. Two defects in the
+harness itself were found and fixed this way (the replay leaked its own
+audit rows into the timeline it was measuring, and its restore path
+assumed bout ids survive a bracket recompute — they do not).
+
+
+**Mid-investigation update: "only the middle tatami" — tested all three
+real mats, found no mat-specific bug (2026-08-22).**
+
+Request: a critical update arriving mid-investigation on the 3rd report
+above — the user narrowed it to "looks like it only does this on the
+middle tatami — not the others." Asked to (1) request the middle mat's
+raw queue from the user regardless, (2) in parallel construct a local
+repro matching "one mat, one complete + one in-progress + one untouched
+division," (3) fix if it reproduces, otherwise hand back the same
+diagnostic request, (4) add a unit test for the exact pattern either way.
+
+**Code read first: nothing mat-identity-aware exists.** `sortRunQueue`
+takes a flat array already filtered to one mat by its caller
+(`getBoard`'s `byMat(matId)`); it never reads `matId`, `Mat.order`, or
+anything about which mat a bout is on — only `drawMatOrder` (a division's
+position *within* whatever mat it's on) and `drawId`. There is no
+structural way for "which mat" to change the sort's behavior; each mat's
+queue is computed as a fully independent call.
+
+**Reproduced live on all three of the seeded event's real mats, not just
+one.** Two required deliberate SQL manipulation (decide one bout, with a
+live `startedAt`, in a division sitting behind others on that mat's own
+`matOrder`), one didn't need any:
+- **Tatami 1** (`matOrder`s 0–15, an *outer* mat): decided a bout in
+  `KATA BOYS 12` (`matOrder` 5) — floated to the top ahead of `KATA BOYS
+  7`(0) and `KATA GIRLS 8-9`(2), identical to the Tatami-2 behavior from
+  the previous investigation pass.
+- **Tatami 2** (`matOrder`s 0–15, the *middle* mat — the one actually
+  named in the report): repeated the earlier `KATA GIRLS 12-13` (`matOrder`
+  8) reproduction from scratch. Same correct result.
+- **Tatami 3** (`matOrder`s 0–13, the *other outer* mat): needed no
+  manipulation at all — the seed data already has `KUMITE FEMALE CADET`
+  (`matOrder` 11) and `KUMITE MALE CADET` O55kg/U55kg (`matOrder` 12–13)
+  genuinely `IN_PROGRESS`, sitting *behind* several untouched divisions on
+  paper. The live board already shows all three correctly floated to
+  positions 0–4, ahead of every `matOrder` 0–10 division — a real,
+  pre-existing, un-manipulated confirmation of the exact fix, sitting
+  right there in the seed data the whole time.
+
+All test mutations reverted immediately after each check; confirmed via a
+follow-up query that all three touched rows (`cmsnmfkhk...`,
+`cmsnmfkja...`, `cmsnmfkky...` — one per mat) matched their original
+`winnerEntryId`/`startedAt` values exactly.
+
+**Working theory, now stronger than before:** "only the middle tatami"
+is very likely a description of the *user's specific tournament's current
+state* on production, not a property of the code. If only their middle
+mat currently has a division mid-flight (the others either haven't been
+picked up by an operator yet, or are already fully finished), then it's
+the *only* mat where any reordering — correct or buggy — would be visible
+to a human glancing at the screen; the other two mats would "look right"
+purely because their divisions are all in the same tier regardless of
+which code is running. This doesn't rule out a still-undeployed fix
+(Railway's actual deploy status remains the one thing unverifiable from
+here), but it does rule out a mat-position-specific code defect.
+
+**No code changed beyond the new test.** Added one regression case (see
+Verification) locking in the exact reported pattern; did not touch
+`sortRunQueue`/`getBoard` themselves, since nothing found here contradicts
+their current behavior.
+
+### Verification (run 2026-08-22)
+
+`npx tsc --noEmit` clean in both `backend` and `frontend`. Full regression
+sweep clean on both sides.
+
+Added one new case to `backend/scripts/test-run-order.ts`: one mat with a
+fully-decided division (modeled correctly as contributing *no* input rows
+at all — the same as `getBoard` never handing `sortRunQueue` a completed
+division's bouts in the first place), one mid-category division with a
+live bout plus one still-pending bout of its own, and one untouched
+division scheduled ahead of it on paper. Deliberately built the fixture
+to be bracket-realistic (a round-2 bout is only "ready" once its own
+round-1 feeders are decided, so the still-pending bout is a *different*,
+non-feeding round-1 position, not one that could coexist with a ready
+round-2 sibling in real data) rather than a shape `computeDrawState` could
+never actually produce. 19 checks in the file now, all passing.
+
+**Still waiting on the user for:** if this genuinely persists on
+production after confirming a hard refresh and a fresh deploy, the raw
+`/api/run/board` response (via DevTools → Network tab) for the specific
+event and mat in question — now doubly useful, since if the *API itself*
+still returns the wrong order for their middle mat specifically, that
+would be the first real evidence of a scenario the three live
+reproductions above didn't cover, rather than a deploy-timing question.
+
+**3rd report on the same issue: "PR #34 didn't fix it, still no change on
+production" — investigated, found no code bug, waiting on diagnostic
+info (2026-08-22).**
+
+Request: after PR #34 merged, the user reported no change in behavior on
+production — the third report on this exact "mid-category division
+doesn't stay on top" issue (PR #32 → PR #34 → this). Explicitly asked to
+rule out the trivial stuff (deploy status, frontend caching/re-sort)
+before re-touching the fix logic, and not to ship speculative code
+changes if the bug can't be reproduced.
+
+**Deploy status, confirmed.** `git log origin/main -5 --oneline` has
+`e93543d` (PR #34's merge commit) at HEAD, with `783fcd0` (the fix
+itself) directly beneath it. `railway.json` uses Nixpacks with the
+backend's own `build`/`start` scripts (`tsc` then `node dist/server.js`)
+— Railway builds fresh from whatever's pushed, it does not run a stale
+local `dist/` (which is gitignored, never pushed, and irrelevant here
+regardless). I cannot see Railway's own deploy log or dashboard from
+here, so I cannot independently confirm *when* Railway last deployed or
+whether that deploy succeeded — this is the one link in the chain I
+can't verify myself.
+
+**Frontend, confirmed clean.** `pages/Run.tsx` calls
+`getRunBoard(eventId)` (`lib/run.ts`) which is a bare `api.get("/run/board",
+...); return res.data` — no `.sort(` anywhere in `Run.tsx`, no
+post-processing in `getRunBoard`. The global `QueryClient` has a 30s
+`staleTime`, but both `winnerMutation` and `kikenMutation` call
+`invalidate()` on success, forcing an immediate refetch regardless — a
+coordinator who just scored a bout gets the fresh order on the next
+render, not up to 30s later. `divisionStarted` (PR #34's new field) is
+consumed entirely inside `sortRunQueue` server-side; the frontend never
+needs to know it exists, so this is conclusively a backend-only question
+— confirms the report's own hypothesis #5.
+
+**Fix logic, re-verified fresh, twice.** Reproduced two variants live
+against the real seeded event (not just the original PR #34 fixture):
+(1) the original single-bout-decided case, re-run from scratch — the
+division correctly floated into the mid-category tier; (2) a closer match
+to "we are halfway through a category" — two of a fresh division's four
+round-1 bouts decided (one with a live `startedAt`, one without, matching
+"some done, one in progress, some still to come") — the division's 3
+remaining bouts (2 round-1 stragglers + the newly-ready round-2) correctly
+sat together near the top. Reverted both test mutations immediately after
+each check, confirmed via a follow-up query that the exact rows matched
+their original values. Also directly re-read `computeDrawState`'s bye
+handling (hypothesis #4): a bye's `isUserResult` is never set to `true`
+(only the `stored && (stored === aka || stored === ao)` branch — a real
+two-fighter decision — sets it), so `hasUserResults`/`state.status` cannot
+be tricked into "IN_PROGRESS" by byes alone; a bye-only division stays
+correctly un-prioritized. No duplicate `getBoard`/`sortRunQueue`
+implementation exists anywhere else in the codebase, and no caching layer
+sits between `/run/board`'s route handler and `RunService.getBoard`.
+
+**Conclusion: no code bug found.** Everything independently checkable
+from this end — the merged commit, the frontend, and the sort logic
+itself under two different reproductions — checks out correct. The
+remaining gap is exactly what's described as unverifiable in this
+environment: whether Railway has actually deployed `e93543d`, and/or
+whether the user's exact real-world scenario has a property the local
+reproductions haven't captured (e.g., what they mean by "category" —
+if a division has multiple weight classes, each is a *separate* `Draw`
+with its own `drawId`, and the fix operates strictly per-draw; a
+still-`DRAWN` sibling weight class would not float just because another
+weight class of the "same" division is mid-flight, which may or may not
+match what the user pictures as "the same category"). **No code changed
+this pass** — shipping another speculative fix on a third unreproduced
+report would be guessing, not debugging.
+
+**Requested next step, needs the user:** ask them to (1) hard-refresh the
+Run tab and confirm the page itself is fresh (rule out a stuck service
+worker / browser cache, distinct from the API-level staleTime already
+ruled out above); (2) open browser DevTools → Network tab → reload the
+Run tab → find the `run/board?eventId=...` request → copy the full raw
+JSON response and share it, along with which category/mat they're
+looking at and roughly how many bouts into it they are. That pinpoints
+in one step whether the *API* is already returning the wrong order
+(→ genuine remaining code/deploy gap) or the API is right and something
+else entirely is wrong (→ a different bug than any of the three fixes
+so far have addressed).
+
+**Follow-up on PR #32: a mid-category division kept dropping out of
+priority (2026-08-22).**
+
+Request: reported as "we are now halfway through a category... the next
+bout shows at top, but the bouts to follow in that tatami for that same
+category are placed right at the end of all other categories." PR #32's
+`startedAt`-based priority worked for exactly one bout at a time, then
+stopped working the moment that bout was actually decided.
+
+**Root cause, confirmed by reproducing before touching any code.** Picked
+a real ready round-1 bout on `KATA GIRLS 12-13` (a division sitting
+mid-pack in Tatami 2's `matOrder`) and recorded a real winner for it via
+direct SQL. Reloading `/api/run/board` showed the division's now-ready
+round-2 bouts sitting back at its plain `matOrder` position, not
+prioritized at all — reproducing the report exactly. The mechanism:
+`getBoard`'s per-bout filter (`if (!cb.akaEntryId || !cb.aoEntryId ||
+cb.winnerEntryId) continue`) means a decided bout is *never* included in
+the array `sortRunQueue` sees — it carries its own `startedAt` value out
+of the queue's view entirely the instant it's scored. PR #32's whole
+priority tier lived on scanning that array for a live `startedAt`, so a
+division that just had its one live bout decided has nothing left to key
+on — if its next bout hasn't itself been explicitly started yet (the
+operator hasn't opened the scoreboard for it), the division has zero
+presence in the "active" computation and falls straight back to
+`drawMatOrder`. Neither `drawMatOrder` nor `startedAt` was wrong on its
+own; the bug was relying on a signal (a bout literally on the clock) that
+is inherently gap-y between bouts, for a property (this whole category is
+mid-flight) that needs to be continuous.
+
+**Fix.** `getBoard` already computes `computeDrawState`'s `state.status`
+(`DRAWN` / `IN_PROGRESS` / `COMPLETED`) fresh, once per draw, for reasons
+unrelated to ordering — reused it here rather than trusting the *stored*
+`Draw.status` column, which can lag behind (confirmed live: my raw-SQL
+test bout left the stored column reading `DRAWN` even after recording a
+result, since only the app's own `setBoutWinner` path — not a direct SQL
+write — triggers the recompute that updates it; `computeDrawState` has no
+such staleness since it always reads the bouts fresh). `state.status !==
+"DRAWN"` is exactly "this division has at least one real, operator-
+recorded result" (`computeDrawState`'s own `hasUserResults`, not counting
+auto-resolved byes) — attached to every `QueueItem` of that draw as
+`divisionStarted`, the same one-value-per-draw pattern already used for
+`drawMatOrder`.
+
+`sortRunQueue` now has three tiers instead of two: (0) a division with a
+bout live *right now* (`startedAt` set, unchanged from PR #32, ordered by
+earliest start among ties) — (1) a division with `divisionStarted` true
+but nothing live this instant — the exact gap PR #32 missed — falling
+back to `drawMatOrder`/`drawId` among its own peers for lack of a
+stronger signal — (2) untouched divisions, `drawMatOrder`/`drawId` as
+before. A live bout (tier 0) still outranks a merely-started one (tier 1)
+when both exist at once — a bout actually being fought is a stronger
+signal than "started at some point."
+
+One second-order effect worth flagging, not a bug: this fix changed the
+*baseline* running order of the seeded event beyond just the reproduction
+case — several other divisions on Tatami 2 already had real (non-bye)
+results recorded in the seed data itself and are now correctly promoted
+ahead of divisions that only *look* further along because of resolved
+byes. That's the fix doing its job; the previous "queue order" for those
+divisions was already quietly wrong in the same way, just never reported
+because nobody happened to notice a bye-heavy division sitting ahead of a
+genuinely-fought one.
+
+Files: `backend/src/services/run.service.ts`,
+`backend/scripts/test-run-order.ts`. No frontend changes — the frontend
+never re-sorts `mat.queue`, so this one backend fix covers the Run tab,
+the operator's mat screen, and the public spectator board alike, same as
+PR #32.
+
+### Verification (run 2026-08-22)
+
+`npx tsc --noEmit` clean in both `backend` and `frontend`. Full regression
+sweep clean on both sides.
+
+**Reproduced the bug live against the real seeded event before writing
+any fix, then re-verified the fix against the same reproduction**: marked
+a real ready bout on `KATA GIRLS 12-13` (Tatami 2, `matOrder` 8) as
+decided via direct SQL; confirmed pre-fix that its now-ready round-2
+bouts sat at their plain `matOrder` position (not prioritized). Applied
+the fix; confirmed the same division's remaining bouts now sit in the
+"started" tier, correctly ordered by `matOrder` among the other genuinely
+in-progress divisions on that mat, strictly ahead of every untouched
+division. Reverted the test bout to its original undecided state
+immediately after and confirmed via a fresh query that the specific row
+matched its pre-test values exactly — the queue's *overall* order shifted
+from what it looked like earlier in this session, but that's the second-
+order effect described above (other seed divisions correctly promoted),
+not leftover test contamination.
+
+Directly simulated the exact pre-fix comparator against the new
+regression's fixture in a standalone script to confirm it actually
+reproduces the reported failure (`a-r1,b-final` — division B stuck behind
+an untouched division A) before confirming the new comparator produces
+the correct order (`b-final,a-r1`).
+
+Extended `backend/scripts/test-run-order.ts` with three new cases: a
+division mid-category (one bout decided, next bout ready but not itself
+started) still floats entirely ahead of an untouched division; a bout
+that's actually live right now still outranks a merely-started division
+when both are present; two merely-started divisions with nothing
+currently live fall back to `matOrder` between themselves, same as
+before. All 18 checks in the file pass, including the PR #32 tests
+re-confirmed unaffected (a manual `queueOrder` still overrides everything,
+including the new mid-category tier).
+
+**Medal badges on final/bronze bouts, everywhere a bout list is shown
+(2026-08-22).**
+
+Request: a UX enhancement, not a bug fix — badge final bouts (gold) and
+bronze bouts (bronze/orange) wherever bouts are listed sequentially, so
+they stand out from ordinary bracket bouts at a glance.
+
+**New shared logic.** `lib/draws.ts` gained `boutMedalType(bout, size):
+"final" | "bronze" | null` — "final" for the single MAIN bout in the
+bracket's last round, "bronze" for *any* REPECHAGE bout regardless of
+stage (matching the call-up sheet's own "Bronze 1"/"Bronze 1.2"
+convention: a coordinator sees "the bronze bracket" as one thing, not a
+medal bout plus anonymous qualifiers ahead of it). `isFinalBout` now
+delegates to it (`boutMedalType(bout, draw.size) === "final"`) rather than
+carrying its own copy of the `round === log2(size)` check — a small DRY
+cleanup, no behavior change, confirmed by a new test asserting the two
+functions agree across every size/round/phase combination.
+
+**New shared component.** `components/MedalBadge.tsx` wraps the existing
+shadcn `Badge`, reusing `components/scoreboard/PodiumBanner.tsx`'s exact
+gold (`bg-yellow-400 text-yellow-950`) and bronze (`bg-orange-600
+text-orange-50`) colors — so "this bout matters" looks the same before
+it's fought as it does on the podium afterward, rather than inventing a
+third color scheme.
+
+**Surfaces updated** (all additive — the existing round label, "Round 2"
+or "Repechage", is untouched, the badge sits next to it):
+- `pages/Run.tsx` — the coordinator's Run tab, `BoutCard`.
+- `pages/MatOperator.tsx` — the operator's mat screen, both the current
+  bout card and the "coming up" list.
+- `components/public/MatsTab.tsx` — the public spectator board's mat
+  queues, both the "On now" card and each queue row.
+- `components/public/AthleteSheet.tsx` — found while checking "any other
+  surface where bouts are shown in a list": a spectator's per-athlete bout
+  history. Not named in the original ask but exactly the same pattern, so
+  updated for consistency rather than left inconsistent.
+- `pages/CallupPrint.tsx` / `lib/callup.ts` — see below.
+
+**Checked and confirmed skip:** `components/draws/BracketView.tsx`
+already labels the final and the bronze bracket at the *column/section*
+level (`roundLabel` literally prints "Final" as a column heading; a
+"Repechage — Bronze medal bouts" section heading already exists) — a
+per-bout badge there would be redundant, not additive.
+
+**Type plumbing, not a runtime change:** `lib/run.ts`'s `RunQueueItem`
+interface was missing a `size` field that the backend's `QueueItem` has
+carried since the PR #29 run-order work (`boutRunGroup` needs it) — the
+API payload already included it, this was purely a stale frontend type.
+Added it so `boutMedalType(item, item.size)` type-checks; `PublicQueueItem
+= RunQueueItem` picked it up automatically as a type alias.
+
+**Call-up sheet, two changes:**
+1. `lib/callup.ts`'s `mainBoutRows`/`finalBoutRows`/`bronzeBoutRows`
+   filters (previously ad-hoc `phase`/`round` comparisons) now all filter
+   on `boutMedalType(b, draw.size)` — the same DRY motivation as
+   `isFinalBout` above, no behavior change (confirmed: full existing
+   `test-callup.ts` suite still passes unmodified). `CallupBoutRow`
+   gained a `medalType` field, set once per row at construction, so
+   `CallupPrint.tsx` can badge a row directly off the row itself rather
+   than needing the page to re-derive it or thread a table-level prop.
+2. Since colored ink on a printed sheet is unreliable, `CallupPrint.tsx`'s
+   badge (`MedalMark`) doesn't lean on color alone: a ★ glyph plus a
+   *thicker* border for the final (2px) than for bronze (1px), so the
+   distinction survives a black-and-white photocopy — the coloring is
+   additional, not load-bearing.
+
+Files: `frontend/src/lib/draws.ts`, `frontend/src/components/MedalBadge.tsx`
+(new), `frontend/src/lib/run.ts`, `frontend/src/pages/Run.tsx`,
+`frontend/src/pages/MatOperator.tsx`,
+`frontend/src/components/public/MatsTab.tsx`,
+`frontend/src/components/public/AthleteSheet.tsx`,
+`frontend/src/lib/callup.ts`, `frontend/src/pages/CallupPrint.tsx`,
+`frontend/scripts/test-draws.ts`. No backend changes.
+
+### Verification (run 2026-08-22)
+
+`npx tsc --noEmit` clean in both `frontend` and `backend`. Full frontend
+regression sweep (all 10 pure-logic scripts) clean, including the
+unmodified `test-callup.ts` suite (confirms the `boutMedalType`-based
+filter refactor didn't change behavior).
+
+Extended `frontend/scripts/test-draws.ts` with a dedicated `boutMedalType`
+suite covering the requested edge cases directly: a 2-entry bracket (just
+a final, no possible bronze bracket), a 4-entry bracket (1 final + bronze
+rows), an 8-entry bracket with a multi-stage repechage chain (confirming
+a later repechage stage isn't misclassified just because its round number
+happens to coincide with the MAIN bracket's semi-final round), and a
+16-entry bracket. Plus a cross-check looping every size/round/phase
+combination from 2 to 32 entries asserting `isFinalBout` and
+`boutMedalType` can never disagree, now that one delegates to the other.
+
+**Verified live against the real seeded event** on three of the four
+named surfaces: the Run tab (confirmed a real ready final,
+`KUMITE MALE JUNIOR · O63kg · Round 2`, renders a "Final" badge with the
+exact `bg-yellow-400 text-yellow-950` classes via direct DOM inspection —
+a repeated screenshot-after-scroll glitch on this particular long page
+prevented a clean visual capture there, so this one was confirmed by
+inspecting the live rendered element's classes and text instead of a
+screenshot); the public spectator board's Mats tab (screenshotted,
+showing the same badge on both `O63kg` and `U63kg` finals inline next to
+their round labels); the call-up sheet (screenshotted — the ★-marked,
+thick-bordered "FINAL" badge under the "Final" section heading, plus the
+plain semis row above it for contrast).
+
+**Not independently screenshotted**: the operator's mat screen
+(`MatOperator.tsx`) and the bonus `AthleteSheet.tsx` surface — both use
+the identical `MedalBadge`/`boutMedalType` call already proven correct on
+the two confirmed screens, and neither could be reached quickly in this
+session (the former needs a mat-operator grant, the latter's athlete
+search sheet didn't respond to a scripted click in this pass). No
+seeded division in the current dataset has progressed far enough to
+produce a *ready* bronze bout, so the bronze badge's color/label
+specifically was verified by the unit tests and code reading only, not a
+live screenshot — it shares the exact same component and conditional
+branch as the visually-confirmed gold badge, just a different `type` prop
+and CSS classes.
+
+**A currently-active division floats to the top of the Run queue
+(2026-08-22).**
+
+Request: follow-up on PR #31. Reported as "the run order is still mixed
+up" — a category actively being scored on a mat showed up at the *bottom*
+of the coordinator's Run queue instead of near the top, even while a bout
+in it was genuinely being fought.
+
+**What "currently on" means in the data**, checked by reading rather than
+guessing: `Bout.startedAt` — "Set once, the first time the mat-side
+scoreboard starts this bout's clock... the app has no other signal that a
+bout is 'in progress'," reset to null whenever the result or fighters are
+invalidated. This is the one authoritative live-ping field.
+`Draw.status` was the other candidate the report named, but it means
+something different and coarser: `IN_PROGRESS` just means "at least one
+result has ever been captured for this division," true for hours after
+the operator moved on to other rounds — not "there is a bout on the clock
+right now." No `Division.order` field exists in the schema at all.
+
+**Root cause, confirmed by reproducing before touching any code.** Marked
+a real ready bout's `startedAt` via direct SQL on a division sitting last
+in a mat's `matOrder` (position 25 of 28 on Tatami 2) and reloaded
+`/api/run/board` — its position never changed. Reading `getBoard`
+confirmed why: `QueueItem` never read `row?.startedAt` from the bout row
+at all, and `sortRunQueue` (from the PR #31 fix) had no notion of it
+either — the queue was built entirely from `queueOrder` → `drawMatOrder` →
+`drawId` → WKF phase order, none of which reflect what is actually
+happening on the mat right now. A bout could be mid-fight and it would
+make literally zero difference to where its division sat in the list.
+
+**Fix.** `QueueItem`/`QueueSortableBout` gained a `startedAt` field,
+populated straight from `row?.startedAt`. `sortRunQueue` now precomputes,
+per `drawId`, the earliest `startedAt` among that division's own ready
+bouts (or nothing, if none are live), and applies it as a new priority
+tier sitting between the manual `queueOrder` override (still the single
+highest-priority key — an explicit human decision beats everything,
+including "this one is live") and the `drawMatOrder`/`drawId`/phase chain
+from PR #31: any division with a live bout outranks every division
+without one, regardless of `matOrder`; among two simultaneously-live
+divisions (an edge case, but the report explicitly asked for a rule here),
+the one that started earliest — furthest along — goes first. The whole
+division floats together, not just the one bout with `startedAt` set: a
+division's other ready-but-not-yet-started bouts (its still-to-come
+rounds, bronze, final) move up with it, still ordered internally by the
+existing WKF `boutRunGroup`/round/position rule. Below that tier, nothing
+changes from PR #31.
+
+**Completed divisions**, per the report's ask #4 to verify whether
+they're still returned at all: confirmed by reading, not assumed — they
+aren't. `getBoard`'s per-bout filter (`if (!cb.akaEntryId || !cb.aoEntryId
+|| cb.winnerEntryId) continue`) means a division with every bout decided
+contributes zero items to the queue in the first place, so there's
+nothing for `sortRunQueue` to specially push "last" — it's simply absent,
+which already satisfies the requirement without any new code.
+
+Files: `backend/src/services/run.service.ts`,
+`backend/scripts/test-run-order.ts`. No frontend changes — the frontend
+never re-sorts `mat.queue`, so fixing the one backend function is enough
+for the Run tab, the operator's mat screen, and the public spectator
+board alike (the same three surfaces PR #30 already traced this data
+through).
+
+### Verification (run 2026-08-22)
+
+`npx tsc --noEmit` clean in both `backend` and `frontend`. Full regression
+sweep clean on both sides.
+
+**Reproduced the exact bug against the real seeded event before writing
+any fix**, per the report's own ask: temporarily set `startedAt = now()`
+on a real ready bout belonging to `KUMITE MALE SENIOR` (`matOrder` 15, the
+very last division on Tatami 2's 28-item queue) via direct SQL, confirmed
+`/api/run/board` left it at positions 25–27 completely unmoved — the bug,
+reproduced live, not inferred. Applied the fix, reloaded (the dev server's
+watch mode picked it up automatically), and confirmed the same division
+now sits at positions 0–2, ahead of everything else on that mat, with the
+rest of the queue otherwise unchanged. Cleared the test `startedAt` value
+immediately after and re-confirmed the mat's full 28-item queue matched
+its original order exactly — no lasting change to the seed data.
+
+Extended `backend/scripts/test-run-order.ts` with three new `sortRunQueue`
+cases, each deliberately set up so the signal under test *disagrees* with
+the others (to prove it's actually driving the result, not riding along
+with a correct answer for the wrong reason): (1) a division scheduled
+last by `matOrder` but with a live bout floats entirely ahead of two
+earlier-scheduled, inactive divisions; (2) of two simultaneously-active
+divisions, the one with the *later* `matOrder` but the *earlier*
+`startedAt` still wins; (3) a manual `queueOrder` still beats an active
+division when the two disagree. All pass, alongside the full existing
+suite (15 checks total in the file).
+
+**Real regression: divisions interleaving by phase across a mat instead of
+running to completion (2026-08-22).**
+
+Request: a genuine regression from the PR #29 run-order fix — a mat's
+queue could show `Category A: R1, R2, Semis; Category B: R1, R2, Semis;
+Category A: Bronze 1, Bronze 2; Category B: Bronze 1, Bronze 2; Category A:
+Final; Category B: Final` instead of running Category A to completion
+before Category B starts at all.
+
+**Root cause.** `RunService.getBoard`'s merged queue comparator was
+already keying on `drawMatOrder` *before* `boutRunGroup` (the within-
+division phase rule from PR #29) — on paper the right order of keys. The
+bug is in what happens when `drawMatOrder` **ties**: `(a.drawMatOrder ??
+Number.MAX_SAFE_INTEGER) - (b.drawMatOrder ?? ...)` evaluates to `0` for
+two divisions that share a value, or — far more commonly — for any two
+divisions that both simply lack one (both fall to the same
+`MAX_SAFE_INTEGER` fallback). A `0` from an `||`-chained comparator falls
+through to the *next* key, which was `boutRunGroup` — a rule that has no
+notion of which division a bout belongs to. Two tied divisions then get
+sorted by phase *across* both of them: every non-final bout from either
+division, then every bronze bout from either, then every final from
+either. Confirmed by direct simulation of the exact pre-fix comparator
+against a two-division fixture — it reproduces the reported pattern
+precisely (see the "before" order in the test file's regression comment).
+
+This wasn't caught during the PR #29 verification because that pass only
+checked a single division's own bout order — the seeded event happens to
+have every draw's `matOrder` populated distinctly (a QA-seed artifact, not
+representative), so cross-division ties never came up. A live check
+during PR #30's investigation touched several other divisions on the same
+mat but never happened to inspect whether *their own* relative order was
+sound, only whether one specific bout was visible.
+
+**Fix.** Extracted the queue's whole comparator out of an unexported
+inline arrow into a new exported, independently-testable
+`sortRunQueue<T extends QueueSortableBout>` in `run.service.ts`, and
+inserted `a.drawId.localeCompare(b.drawId)` as an explicit key *between*
+`drawMatOrder` and `boutRunGroup`. This guarantees one division's bouts
+stay contiguous regardless of whether `drawMatOrder` gives a meaningful
+cross-division order or not — `drawMatOrder` still decides *which*
+division goes first when it can, `drawId` only takes over exactly when
+`drawMatOrder` can't (a tie, most often both null), and only once a run of
+same-`drawId` bouts is established does `boutRunGroup`/round/position
+apply *within* it. The now-fully-redundant trailing
+`category.localeCompare` tiebreak (unreachable once `drawId` disambiguates
+completely) was removed. `sortBoutsForRunning` itself — the single-
+division rule call-up sheet and this file both use — was untouched; it was
+never the source of this bug, since it never receives more than one
+division's bouts at a time.
+
+**Call-up sheet checked, confirmed unaffected.** `lib/callup.ts`'s
+`mainBoutRows`/`bronzeBoutRows`/`finalBoutRows` all call
+`sortBoutsForRunning(draw.bouts, draw.size)` where `draw` is always one
+division's own `CallupDraw` (from a single `getDraw(drawId)` call) — never
+a merged array. `CallupPrint.tsx`'s per-mat batch mode renders one
+`buildCallupSheet(draw)` call per division independently (`targets.map`),
+each in its own printed section; there is no code path where bouts from
+two different divisions are ever sorted against each other. Nothing to
+fix here — verified by reading, not assumed.
+
+Files: `backend/src/services/run.service.ts`,
+`backend/scripts/test-run-order.ts`. No frontend changes.
+
+### Verification (run 2026-08-22)
+
+`npx tsc --noEmit` clean in both `backend` and `frontend`. Full regression
+sweep clean on both sides (frontend's pure-logic suite unaffected, as
+expected, since only backend files changed).
+
+**Confirmed the bug reproduces with the pre-fix logic**: directly
+simulated the exact old comparator (queueOrder → drawMatOrder →
+boutRunGroup → round → position) against a two-division, tied-matOrder
+fixture in a standalone Node script — it produced
+`a-r1,b-r1,a-semi,b-semi,a-bronze,b-bronze,a-final,b-final`, the identical
+phase-interleaved pattern from the report.
+
+Extended `backend/scripts/test-run-order.ts` with four new `sortRunQueue`
+cases: (1) two divisions with *distinct* `drawMatOrder` must each run to
+completion before the next starts (semis then final for A, only then B's
+semis) — this alone doesn't catch the real bug, since distinct values
+never hit the `0`-tie path; (2) the actual regression — two divisions
+that both lack `drawMatOrder` must stay grouped by `drawId`, not
+interleaved by phase, with an explicit assertion that the known-buggy
+order does *not* occur; (3) a manual `queueOrder` still overrides division
+grouping entirely, unchanged from before; (4) the sort doesn't mutate its
+input. All pass.
+
+**Verified live against the seeded event, not just a synthetic fixture.**
+Temporarily nulled `Draw.matOrder` via direct SQL for two real division
+pairs on the same mat (Tatami 2) — first `KUMITE MALE JUNIOR` O63kg/U63kg
+(confirmed both push to the end of the queue together when tied, though
+each had only one ready bout, so this alone couldn't show intra-group
+interleaving), then the more decisive case, `KATA BOYS 5-6` and
+`KATA GIRLS 12-13` (each with 4 ready bouts spanning two rounds): with
+both `matOrder`s null, `/api/run/board` returned all 4 of KATA BOYS 5-6's
+bouts contiguously, then all 4 of KATA GIRLS 12-13's — not interleaved
+round-by-round. Restored both pairs' original `matOrder` values
+immediately after (0/8/12/13, confirmed via a follow-up query, and the
+full Tatami 2 queue re-checked to match its original 28-item order
+exactly) — no lasting change to the seed data.
+
+**Follow-up: the final bout wasn't visible on the public spectator board
+(2026-08-22).**
+
+Request: after the run-order fix below, the user reported the final bout
+wasn't showing on "the run screens" — named all three: the operator's mat
+screen, the coordinator's Run tab, and the public spectator board. Asked
+for a real check of what each screen actually renders today, not
+inference, before fixing.
+
+**What I actually found, checked live against the seeded event (not
+inferred):**
+- **Operator's screen (`pages/MatOperator.tsx`) and the Run tab
+  (`pages/Run.tsx`)** — both already correctly show the final. Verified
+  directly: granted the dev-auth user a Tatami 2 operator grant, loaded
+  `/mat` and `/hub/run`, and found `KUMITE MALE JUNIOR · O63kg · Round 2`
+  (a real, ready final bout in the seed data — both `aka`/`ao` known,
+  `winnerEntryId` null) rendered in both screens' full queue text, at its
+  correct position (#20 of Tatami 2's 28-item queue). Neither screen
+  truncates — both render every item Prisma/`RunService.getBoard` returns,
+  full stop, so there was nothing to fix here. My run-order fix's own
+  change (`boutRunGroup`) had zero effect on this specific division besides
+  confirming this — it has no repechage bracket at all (size 4, no bronze),
+  so its final's position wasn't touched by that fix either way.
+- **Public spectator board's Mats tab (`components/public/MatsTab.tsx`,
+  built in the *separate*, unrelated PR #28) — this is where the bug
+  actually lives.** `MatColumn` slices each mat's ready-queue to
+  `QUEUE_LIMIT = 8` items for the "Up next" preview and replaces everything
+  past that with static, dead text: `+ N more · see the Schedule tab for
+  the rest of the day`. On a mat with a deep queue (this seed's Tatami 2
+  has 28 ready bouts across ~10 divisions, all drawn at once — an unusually
+  deep queue a real single-day event would rarely produce, but not an
+  impossible one), a bout sitting past position 8 — the final included —
+  is simply never rendered, and the "Schedule tab" the message points to
+  shows *estimated start times* built from `lib/schedule.ts`, not "what's
+  actually next in the ready queue," so it doesn't actually answer the
+  question a parent has. **Confirmed live**: with Tatami 2's real queue,
+  the final sat at position 20, past the cut, invisible with no way to
+  reach it.
+
+**Root cause was NOT the run-order fix (PR #29) itself** — `QUEUE_LIMIT`
+truncation predates it (from the PR #28 spectator-board rebuild) and is
+independent of bout ordering; it would have hidden any bout sitting past
+position 8 on a busy mat, final or not. Correcting the record here since
+the report was filed as a follow-up to PR #29.
+
+**Fix**: `MatColumn` keeps its collapsed default (a spectator glancing at
+their phone still sees a short list, matching PR #28's whole reason for
+existing — "ten screens of scrolling on a phone" was the old board's
+problem), but the cut-off is no longer a dead end. The static "+ N more"
+text became a "Show N more" button; tapping it reveals the rest of that
+mat's queue in full, with no re-sort or filtering — the exact same rows
+that were always in `board.mats[].queue`, just not initially rendered. No
+bout gets special-cased to "always show" (the final gets no bespoke
+treatment anywhere in this fix) — every bout, including the final, is
+reachable by the same one generic mechanism. Also dropped an unused
+`roundLabel` import from `lib/draws.ts` in this file (the file already
+defines its own identical local `boutRound` — dead code from PR #28,
+noticed while editing the same lines, not otherwise related).
+
+Files: `frontend/src/components/public/MatsTab.tsx`. No backend changes —
+`RunService.getBoard`'s readiness filter and `sortBoutsForRunning`'s
+ordering were both already correct.
+
+### Verification (run 2026-08-22)
+
+`npx tsc --noEmit` clean in both `frontend` and `backend`. Full frontend
+pure-logic regression sweep clean.
+
+Added an explicit "never drops a bout, the final included" check to both
+`backend/scripts/test-run-order.ts` and `frontend/scripts/test-draws.ts`'s
+`sortBoutsForRunning` suites — asserts output length equals input length
+and that a bout named "final" is specifically present in the result. This
+pins the guarantee the report actually needed, even though the live
+investigation found `sortBoutsForRunning` itself was never the culprit.
+
+**Verified live against the real, deep Tatami 2 queue in the seeded
+event** (not a synthetic fixture): before the fix, the public board's Mats
+tab showed "Up next" through position 9 then "+ 19 more" with the final
+(`KUMITE MALE JUNIOR · O63kg · Round 2`, position 20) unreachable. After
+the fix, clicking "Show 19 more" reveals the complete 28-item queue
+including that exact final bout, on both the desktop grid layout
+(screenshotted) and via full page-text extraction confirming its row
+content; the other two mats' own "Show N more" buttons were left
+untouched/collapsed, confirming the expand state is scoped per mat, not
+global. Re-confirmed the operator's screen and Run tab were already
+correct (see above) before making any change, per the "verify each screen
+today" ask.
+
+**Tatami operator: fixed the bout running order — bronze before the final,
+not after (2026-08-22).**
+
+Request: the operator's screen (the queue they pull the next bout from to
+score on their mat) was running WKF divisions out of order. The bug: the
+"ready to fight" queue sorted by phase (MAIN before REPECHAGE) then round
+ascending — which puts the MAIN bracket's *final* ahead of the bronze
+bouts, since the final's round number is the highest MAIN round but still
+sorts before any REPECHAGE row regardless of round. Correct WKF order is
+main bracket through the semis → bronze (repechage) → final last, so the
+medal ceremony can happen immediately after the final bout, not with two
+bronze bouts still to fight afterward.
+
+**Where the bug actually lived:** `backend/src/services/run.service.ts`'s
+`getBoard` — the per-mat "ready bout" queue behind `/run/board` (the Run
+tab, organizer view of every mat) and `/run/my-mats` (the operator's own
+screen, `MatOperator.tsx`, which reuses `getBoard` verbatim via
+`getOperatorBoard`). Both consume the same `queue` array with no
+client-side re-sort, so fixing the one backend comparator fixes both
+surfaces. The `PHASE_ORDER: { MAIN: 0, REPECHAGE: 1 }` constant was the
+actual bug — it never distinguished "an ordinary MAIN round" from "the
+MAIN round that happens to be the final."
+
+**Fix:** replaced `PHASE_ORDER` with `boutRunGroup(bout, size)`, returning
+0 (MAIN, not the final round) / 1 (REPECHAGE) / 2 (MAIN, is the final
+round — `round === Math.log2(size)`), and use that as the primary
+bracket-order tie-break instead. The queue's other tie-break keys are
+unchanged and still take priority: a manual `queueOrder` (drag-to-reorder
+in the Run tab) always wins, then `drawMatOrder` keeps each division's
+bouts contiguous rather than interleaving two divisions on the same mat.
+
+**Shared helper, not hand-rolled twice:** added `sortBoutsForRunning(bouts,
+size)` — exported from both `backend/src/services/run.service.ts` and
+`frontend/src/lib/draws.ts`, wrapping the same `boutRunGroup` rule as a
+plain "sort one division's bouts into WKF running order" function. The two
+are a **deliberate, matching reimplementation, not a shared import** — this
+repo has no package boundary between the frontend and backend TypeScript
+projects (`shared/types` exists but is an unrelated, unused scaffold from a
+different app template, confirmed unreferenced by either project), so
+there is no way to literally share the function. Both copies are
+unit-tested against the identical fixture shapes precisely so they can't
+quietly drift apart.
+
+**Call-up sheet updated to match:** `frontend/src/lib/callup.ts`'s
+`CallupSheet` gained a third array, `finalRows` (previously the final lived
+inside `mainRows`, printed *before* the bronze section — exactly the
+now-fixed bug, just on paper instead of on the operator's screen).
+`mainBoutRows`/`bronzeBoutRows`/`finalBoutRows` all now derive their order
+from `sortBoutsForRunning` instead of each hand-rolling its own
+`.sort((a,b) => a.round - b.round || ...)`. One behavior change worth
+flagging: `bronzeBoutRows` used to iterate side 0's stages then side 1's
+stages ("Bronze 1.1, Bronze 1.2, Bronze 2.1, Bronze 2.2"); it now follows
+true WKF running order instead (every side's stage 1 before either side's
+stage 2 — "Bronze 1.1, Bronze 2.1, Bronze 1.2, Bronze 2.2"), since the
+whole point of this fix is that the *printed* order should match what the
+operator will actually be asked to call. The per-bout labels themselves
+are unchanged (still "Bronze N.M" by side+stage), only the row order
+changed. `pages/CallupPrint.tsx` now prints three sections in the corrected
+order: main bracket, then "Bronze bouts", then "Final" — previously two
+sections with the final folded into the first.
+
+**Other surfaces checked, confirmed unaffected (no change needed):**
+- `components/draws/BracketView.tsx` — lays a bracket out positionally by
+  round/column, not as a sequential list; nothing to reorder.
+- `draw.service.ts`'s athlete-search "your status" (`next` /
+  `AthleteBout[]`) — picks a *single* athlete's own next pending bout. An
+  athlete is never simultaneously in both a pending MAIN final and a
+  pending REPECHAGE bout (repechage is only for that side's semi-final
+  losers), so the MAIN-vs-REPECHAGE ordering bug could never actually
+  surface there regardless of `state.bouts`' own internal order.
+- The estimator (`Estimator.tsx`, `lib/schedule.ts`) and standings
+  (`competition.service.ts`) only *count* bouts (including bronze) for
+  duration/medal totals — counting is order-independent, so unaffected,
+  exactly as flagged as a possibility up front.
+
+Files: `backend/src/services/run.service.ts`,
+`backend/scripts/test-run-order.ts` (new),
+`frontend/src/lib/draws.ts`, `frontend/scripts/test-draws.ts`,
+`frontend/src/lib/callup.ts`, `frontend/src/pages/CallupPrint.tsx`,
+`frontend/scripts/test-callup.ts`.
+
+### Verification (run 2026-08-22)
+
+`npx tsc --noEmit` clean in both `backend` and `frontend`.
+
+`backend/scripts/test-run-order.ts` (new, 6 checks) — main-only bracket
+(final still sorts after two out-of-order semis), a full bracket with a
+two-stage bronze chain per side (asserts the exact expected order end to
+end, and that the final is strictly last), a 2-entry bracket with no
+bronze at all (trivial single-bout case), and that the sort doesn't mutate
+its input. Runs with zero DB dependency — deliberately written like the
+frontend's pure test-script convention rather than backend's usual
+DB-integration style, since `sortBoutsForRunning` genuinely has no DB
+dependency and importing `run.service.ts` doesn't eagerly connect
+(`PrismaClient` only connects on first query).
+
+`frontend/scripts/test-draws.ts` — added the equivalent 4-check
+`sortBoutsForRunning` suite (mirrors the backend one exactly, same
+fixtures) plus a full regression pass of the file's existing
+`isFinalBout`/`finalBronzeMedalists` tests, all still passing.
+
+`frontend/scripts/test-callup.ts` — rewritten around the new
+`mainBoutRows`/`finalBoutRows` split: the final is asserted absent from
+`mainBoutRows` and present (alone) in `finalBoutRows`; a new end-to-end
+scenario (4 quarter-finals → 2 semis → 2 bronze → 1 pending final) asserts
+the complete grouping; bronze-row order is asserted stage-major
+("Bronze 1, Bronze 2.1, Bronze 2.2", not side-major) to lock in the
+deliberate ordering change described above. Every other frontend
+pure-logic test script re-run clean as a full regression sweep
+(`test-autoschedule`, `test-eligibility`, `test-estimator`, `test-kata`,
+`test-schedule`, `test-schedule-print`, `test-scoreboard`, `test-timing`).
+
+Checked against the seeded event's real, further-along-than-drawn
+divisions (several `IN_PROGRESS`/`COMPLETED` KUMITE brackets) via
+`/api/run/board`: the endpoint still returns a valid, correctly-shaped
+queue post-change with no errors. Could not find or easily construct a
+seeded division currently sitting in the *exact* race window this bug
+needed (a division whose semis just decided, producing a ready final and
+a ready multi-stage bronze bout in the same instant) — reproducing it live
+would mean hand-editing bout results in the seed data. The unit tests
+above construct that exact scenario directly and are the real evidence the
+fix works; the live check only confirms the change didn't break the
+endpoint against real data.
+
+**Not verified in-browser** — the operator's screen (`MatOperator.tsx`) and
+the Run tab were not opened and visually checked against a live queue in
+the corrected order; verification here is unit tests plus one non-visual
+API check, per this task's own stated bar.
+
+**Public spectator board rebuilt for mobile (2026-08-21).**
+
+Request: review the public board for spectators — make it suit a phone
+(tabs or swiping between tatamis), summarise it, put results on top, and add
+athlete search so parents can find their athlete and see either when they
+are competing or their detailed results. Club totals and tatami schedules
+visible too.
+
+The board this replaces was one stacked column: every ready bout on every
+mat, as a three-line card each, and only then the medals. On the seeded test
+event that is **~100 cards before a parent reaches the result they opened
+the link for**, and on a 375px screen the three tatamis were simply three
+long lists one after another.
+
+### Shape
+
+**Four tabs, results first** (`pages/PublicBoard.tsx`, plus a new
+`components/public/` folder):
+
+- **Results** — podium cards, "14 of 43 categories decided", with the
+  still-running categories folded behind a toggle rather than dropped.
+- **Mats** — the live queues, one tatami per swipeable page.
+- **Times** — the day's running order per tatami.
+- **Clubs** — the medal table; tapping a club lists its medallists.
+
+Above the tabs, a sticky header with a **Find an athlete** button that opens
+a full-screen search.
+
+**The tatami pager** (`components/public/MatPager.tsx`) is CSS scroll
+snapping, not a carousel dependency: the browser does momentum and touch
+handoff better than JS can. A chip strip scrolls the container; the
+container's scroll position drives the chips (read from `scrollLeft`, so a
+half-swipe that snaps back cannot leave the chips lying). Above `md` the
+pager is replaced **in CSS** by a plain grid — no measuring, no hydration
+mismatch — because a laptop or the hall projector has room for every floor
+at once and swipping past what already fits would be a regression.
+
+**Summarising** is mostly the queue: one line per bout (`aka v ao`, category
+and round beneath) instead of a card, capped at 8 per floor with a "+N more
+· see the Schedule tab" footer, and one full-size "On now" card at the head
+of each real floor. The unassigned pool deliberately gets no "On now" — it
+is a to-do list, not a mat.
+
+### Backend
+
+Four endpoints instead of one payload, because they go stale at very
+different rates — `routes/public.ts` and `services/public.service.ts`:
+
+| Endpoint | Cache TTL | Gzipped |
+|---|---|---|
+| `/public/board/:token` | 10s | 8.6 KB |
+| `/public/board/:token/athletes` | 20s | 6.8 KB |
+| `/public/board/:token/schedule` | 120s | 3.0 KB |
+| `/public/board/:token/athletes/:athleteId` | (shares the athlete index) | small |
+
+`utils/board-cache.ts` gained a per-entry TTL and namespaced keys
+(`${eventId}:board`, `:athletes`, `:schedule`) so the hard-polled live board
+does not drag the schedule's rebuild along with it. The token lookup is
+still per-request — it is the access check — so rotating the token still
+revokes access immediately.
+
+**`DrawService.eventAthletes(eventId)`** is the new computation: the same
+one-pass-per-draw bracket replay `eventResults` does, turned inside out to
+ask *per athlete* what happened to them rather than per bracket who
+medalled. It returns each person once (an athlete in three categories is one
+search result with three runs), each run carrying its bouts with **scores
+from that athlete's side** — "Won 4 – 2", never "aka 4, ao 2", because the
+spectator does not know which corner their child was in.
+
+Two rules worth keeping in mind if you touch it:
+
+- **Repechage eligibility is computed, not guessed.** A beaten athlete is
+  `REPECHAGE_HOPE` only while the athlete who beat them can still reach the
+  final — i.e. that athlete has not themselves lost a main-bracket bout.
+  Otherwise they are `OUT`. Telling a parent "still possible" when it isn't
+  is worse than saying nothing.
+- **The index includes approved entries with no draw yet** (`NOT_DRAWN`).
+  On the morning of a tournament nothing is drawn, which is exactly when
+  parents are searching; an index built only from bracket slots would tell
+  every one of them "no such athlete".
+
+**The schedule tab deliberately serves `PlanService.getBoard` unchanged**
+and the frontend builds it with the same `buildSchedule` walk as the Plan
+tab and the printed running order. A spectator schedule that could drift
+from the one pinned to the wall would be worse than none. Verified byte-
+identical below.
+
+### Privacy
+
+Everything exposed is what a tournament announces over the PA: names, clubs,
+categories, bracket structure, results. **`checkedIn` is now stripped** from
+the public queue — it is the one field in the run board that says whether a
+named child is physically at the venue, the spectator view never rendered
+it, and a public link is the wrong place to publish it. The module comment
+in `public.service.ts` states that line so new fields get judged against it.
+
+### Refactor carried along
+
+`toScheduleCategory` existed as three identical private copies (Plan tab,
+PlanPrint, CallupPrint) and this change needed a fourth. It now lives once
+in `lib/plan.ts`; all four surfaces import it. Pure move, no behaviour
+change — every schedule test still passes.
+
+Files: `backend/src/services/draw.service.ts`,
+`backend/src/services/public.service.ts`, `backend/src/routes/public.ts`,
+`backend/src/utils/board-cache.ts`, `frontend/src/lib/public.ts`,
+`frontend/src/lib/plan.ts`, `frontend/src/pages/PublicBoard.tsx`,
+`frontend/src/components/public/*` (7 new), and the three pages that lost
+their local `toScheduleCategory`.
+
+### Verification (run 2026-08-21)
+
+`npx tsc --noEmit` **and** `npm run build` clean in both projects. The
+lazy-loaded `PublicBoard` chunk is 25.9 KB / **7.25 KB gzipped**. (The
+pre-existing 500 KB warning is the shared `index` chunk, untouched here.)
+
+All existing test scripts pass — run because the `toScheduleCategory` move
+touched three schedule surfaces: frontend `test-schedule`, `test-callup`,
+`test-autoschedule`, `test-estimator`, `test-draws`, `test-kata`; backend
+`test-plan` (53), `test-draws` (83), `test-bout-scoring` (24).
+
+Exercised in the browser at **375×812** and **1280** against the seeded
+`Championships 2026 (Test)` event (277 entries, 43 draws, 3 tatamis), with
+results simulated into 22 of the 43 categories so the medals, scores and
+half-run brackets were real rather than empty:
+
+- Results tab leads; podiums, club table and its expansion all correct —
+  Swakopmund's 5/3/2 tally matched exactly 5 🥇, 3 🥈, 2 🥉 in the expanded
+  medallist list.
+- **Pager verified in both directions**: a chip tap scrolls to exactly
+  `index × clientWidth` (0 / 343 / 686 on a 375px screen, with
+  `scrollWidth` exactly 3 × `clientWidth`), and a scroll updates the chips,
+  including the mid-flick rounding case.
+- Search: "amutenya" → 12 matches including "Hamutenya", each with a live
+  status chip ("Semi-finals · waiting for an opponent", "🥇 Gold medal").
+  Opening one showed both its categories and the full journey — bye →
+  "Won 4 – 2" → "Won 5 – 0" → Gold.
+- Schedule: the public payload is **byte-identical** to
+  `PlanService.getBoard` for the same event (checked by diffing the two in
+  a script), and renders the opening-ceremony band plus per-tatami rows.
+- `document.body.scrollWidth === window.innerWidth` at 375px — the two
+  horizontally-scrolling children do not leak page-level overflow.
+- All four payloads scanned for `email`, `dateOfBirth`, `weight`, `beltId`,
+  `checkedIn`, `userId`, `feeCents`, contact and guardian fields: **clean**.
+- Console: only the pre-existing `/api/auth/me` dev-auth-fallback 401 noise
+  already documented in this file. Every public endpoint returned 200.
+
+**Two real bugs found and fixed during that pass**, both of which type-
+checking would never have caught:
+
+1. `scrollTo({ behavior: "smooth" })` is **silently a no-op** on a
+   `scroll-snap-type: mandatory` container in Chromium — the chip lit up and
+   the pages never moved. Now `behavior: "instant"`; there is a comment at
+   the call site so nobody "improves" it back. Swiping is unaffected either
+   way, since the browser drives that.
+2. The first pass put every screen on the pager, which on a 1280px desktop
+   showed one 736px floor and hid the other two behind a swipe — worse than
+   the board being replaced. Hence the `md` grid, and the page shell
+   widening to `xl:max-w-6xl` (three floors truncated every name at 768px).
+
+**Not verified:** real touch swiping on a physical phone — this environment
+does not emit scroll events for programmatic `scrollTo`, so the
+scroll→chip direction was exercised by dispatching the scroll event the
+browser fires on a real swipe. Also not checked on iOS Safari, only
+Chromium at a mobile viewport.
+
+**Local test data left behind:** the seeded `Championships 2026 (Test)`
+event has had its public token enabled (`00bac1f24b79bd836f68c814`) and
+carries simulated results in 22 of its 43 categories. Local dev database
+only — nothing was run against production.
+
+**Draws separate club-mates in the unseeded field (2026-08-21).**
+
+Request: when a draw is generated, unseeded athletes from different clubs
+should be matched against each other as much as possible, so an unseeded
+bracket doesn't put two athletes from one club against each other in the
+early rounds.
+
+Until now `seededOrder` (`backend/src/services/draw.service.ts`) placed the
+seeds into their protected slots and then filled every remaining index with
+a plain `shuffle()` — nothing in the draw engine had ever looked at which
+club an entry belonged to, so two of a club's four athletes landing in the
+same round-1 pair was pure luck, and happened regularly.
+
+**Change:** `SeedableEntry` gained an optional `clubId`, and the two
+`prisma.entry.findMany` calls that feed draw generation (`DrawService.create`
+and `.regenerate`) now select it. The unseeded fill is no longer the raw
+shuffle: it still *starts* as that shuffle, then `spreadUnseededByClub`
+hill-climbs it — repeatedly swapping pairs of unseeded athletes whenever the
+swap strictly lowers a total "clash cost", where a club-mate pairing costs
+`4 ** (totalRounds - meetRound)`. That weighting is steeply front-loaded on
+purpose: one round-1 club clash outweighs any number of clashes in later
+rounds, which is the actual complaint. Seeds are never moved — they take
+part only as fixed obstacles, so seeding protection still outranks club
+separation. Where separation is impossible (one club filling the category)
+the cost simply can't be improved and the original shuffle stands; the
+passes are capped at 8 so no field can spin there.
+
+Two properties worth keeping in mind for anyone touching this next:
+
+- **The draw is still random.** Only strict improvements are accepted, from
+  a randomly shuffled start, with the candidate swap order itself shuffled —
+  so among arrangements that are equally club-clean, which one comes out is
+  still luck. Measured over 200 draws of an 8-athlete/4-club field, every
+  athlete still reaches all 8 bracket positions and still draws all 6 of
+  their legal round-1 opponents.
+- **`clubId` is optional on purpose.** A caller that selects only `id` and
+  `seed` degrades to exactly the old shuffle, which is what the pure seeding
+  tests in `scripts/test-draws.ts` do.
+
+No schema change, no migration, no API shape change. `SeedPanel.tsx`'s
+explanatory copy was updated, since it previously told the user unseeded
+athletes are "drawn at random" full stop.
+
+Files: `backend/src/services/draw.service.ts`,
+`backend/scripts/test-draws.ts`, `frontend/src/components/draws/SeedPanel.tsx`.
+
+### Verification (run 2026-08-21)
+
+`npx tsc --noEmit` clean in both `backend` and `frontend`.
+
+`npx tsx scripts/test-draws.ts` — ALL CHECKS PASSED, including the whole
+pre-existing seeding suite (seed 1 v 2 only in the final, tier confinement,
+byes on the top seeds, totality) unchanged, plus 12 new club-separation
+checks:
+
+- **Zero** round-1 club clashes in the worst of 60 draws for every field
+  where zero is achievable: 8 athletes/2 clubs of 4, 12/3 clubs of 4, 16/2
+  clubs of 8, `A,A,B,B,C`, and 32 athletes over 8 clubs.
+- Still zero with seeds 1–4 placed one per club, *and* seeds 1 and 2 still
+  only meet in the final in that same field — i.e. club separation did not
+  buy itself anything at seeding's expense.
+- Impossible fields settle at the theoretical minimum rather than erroring
+  or looping: `A×5, B×2` in a size-8 bracket gives exactly 1 clash, six of
+  one club gives exactly 2.
+- Randomness preserved (the two measurements above).
+- A clubless caller still behaves as before.
+
+Measured separately over 500 draws per scenario: average round-1 clashes
+0.000 for every separable field (previously these were routine), and the
+cost stays negligible — ~1.2 ms per 32-athlete draw, ~10 ms for a
+64-athlete one, both far below any real category size and only paid at
+draw-generation time.
+
+**Not verified in the browser.** This is a pure change to the draw engine
+with no UI beyond the one copy edit; it was verified against the local
+database via `scripts/test-draws.ts`, which generates and regenerates real
+draws end to end.
 
 **Call-up sheets: kata switches to the same paired AKA/AO table as kumite
 (2026-08-21).**
