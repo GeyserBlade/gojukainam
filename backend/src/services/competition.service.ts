@@ -203,7 +203,13 @@ export function athleteRunIn(resolved: ReturnType<typeof resolveDraw>, entryId: 
 
 export class CompetitionService {
   /**
-   * The federation calendar, with this club's involvement attached.
+   * The federation calendar, with one club's involvement attached.
+   *
+   * Which club is the caller's choice: a `federation:read` key (or an admin)
+   * may ask about any of them, and the answer names the club it counted rather
+   * than leaving "ours" to be inferred. Everything else in the row — the
+   * event, its dates, how many categories are drawn — is federation-wide and
+   * identical whoever asks.
    *
    * `hasTakenPlace` is computed here rather than left to the caller for the
    * same reason ages are: a model handed a date and today's date gets the
@@ -219,6 +225,15 @@ export class CompetitionService {
   }) {
     const { clubId, when = "all", limit = 25, asOf } = params;
     const today = startOfUtcDay(asOf);
+
+    // Named once for the whole list rather than joined per event: the counts
+    // below are all for this one club, and an answer that says "Swakopmund"
+    // is checkable in a way that "your club" is not.
+    const club = await prisma.club.findUnique({
+      where: { id: clubId },
+      select: { id: true, name: true },
+    });
+    if (!club) throw { status: 404, message: "Club not found" };
 
     const where =
       when === "past"
@@ -267,7 +282,9 @@ export class CompetitionService {
             closesOn: toIsoDate(startOfUtcDay(e.regClose)),
             isOpen: e.regOpen.getTime() <= asOf.getTime() && asOf.getTime() <= e.regClose.getTime(),
           },
-          myClub: {
+          club: {
+            id: club.id,
+            name: club.name,
             entryCount: e.entries.length,
             athleteCount: athletes.size,
             approvedCount: e.entries.filter((x) => x.status === "APPROVED").length,
@@ -284,7 +301,7 @@ export class CompetitionService {
     };
   }
 
-  /** One event, plus every category in it and this club's entry counts. */
+  /** One event, plus every category in it and the named club's entry counts. */
   static async getEvent(eventId: string, clubId: string, asOf: Date) {
     const event = await prisma.event.findUnique({
       where: { id: eventId },
@@ -300,6 +317,12 @@ export class CompetitionService {
       },
     });
     if (!event) throw { status: 404, message: "Event not found" };
+
+    const club = await prisma.club.findUnique({
+      where: { id: clubId },
+      select: { id: true, name: true },
+    });
+    if (!club) throw { status: 404, message: "Club not found" };
 
     const today = startOfUtcDay(asOf);
     const start = startOfUtcDay(event.startDate);
@@ -326,7 +349,9 @@ export class CompetitionService {
           event.regOpen.getTime() <= asOf.getTime() && asOf.getTime() <= event.regClose.getTime(),
       },
       divisions: event.divisions,
-      myClub: {
+      club: {
+        id: club.id,
+        name: club.name,
         entryCount: event.entries.length,
         athleteCount: athletes.size,
         approvedCount: event.entries.filter((x) => x.status === "APPROVED").length,
@@ -594,6 +619,339 @@ export class CompetitionService {
             b.bronze - a.bronze ||
             a.clubName.localeCompare(b.clubName),
         ),
+    };
+  }
+  // -------------------------------------------------------------------------
+  // Tournament day: brackets, mats, running order.
+  //
+  // Event-scoped, never club-scoped — see the note at the top of this file and
+  // the gate comment in routes/competition.ts. Every one of these is already
+  // on the public board for anyone holding the event link; the value added
+  // here is that the numbers are counted server-side, so "how many categories
+  // are still to run on Mat 2" is a field rather than an inference from a list
+  // the model half-read.
+  // -------------------------------------------------------------------------
+
+  /**
+   * Every category in an event, drawn or not, and how far each bracket has got.
+   *
+   * A category with entries but no bracket is included with `hasDraw: false`
+   * rather than omitted: "which categories still need drawing" is the question
+   * this is asked on the morning of an event, and a list that silently skips
+   * them answers it wrong.
+   */
+  static async listDraws(eventId: string) {
+    const event = await prisma.event.findUnique({
+      where: { id: eventId },
+      select: { id: true, name: true, startDate: true },
+    });
+    if (!event) throw { status: 404, message: "Event not found" };
+
+    const [draws, mats, divisions, weightClasses, entryGroups] = await Promise.all([
+      prisma.draw.findMany({
+        where: { eventId },
+        include: { ...DRAW_INCLUDE, mat: { select: { id: true, name: true, order: true } } },
+      }),
+      prisma.mat.findMany({
+        where: { eventId },
+        orderBy: [{ order: "asc" }, { createdAt: "asc" }],
+        select: { id: true, name: true, order: true },
+      }),
+      prisma.division.findMany({
+        where: { eventId },
+        orderBy: [{ category: "asc" }, { gender: "asc" }, { minAge: "asc" }],
+        select: { id: true, name: true, category: true, gender: true, minAge: true, maxAge: true },
+      }),
+      prisma.weightClass.findMany({ where: { eventId }, select: { id: true, name: true } }),
+      // APPROVED only: an undrawn category is interesting because people will
+      // step on the mat for it, and only an approved entry does.
+      prisma.entry.groupBy({
+        by: ["divisionId", "weightClassId"],
+        where: { eventId, status: "APPROVED" },
+        _count: true,
+      }),
+    ]);
+
+    const wcName = new Map(weightClasses.map((w) => [w.id, w.name]));
+    const divisionById = new Map(divisions.map((d) => [d.id, d]));
+    const catKey = (divisionId: string, weightClassId: string | null) =>
+      `${divisionId}:${weightClassId ?? ""}`;
+    const approvedByCat = new Map(
+      entryGroups.map((g) => [catKey(g.divisionId, g.weightClassId), g._count]),
+    );
+
+    const drawn = draws.map((draw) => {
+      const resolved = resolveDraw(draw as unknown as DrawRow);
+      const bouts = resolved.state.bouts;
+      const contested = bouts.filter((b) => b.isUserResult);
+      return {
+        drawId: draw.id,
+        category: resolved.label,
+        divisionId: draw.divisionId,
+        divisionCategory: draw.division.category,
+        gender: draw.division.gender,
+        minAge: divisionById.get(draw.divisionId)?.minAge ?? null,
+        maxAge: divisionById.get(draw.divisionId)?.maxAge ?? null,
+        weightClass: draw.weightClass?.name ?? null,
+        hasDraw: true,
+        /** Bracket size (2, 4, 8, 16, 32), NOT the number of competitors. */
+        bracketSize: draw.size,
+        /** Competitors actually in the bracket. This is the field size. */
+        fieldSize: resolved.byEntry.size,
+        /** Approved entries right now — differs from fieldSize when entries moved after the draw. */
+        approvedEntries: approvedByCat.get(catKey(draw.divisionId, draw.weightClassId)) ?? 0,
+        status: resolved.state.status,
+        locked: draw.locked,
+        boutsFought: contested.length,
+        /**
+         * Bouts that could be called to the mat right now: both competitors
+         * known, no result captured. NOT "bouts remaining" — in a bracket that
+         * has not run, everything past round one has unknown fighters, so this
+         * is 2 for a field of 6 rather than 5. The distinction matters on the
+         * day, which is why the two counts are separate fields.
+         */
+        boutsReady: bouts.filter((b) => !b.isUserResult && b.akaEntryId && b.aoEntryId).length,
+        /**
+         * How many contested bouts the main bracket will produce in total:
+         * a single-elimination field of N settles in N-1. Excludes repechage,
+         * which depends on who loses to whom and cannot be known in advance.
+         */
+        mainDrawBouts: Math.max(resolved.byEntry.size - 1, 0),
+        mat: draw.mat ? { id: draw.mat.id, name: draw.mat.name } : null,
+        matOrder: draw.matOrder,
+        podium: resolved.podium,
+      };
+    });
+
+    const drawnKeys = new Set(draws.map((d) => catKey(d.divisionId, d.weightClassId)));
+    const undrawn = entryGroups
+      .filter((g) => g._count > 0 && !drawnKeys.has(catKey(g.divisionId, g.weightClassId)))
+      .flatMap((g) => {
+        const division = divisionById.get(g.divisionId);
+        if (!division) return [];
+        return [{
+          drawId: null,
+          category: categoryLabel(
+            division.name,
+            g.weightClassId ? wcName.get(g.weightClassId) ?? null : null,
+          ),
+          divisionId: division.id,
+          divisionCategory: division.category,
+          gender: division.gender,
+          minAge: division.minAge,
+          maxAge: division.maxAge,
+          weightClass: g.weightClassId ? wcName.get(g.weightClassId) ?? null : null,
+          hasDraw: false as const,
+          bracketSize: null,
+          fieldSize: null,
+          approvedEntries: g._count,
+          status: null,
+          locked: false,
+          boutsFought: null,
+          boutsReady: null,
+          mainDrawBouts: null,
+          mat: null,
+          matOrder: null,
+          podium: null,
+        }];
+      });
+
+    const categories = [...drawn, ...undrawn].sort((a, b) =>
+      a.category.localeCompare(b.category),
+    );
+
+    return {
+      event: { id: event.id, name: event.name, startDate: toIsoDate(startOfUtcDay(event.startDate)) },
+      mats,
+      count: categories.length,
+      drawnCount: drawn.length,
+      undrawnCount: undrawn.length,
+      /** True once at least one bout anywhere in the event has a captured result. */
+      anyResults: drawn.some((d) => d.boutsFought > 0),
+      categories,
+    };
+  }
+
+  /**
+   * One bracket, round by round.
+   *
+   * Rounds are NAMED ("Final", "Semi-final") by the same roundName() the
+   * athlete record uses, so the two can never disagree about what to call the
+   * same bout. `scoreJson` is deliberately not returned: it is a per-action
+   * blob for the scoreboard UI, and a model handed it will narrate it wrong.
+   */
+  static async getDraw(drawId: string) {
+    const draw = await prisma.draw.findUnique({
+      where: { id: drawId },
+      include: {
+        ...DRAW_INCLUDE,
+        mat: { select: { id: true, name: true } },
+        event: { select: { id: true, name: true, startDate: true } },
+      },
+    });
+    if (!draw) throw { status: 404, message: "Draw not found" };
+
+    const resolved = resolveDraw(draw as unknown as DrawRow);
+    const { byEntry, storedByKey, totalRounds } = resolved;
+    const look = (id: string | null) => (id ? byEntry.get(id) ?? null : null);
+
+    const slots = [...draw.slots]
+      .sort((a, b) => a.position - b.position)
+      .map((s) => ({
+        position: s.position,
+        seed: s.seed,
+        competitor: byEntry.get(s.entryId) ?? null,
+      }));
+
+    const bouts = resolved.state.bouts.map((b) => {
+      const stored = storedByKey.get(boutKey(b.phase, b.round, b.position));
+      return {
+        phase: b.phase,
+        round: b.phase === "MAIN" ? roundName(b.round, totalRounds) : `Repechage ${b.round}`,
+        roundNumber: b.round,
+        position: b.position,
+        aka: look(b.akaEntryId),
+        ao: look(b.aoEntryId),
+        winner: look(b.winnerEntryId),
+        /** False = a bye or a bout not yet fought. A bye has no loser to name. */
+        contested: b.isUserResult,
+        akaScore: stored?.akaScore ?? null,
+        aoScore: stored?.aoScore ?? null,
+        outcome: stored?.outcome ?? null,
+      };
+    });
+
+    return {
+      drawId: draw.id,
+      event: {
+        id: draw.event.id,
+        name: draw.event.name,
+        startDate: toIsoDate(startOfUtcDay(draw.event.startDate)),
+      },
+      category: resolved.label,
+      divisionCategory: draw.division.category,
+      gender: draw.division.gender,
+      bracketSize: draw.size,
+      fieldSize: byEntry.size,
+      status: resolved.state.status,
+      locked: draw.locked,
+      mat: draw.mat ? { id: draw.mat.id, name: draw.mat.name } : null,
+      matOrder: draw.matOrder,
+      slots,
+      bouts,
+      podium: resolved.podium,
+    };
+  }
+
+  /**
+   * The running order: what sits on each mat, in what sequence, with the
+   * breaks in their real places.
+   *
+   * Categories and schedule blocks share one `matOrder` index space per mat —
+   * that is how "lunch after the U14 pools on Mat 2" is representable at all —
+   * so they are merged into a single ordered list here rather than returned as
+   * two lists for the caller to interleave. A model asked to do that
+   * interleaving gets it wrong, and the mistake looks like a real schedule.
+   */
+  static async schedule(eventId: string) {
+    const event = await prisma.event.findUnique({
+      where: { id: eventId },
+      select: { id: true, name: true, startDate: true },
+    });
+    if (!event) throw { status: 404, message: "Event not found" };
+
+    const [mats, blocks, draws, divisions, weightClasses] = await Promise.all([
+      prisma.mat.findMany({
+        where: { eventId },
+        orderBy: [{ order: "asc" }, { createdAt: "asc" }],
+        select: { id: true, name: true, order: true },
+      }),
+      prisma.scheduleBlock.findMany({
+        where: { eventId },
+        orderBy: [{ matOrder: "asc" }, { createdAt: "asc" }],
+      }),
+      prisma.draw.findMany({
+        where: { eventId },
+        select: {
+          id: true, divisionId: true, weightClassId: true, size: true, status: true,
+          matId: true, matOrder: true, _count: { select: { slots: true } },
+        },
+      }),
+      prisma.division.findMany({
+        where: { eventId },
+        select: { id: true, name: true, category: true, gender: true },
+      }),
+      prisma.weightClass.findMany({ where: { eventId }, select: { id: true, name: true } }),
+    ]);
+
+    const divisionById = new Map(divisions.map((d) => [d.id, d]));
+    const wcName = new Map(weightClasses.map((w) => [w.id, w.name]));
+
+    type Item = {
+      kind: "category" | "break";
+      order: number | null;
+      label: string;
+      drawId?: string | null;
+      status?: string | null;
+      fieldSize?: number | null;
+      minutes?: number | null;
+    };
+
+    const categoryItems = draws.map((d) => {
+      const division = divisionById.get(d.divisionId);
+      return {
+        matId: d.matId,
+        item: {
+          kind: "category" as const,
+          order: d.matOrder,
+          label: categoryLabel(
+            division?.name ?? "Unknown category",
+            d.weightClassId ? wcName.get(d.weightClassId) ?? null : null,
+          ),
+          drawId: d.id,
+          status: d.status,
+          fieldSize: d._count.slots,
+        } satisfies Item,
+      };
+    });
+
+    const blockItems = blocks.map((b) => ({
+      matId: b.matId,
+      startTime: b.startTime,
+      item: {
+        kind: "break" as const,
+        order: b.matOrder,
+        label: b.label,
+        minutes: b.minutes,
+        blockKind: b.kind,
+      },
+    }));
+
+    // Unplaced items sort after placed ones rather than at order 0, so a
+    // category nobody has scheduled yet never appears to be running first.
+    const byOrder = (a: { order: number | null }, b: { order: number | null }) =>
+      (a.order ?? Number.MAX_SAFE_INTEGER) - (b.order ?? Number.MAX_SAFE_INTEGER);
+
+    return {
+      event: { id: event.id, name: event.name, startDate: toIsoDate(startOfUtcDay(event.startDate)) },
+      mats: mats.map((m) => ({
+        id: m.id,
+        name: m.name,
+        running: [
+          ...categoryItems.filter((c) => c.matId === m.id).map((c) => c.item),
+          ...blockItems.filter((b) => b.matId === m.id).map((b) => b.item),
+        ].sort(byOrder),
+      })),
+      /**
+       * Categories with no mat yet. Not an error — the organiser assigns mats
+       * when the draws are done — but "what is unplaced" is the question the
+       * plan screen exists to answer, so it is a field rather than a silence.
+       */
+      unassigned: categoryItems.filter((c) => c.matId === null).map((c) => c.item),
+      /** Blocks that stop the whole venue. `startTime` is a "HH:MM" clock anchor, or null for "before the first bout"/"after the last". */
+      venueWide: blockItems
+        .filter((b) => b.matId === null)
+        .map((b) => ({ ...b.item, startTime: b.startTime })),
     };
   }
 }

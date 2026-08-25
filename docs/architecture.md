@@ -27,11 +27,12 @@ Errors thrown anywhere in a route are passed to `next(err)` and normalised by
 | Path | Role |
 |------|------|
 | `server.ts` | Express bootstrap: helmet, rate limits, CORS allow-list, cookie parser, route mounting at `/api/*`, `errorHandler` last. Listens on `PORT` (4000). |
-| `routes/` | HTTP layer only: role checks, ownership checks, status codes. One file per resource: `auth`, `athletes`, `clubs`, `events`, `entries`, `teams`, `belts`, `users`, `documents`, `reports`, `review`. |
+| `routes/` | HTTP layer only: role checks, ownership checks, status codes. One file per resource: `auth`, `athletes`, `clubs`, `events`, `entries`, `teams`, `belts`, `users`, `documents`, `reports`, `review`. Three are built for machine callers rather than the frontend — `billing`, `competition`, `federation` — with computed fields, no writes outside `billing`, and one gate per file. |
 | `services/` | Business logic + Prisma access. `*.service.ts` exported as a static-method class (`ClubService.getAll()`). |
 | `lib/prisma.ts` | Singleton Prisma client. |
 | `lib/storage.ts` | Supabase Storage via `@supabase/storage-js` (avoids the realtime/WS dependency). Builds keys as `<entityType>/<entityId>/<docType>/<uuid>.<ext>` and issues signed upload/download URLs with a TTL. |
 | `utils/auth.ts` | `authMiddleware` (cookie JWT, optional dev headers) and `requireRoles(...)`. Augments `Express.Request` with `user: { id, role, clubId }`. |
+| `utils/agent-auth.ts` | Service-account keys: `verifyApiKey`, `agentRouteGuard`, `requireAgent(OrRoles)`, and the two club assertions — `assertAgentClub` (writes, home club, ignores scopes) and `assertAgentClubRead` (reads, widened by `federation:read`). Augments `Express.Request` with `agent`. |
 | `utils/validators.ts` | All Zod schemas and shared enums. |
 | `utils/eligibility.ts` | Server-side age/gender eligibility for divisions. |
 | `utils/params.ts` | `getParam()` for typed route params. |
@@ -56,6 +57,27 @@ extension** even in TypeScript source: `import { prisma } from "./lib/prisma.js"
    inside the handler** for `CLUB_MANAGER` / `COACH` / `ATHLETE`.
 5. Auth endpoints are rate-limited to 10 requests / 15 min; the rest of `/api`
    to 300 / min.
+
+### Machine callers (`utils/agent-auth.ts`)
+
+A service-account `ApiKey` — today, the sensai agent stack — takes a third
+branch. It populates `req.agent` and **never** `req.user`, so `requireRoles`
+default-denies it everywhere; `agentRouteGuard` additionally allowlists the
+only path prefixes a key may reach at all (`/api/billing`, `/api/competition`,
+`/api/federation`), so an unguarded handler elsewhere cannot become
+agent-reachable by accident.
+
+The key's `clubId` means two different things by direction, and the split is
+the whole model:
+
+| | Without `federation:read` | With `federation:read` |
+|---|---|---|
+| Reads | home club only (`assertAgentClubRead`) | any club, plus `/api/federation` |
+| Writes | home club only (`assertAgentClub`) | **home club only — unchanged** |
+
+`assertAgentClub` does not consult scopes, so no scope widens a write. Routes
+say which promise they are making by which function they call: `grep
+assertAgentClub(` lists every path a key can change.
 
 Frontend side: `contexts/AuthContext.tsx` exposes `useAuth()` with
 `{ user, loading, login, requestMagicLink, verifyMagicLink, logout, clubId, role }`

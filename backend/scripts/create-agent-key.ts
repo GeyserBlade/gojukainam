@@ -46,9 +46,15 @@ async function main() {
         : k.expiresAt && k.expiresAt <= new Date()
           ? "EXPIRED"
           : "active";
+      // clubId is non-nullable, so it always prints. What varies is its
+      // meaning, and the reach line says which: a key with federation:read
+      // reads every club and still writes only this one.
+      const reach = k.scopes.includes("federation:read")
+        ? "reads ALL clubs, writes home club only"
+        : "home club only";
       console.log(
         `${k.prefix}  ${state.padEnd(8)}  ${k.name}\n` +
-          `          club=${k.clubId ?? "(federation-wide)"}  scopes=${k.scopes.join(",")}\n` +
+          `          club=${k.clubId} (${reach})  scopes=${k.scopes.join(",")}\n` +
           `          created=${k.createdAt.toISOString().slice(0, 10)}  ` +
           `lastUsed=${k.lastUsedAt?.toISOString().slice(0, 16) ?? "never"}`,
       );
@@ -87,7 +93,15 @@ async function main() {
         "  tsx scripts/create-agent-key.ts --list\n" +
         "  tsx scripts/create-agent-key.ts --revoke <prefix>\n\n" +
         `Known scopes: ${AGENT_SCOPES.join(", ")}\n\n` +
-        'Example:\n  tsx scripts/create-agent-key.ts sensai-tools-api clx123 "members:read,billing:read"',
+        "clubId is the key's HOME club: the only one it may ever write to.\n" +
+        "Add federation:read on top to let it READ every club in the federation\n" +
+        "and reach /api/federation. It widens no write path — that is the point\n" +
+        "of it being a scope rather than a second clubId.\n\n" +
+        "Examples:\n" +
+        '  one club:   tsx scripts/create-agent-key.ts sensai-tools-api clx123 "members:read,billing:read"\n' +
+        '  federation: tsx scripts/create-agent-key.ts sensai-tools-api clx123 \\\n' +
+        '                "members:read,billing:read,billing:write,payments:write,competition:read,federation:read"',
+
     );
     process.exit(1);
   }
@@ -130,6 +144,11 @@ async function main() {
   console.log(`  prefix  ${prefix}`);
   console.log(`  club    ${clubId} (${club.name})`);
   console.log(`  scopes  ${scopes.join(", ")}`);
+  if (scopes.includes("federation:read")) {
+    console.log("  reach   reads EVERY club; writes still land on the home club above");
+  } else {
+    console.log("  reach   this club only, reads and writes");
+  }
   console.log(`\n  ${key}\n`);
   console.log("This is the only time the key is shown — only its sha256 is stored.");
   console.log("Put it in sensai's .env as GOJUKAINAM_AGENT_KEY. It belongs to");
