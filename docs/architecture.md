@@ -85,6 +85,11 @@ and hydrates from `GET /api/auth/me`. `<Protected>` in `App.tsx` guards routes.
 
 ## Data model — `backend/prisma/schema.prisma`
 
+Prisma 7: the `datasource` block names the provider only. The connection URL
+lives in `backend/prisma.config.ts` for Migrate/Studio and is passed to the
+client at runtime as a `@prisma/adapter-pg` driver adapter (`src/lib/prisma.ts`,
+the single `PrismaClient` constructor in the codebase).
+
 Enums: `Role`, `Gender`, `EntryType`, `EntryStatus`, `TeamStatus`,
 `InvoiceStatus`, `EventStatus`, `DocumentType`, `CategoryType`.
 

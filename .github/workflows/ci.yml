@@ -63,10 +63,16 @@ jobs:
       - name: Verify migration history reproduces the schema
         # Catches schema.prisma edits that were never given a migration, and
         # out-of-band DDL. Empty output means the two agree.
+        #
+        # Prisma 7 renamed both flags: the datasource moved out of the schema
+        # into prisma.config.ts (--from-config-datasource), and
+        # --to-schema-datamodel became --to-schema. The old spelling does not
+        # fail loudly — it prints the help text and exits 0, so this check
+        # would have gone on "passing" while comparing nothing at all.
         run: |
           npx prisma migrate diff \
-            --from-schema-datasource prisma/schema.prisma \
-            --to-schema-datamodel prisma/schema.prisma \
+            --from-config-datasource \
+            --to-schema prisma/schema.prisma \
             --exit-code
 
       - run: npx tsc --noEmit
