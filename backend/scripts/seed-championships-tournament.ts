@@ -234,6 +234,11 @@ async function clean() {
   await prisma.eventCoordinator.deleteMany({ where: { eventId: { in: eventIds } } });
   await prisma.event.deleteMany({ where: { id: { in: eventIds } } });
   await prisma.athlete.deleteMany({ where: { clubId: { in: clubIds } } });
+  // ApiKey.clubId is Restrict on purpose (a nullable one would silently promote
+  // a club-scoped key to federation-wide), so a key minted against a seeded
+  // club blocks the whole clean with a P2003 that names a constraint and not a
+  // cause. Seeded clubs are throwaway; so is any key pointed at one.
+  await prisma.apiKey.deleteMany({ where: { clubId: { in: clubIds } } });
   await prisma.club.deleteMany({ where: { id: { in: clubIds } } });
   return true;
 }
