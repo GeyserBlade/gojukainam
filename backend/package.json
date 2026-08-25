@@ -3,6 +3,10 @@
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
+  "//engines": "Nixpacks picks its own Node when this is absent, and Prisma 7 raised its floor to ^20.19 || ^22.12 || >=24. Prisma 6 ran on older Node, which is why every deploy worked until the upgrade. CI pins 22 explicitly, so CI could not see the difference.",
+  "engines": {
+    "node": ">=22.12"
+  },
   "scripts": {
     "//postinstall": "Prisma 7 dropped @prisma/client's automatic postinstall generate. Without this the production image installs the stock package, which exports no PrismaClient, and the server dies at import with a SyntaxError that names the export rather than the missing step.",
     "postinstall": "prisma generate",
