@@ -32,6 +32,13 @@ async function main() {
   const args = process.argv.slice(2);
 
   if (args[0] === "--list") {
+    // Which database, before the keys and not only on the error paths. This
+    // listing is what someone reads immediately before revoking a key, and the
+    // commonest way to get that wrong is to run it against localhost while
+    // holding a prefix from production — where it reports "no key with prefix
+    // …" and the live credential stays live.
+    console.log(`\nAPI keys in ${describeTarget()}\n`);
+
     const keys = await prisma.apiKey.findMany({
       select: {
         prefix: true, name: true, clubId: true, scopes: true,
@@ -39,7 +46,7 @@ async function main() {
       },
       orderBy: { createdAt: "desc" },
     });
-    if (keys.length === 0) console.log("No API keys.");
+    if (keys.length === 0) console.log("  No API keys.");
     for (const k of keys) {
       const state = k.revokedAt
         ? "REVOKED"
@@ -70,7 +77,9 @@ async function main() {
     }
     const existing = await prisma.apiKey.findUnique({ where: { prefix } });
     if (!existing) {
-      console.error(`No key with prefix ${prefix}`);
+      console.error(`No key with prefix ${prefix} in ${describeTarget()}`);
+      console.error("If you expected production, this script reads DATABASE_URL from");
+      console.error("backend/.env, which normally points at your local database.");
       process.exit(1);
     }
     if (existing.revokedAt) {
@@ -78,7 +87,10 @@ async function main() {
       return;
     }
     await prisma.apiKey.update({ where: { prefix }, data: { revokedAt: new Date() } });
-    console.log(`Revoked ${prefix} (${existing.name}). It stops working immediately.`);
+    console.log(
+      `Revoked ${prefix} (${existing.name}) in ${describeTarget()}. ` +
+        "It stops working immediately.",
+    );
     return;
   }
 
