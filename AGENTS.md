@@ -149,9 +149,18 @@ own data and touches nothing else.
 
 Note the local `gojukainam` role lacks `CREATEDB`, so `prisma migrate dev`
 fails on its shadow database. Generate migrations with
-`prisma migrate diff --from-schema-datasource ... --to-schema-datamodel ...`,
+`prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma`,
 write the SQL into `prisma/migrations/<timestamp>_<name>/migration.sql`, then
 `prisma migrate deploy`.
+
+**Prisma 7 moved the connection URL out of the schema.** `datasource db`
+declares only the provider. The URL reaches Migrate and Studio through
+`backend/prisma.config.ts`, and the running application through a driver
+adapter in `src/lib/prisma.ts` — which is now the only place a `PrismaClient`
+is constructed, because every client needs that adapter and six copies of the
+wiring is five too many. Both files load `backend/.env` **by path**, not by
+working directory, so scripts still run from either the repository root or
+`backend/`.
 
 ## Ground rules for agents
 

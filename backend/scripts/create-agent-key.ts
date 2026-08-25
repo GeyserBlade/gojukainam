@@ -1,7 +1,9 @@
-import { PrismaClient } from "@prisma/client";
+// The shared client, not a second one: Prisma 7 requires a driver adapter on
+// every PrismaClient, and configuring that per script is six places to keep
+// in step with one. src/lib/prisma.ts is the only constructor now.
+import { prisma } from "../src/lib/prisma.js";
 import { generateApiKey, AGENT_SCOPES } from "../src/utils/agent-auth.js";
 
-const prisma = new PrismaClient();
 
 /**
  * Which database are we actually talking to? Without this the "no such club"

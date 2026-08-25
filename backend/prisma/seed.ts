@@ -1,10 +1,13 @@
-import { PrismaClient, Gender, EntryType, EntryStatus, CategoryType, Role } from "@prisma/client";
+// The shared client, not a second one: Prisma 7 requires a driver adapter on
+// every PrismaClient, and configuring that per script is six places to keep
+// in step with one. src/lib/prisma.ts is the only constructor now.
+import { prisma } from "../src/lib/prisma.js";
+import { Gender, EntryType, EntryStatus, CategoryType, Role } from "@prisma/client";
 import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import yaml from "js-yaml";
 
-const prisma = new PrismaClient();
 
 // Resolve the event config relative to this file, not the working directory —
 // `npm run prisma:seed` runs with cwd=backend/ while the config lives at the

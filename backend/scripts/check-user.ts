@@ -1,7 +1,9 @@
-import { PrismaClient } from "@prisma/client";
+// The shared client, not a second one: Prisma 7 requires a driver adapter on
+// every PrismaClient, and configuring that per script is six places to keep
+// in step with one. src/lib/prisma.ts is the only constructor now.
+import { prisma } from "../src/lib/prisma.js";
 import bcrypt from "bcryptjs";
 
-const prisma = new PrismaClient();
 
 async function main() {
   const email = process.argv[2] || "geyserrb@gmail.com";
