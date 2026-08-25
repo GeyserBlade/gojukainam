@@ -758,3 +758,43 @@ export const CompetitionResultsQuery = z.object({
   gender: z.enum(["Male", "Female"]).optional(),
   limit: z.coerce.number().int().min(1).max(80).optional(),
 });
+
+// --- Federation-wide reads (M9) --------------------------------------------
+//
+// Note what is NOT here: a clubId is optional on every one of these. That is
+// the difference between this surface and /api/billing, where clubId is
+// required precisely because a missing one would silently widen a query. Here
+// the widening IS the endpoint, and the gate that reaches it already required
+// `federation:read`.
+
+const asOfDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+
+export const FederationClubsQuery = z.object({
+  /** Matched against club name and region. */
+  q: z.string().trim().min(1).max(80).optional(),
+});
+
+export const FederationClubQuery = z.object({
+  asOf: asOfDate.optional(),
+});
+
+export const FederationAthletesQuery = z.object({
+  q: z.string().trim().min(1).max(80).optional(),
+  clubId: z.string().min(1).optional(),
+  beltId: z.string().min(1).optional(),
+  gender: z.enum(["Male", "Female"]).optional(),
+  includeInactive: QueryBoolean.optional(),
+  instructorsOnly: QueryBoolean.optional(),
+  minAge: z.coerce.number().int().min(0).max(120).optional(),
+  maxAge: z.coerce.number().int().min(0).max(120).optional(),
+  limit: z.coerce.number().int().min(1).max(200).optional(),
+  asOf: asOfDate.optional(),
+});
+
+export const FederationAthleteQuery = z.object({
+  asOf: asOfDate.optional(),
+});
+
+export const FederationSummaryQuery = z.object({
+  asOf: asOfDate.optional(),
+});

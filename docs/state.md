@@ -4,7 +4,17 @@ This file is the handoff between coding agents. It describes what is in flight
 right now, not the permanent architecture (that's
 [`architecture.md`](architecture.md)).
 
-**Last updated:** 2026-08-23 — by Claude Code: **the Run-queue
+**Last updated:** 2026-08-25 — by Claude Code, on branch
+`feat/federation-agent-reads`: **the sensai agent key can now READ every club,
+and still writes only its own.** New `federation:read` scope, new
+`/api/federation` surface (club directory, cross-club athlete lookup, belt
+ramp, federation totals), and three new event-day reads under
+`/api/competition` (categories/brackets, one bracket in full, the running
+order). `assertAgentClub` is now writes-only and `assertAgentClubRead` is its
+read counterpart — the write path is deliberately untouched, and was verified
+refused over HTTP with a federation key. See "In flight" below.
+
+Previously, 2026-08-23 — by Claude Code: **the Run-queue
 ordering issue is diagnosed and confirmed against the production data of
 the 2026-08-22 tournament. It was never a bug in `sortRunQueue`. The
 cause is `Bout.queueOrder`: one drag-to-reorder on the Run tab
@@ -266,6 +276,40 @@ port; those have since been pushed.) Everything here is verified locally against
 a database, never against production data.
 
 ## In flight (uncommitted)
+
+**Federation-wide agent reads (2026-08-25, branch `feat/federation-agent-reads`).**
+
+Ryan runs the federation, not only a dojo, so an assistant that could only
+answer about one club was answering the wrong question most of the time. The
+widening is **reads only**, and the asymmetry is the design rather than a
+convention:
+
+- `AGENT_SCOPES` gains `federation:read`. It widens reads to any club and opens
+  `/api/federation`. `assertAgentClub` does not look at scopes at all, so no
+  scope can widen a write — an invoice run still lands on the key's home club.
+  `billing.ts`'s single `gate()` is split into `gateRead` / `gateWrite` so each
+  handler names which promise it makes.
+- `AGENT_ALLOWED_PREFIXES` gains `/api/federation`. The human CRUD routers
+  (`/api/athletes`, `/api/clubs`, …) were deliberately **not** opened: doing so
+  would mean auditing every handler in them for club leakage and keeping that
+  audit true forever. `federation.ts` instead follows what `billing.ts` and
+  `competition.ts` already did — a purpose-built read surface, computed fields,
+  no writes, one gate.
+- `CompetitionService.listEvents`/`getEvent` return `club: { id, name, … }`
+  where they returned `myClub`. Once another club can be named, "my" is a lie,
+  and the counts have to say whose they are.
+
+Verified over HTTP against the local database with two minted keys (both
+revoked afterwards): a club-only key is refused another club's events (403),
+`/api/federation` (403) and `/api/athletes` (403); a `federation:read` key
+reads another club's events and members (200) and is still refused that club's
+invoice run (403).
+
+Not built, and worth knowing before someone assumes otherwise: **there is no
+grading history**. `Athlete` carries a current `beltId` and `lastGraded` and
+nothing else, so `gradedAt` is the date of the grade held *now* — "when did she
+get her green belt" is unanswerable unless green is current. The API and the
+tool descriptions both say so rather than implying a history exists.
 
 **Run-day replay harness, and a reproduction of the ordering symptom that
 does not involve `sortRunQueue` being wrong (2026-08-23).**

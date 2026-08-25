@@ -23,10 +23,16 @@ export type AgentIdentity = {
   keyId: string;
   name: string;
   /**
-   * The single club this key may act for. Non-nullable by design — see the
-   * ApiKey model. A nullable "federation-wide" value would make the club check
-   * below a no-op, so the escalation path is removed at the type rather than
-   * guarded against at each call site.
+   * The key's HOME club. Non-nullable by design — see the ApiKey model. A
+   * nullable "federation-wide" value would make the club check below a no-op,
+   * so the escalation path is removed at the type rather than guarded against
+   * at each call site.
+   *
+   * It means two different things depending on the direction of the call, and
+   * the split is the point:
+   *   writes — the only club this key may ever change. No scope widens this.
+   *   reads  — the club it sees by default, and the ONLY one it sees unless it
+   *            also carries `federation:read`.
    */
   clubId: string;
   scopes: string[];
@@ -57,6 +63,18 @@ export const AGENT_SCOPES = [
    * argument.
    */
   "competition:read",
+  /**
+   * Cross-club READS. Lets a key name a club other than its own on any read
+   * endpoint, and unlocks the /api/federation surface (the club directory,
+   * federation-wide athlete lookup, the belt ramp).
+   *
+   * It grants nothing on any write path — `assertAgentClub` does not consult
+   * scopes at all, so an invoice run or a payment still lands only on the
+   * key's home club however wide its reads are. That asymmetry is why this is
+   * a scope rather than a nullable clubId: a key can be trusted to answer
+   * "what does Swakopmund owe" without being trusted to bill them.
+   */
+  "federation:read",
 ] as const;
 export type AgentScope = (typeof AGENT_SCOPES)[number];
 
@@ -142,7 +160,11 @@ export async function verifyApiKey(raw: string): Promise<AgentIdentity | null> {
  * machine callers — keep the list short, and keep it a list of prefixes rather
  * than a wildcard, so widening it is always a visible diff.
  */
-const AGENT_ALLOWED_PREFIXES: readonly string[] = ["/api/billing", "/api/competition"];
+const AGENT_ALLOWED_PREFIXES: readonly string[] = [
+  "/api/billing",
+  "/api/competition",
+  "/api/federation",
+];
 
 /**
  * Structural default-deny for agent callers, mounted immediately after
@@ -200,9 +222,14 @@ export function requireAgentOrRoles(scopes: AgentScope[], ...roles: AuthUser["ro
 }
 
 /**
- * Club ownership for agent callers, mirroring the human check that route
- * bodies already do (docs/conventions.md: `requireRoles` says *this kind of
- * caller may call this*; the body says *…for this club*).
+ * Club ownership for agent callers on a WRITE, mirroring the human check that
+ * route bodies already do (docs/conventions.md: `requireRoles` says *this kind
+ * of caller may call this*; the body says *…for this club*).
+ *
+ * Deliberately does not look at scopes. There is no scope, present or future,
+ * that lets a key write outside its home club — if that is ever wanted it
+ * should be a second key, so the blast radius of a leak stays readable from
+ * the ApiKey row alone. Reads use `assertAgentClubRead` instead.
  *
  * No-op for human callers — their club check is the existing `req.user.clubId`
  * comparison, which this must not duplicate or contradict.
@@ -211,6 +238,35 @@ export function assertAgentClub(req: Request, clubId: string): void {
   if (req.agent && req.agent.clubId !== clubId) {
     throw { status: 403, message: "Forbidden" };
   }
+}
+
+/**
+ * The read counterpart: home club always, any club with `federation:read`.
+ *
+ * Separate function rather than a `mode` flag on assertAgentClub, so that
+ * every call site names which of the two promises it is making, and so that
+ * `grep assertAgentClub(` lists exactly the paths a key can change.
+ */
+export function assertAgentClubRead(req: Request, clubId: string): void {
+  if (!req.agent) return;
+  if (req.agent.scopes.includes("federation:read")) return;
+  if (req.agent.clubId !== clubId) {
+    throw { status: 403, message: "Forbidden" };
+  }
+}
+
+/**
+ * Whether this caller may see the whole federation.
+ *
+ * True for an agent key carrying `federation:read`, and for a SUPERADMIN or
+ * ADMIN human — the two already see cross-club data everywhere in the
+ * frontend (docs/conventions.md, "Roles in the UI"), so a separate answer here
+ * would only mean the agent surface disagreed with the screens.
+ */
+export function mayReadFederation(req: Request): boolean {
+  if (req.agent) return req.agent.scopes.includes("federation:read");
+  const role = req.user?.role;
+  return role === "SUPERADMIN" || role === "ADMIN";
 }
 
 /**

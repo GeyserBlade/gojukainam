@@ -66,11 +66,13 @@ function withAge<T extends MemberRow>(m: T, asOf: Date) {
 
 /**
  * Normalised similarity used only to rank name search results for a human or
- * an agent to choose between. Deliberately NOT the reconciliation matcher —
+ * an agent to choose between. Exported so the federation-wide athlete search
+ * ranks identically — two search boxes that disagree about who "Ben F" is
+ * would be worse than either one being imperfect. Deliberately NOT the reconciliation matcher —
  * that one lives in the recon engine, is Jaro-Winkler, and is held to a
  * threshold because money depends on it. This one just orders a dropdown.
  */
-function nameScore(candidate: string, query: string): number {
+export function nameScore(candidate: string, query: string): number {
   const c = candidate.toLowerCase();
   const q = query.toLowerCase();
   if (c === q) return 1;

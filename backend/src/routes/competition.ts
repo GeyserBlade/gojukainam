@@ -1,7 +1,7 @@
 import { Router } from "express";
 import type { Request } from "express";
 import { validate, validateMultiple } from "../middleware/validate.js";
-import { requireAgentOrRoles, assertAgentClub } from "../utils/agent-auth.js";
+import { requireAgentOrRoles, assertAgentClubRead } from "../utils/agent-auth.js";
 import { getParam } from "../utils/params.js";
 import { startOfUtcDay } from "../utils/dates.js";
 import {
@@ -19,14 +19,22 @@ export const router = Router();
  * this file:
  *
  *   entryGate  — anything that names a club. `clubScope()` runs on every one of
- *                them, so an agent key sees its own club and a CLUB_MANAGER
- *                sees theirs.
+ *                them, so a plain agent key sees its own club and a
+ *                CLUB_MANAGER sees theirs. A key holding `federation:read`,
+ *                like an admin, may name any club.
  *
  *   resultGate — podiums. No clubId anywhere, and deliberately no club check:
  *                these are already served federation-wide by
  *                /api/reports/results to every authenticated user, and by the
  *                public board to anyone with the link. ATHLETE is included for
  *                exactly that consistency.
+ *
+ *   eventGate  — brackets, mats and the running order. Event-level rather than
+ *                club-level, and for the same reason as resultGate: the public
+ *                board already serves every one of these to anyone holding the
+ *                event link. Gating them on `federation:read` would protect
+ *                nothing while making the agent worse at the one job it has on
+ *                tournament day.
  *
  * Nothing here writes. There is no competition write path for machines at all,
  * which is why none of these handlers carry an idempotency or audit concern.
@@ -43,15 +51,29 @@ const resultGate = requireAgentOrRoles(
 );
 
 /**
- * A caller may only name its own club.
+ * Brackets, mats and the running order. Same roles as resultGate and for the
+ * same reason: /api/public serves all three to anyone holding the event link,
+ * so there is nothing here to withhold from an authenticated athlete.
+ */
+const eventGate = resultGate;
+
+/**
+ * Who a caller may name.
  *
  * Both caller kinds are checked, for the reason billing.ts spells out:
  * requireAgentOrRoles only says *this kind of caller may call this*, and a
  * CLUB_MANAGER passing someone else's clubId is exactly as much a cross-tenant
  * read as a service key doing it.
+ *
+ * Entries used to be own-club-only for everyone, on the grounds that who a
+ * club has entered is competitive information before the event runs. That
+ * still holds between clubs — a CLUB_MANAGER is refused here exactly as
+ * before. It never held for the federation itself, which approves those
+ * entries, and `federation:read` is how a key says it is asking on the
+ * federation's behalf rather than a club's.
  */
 function clubScope(req: Request, clubId: string): void {
-  assertAgentClub(req, clubId);
+  assertAgentClubRead(req, clubId);
   const role = req.user?.role;
   if (role && role !== "SUPERADMIN" && role !== "ADMIN" && req.user?.clubId !== clubId) {
     throw { status: 403, message: "Forbidden" };
@@ -156,5 +178,30 @@ router.get("/results", resultGate, validate(CompetitionResultsQuery, "query"), a
         ...(q.limit !== undefined ? { limit: q.limit } : {}),
       }),
     );
+  } catch (err) { next(err); }
+});
+
+// ---------------------------------------------------------------------------
+// Tournament day — brackets, mats, running order.
+//
+// Event-scoped: no clubId anywhere, deliberately. A bracket contains every
+// club by construction, and asking "which of these bouts are mine" is what
+// list_event_entries and get_athlete_competition_record are for.
+// ---------------------------------------------------------------------------
+router.get("/events/:id/draws", eventGate, validate(IdParam, "params"), async (req, res, next) => {
+  try {
+    res.json(await CompetitionService.listDraws(getParam(req.params.id)));
+  } catch (err) { next(err); }
+});
+
+router.get("/events/:id/schedule", eventGate, validate(IdParam, "params"), async (req, res, next) => {
+  try {
+    res.json(await CompetitionService.schedule(getParam(req.params.id)));
+  } catch (err) { next(err); }
+});
+
+router.get("/draws/:id", eventGate, validate(IdParam, "params"), async (req, res, next) => {
+  try {
+    res.json(await CompetitionService.getDraw(getParam(req.params.id)));
   } catch (err) { next(err); }
 });
