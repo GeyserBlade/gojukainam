@@ -39,6 +39,7 @@ const HubSetupPage = lazy(() => import("./pages/hub/Setup"));
 const HubEstimatorPage = lazy(() => import("./pages/hub/Estimator"));
 const HubPlanPage = lazy(() => import("./pages/hub/Plan"));
 const HubPracticePage = lazy(() => import("./pages/hub/Practice"));
+const HubAthletesPage = lazy(() => import("./pages/hub/Athletes"));
 const ScoreboardPage = lazy(() => import("./pages/Scoreboard"));
 const KataScoreboardPage = lazy(() => import("./pages/KataScoreboard"));
 const ScoreboardDisplayPage = lazy(() => import("./pages/ScoreboardDisplay"));
@@ -86,6 +87,7 @@ const AppRoutes: React.FC = () => (
         <Route path="estimator" element={<HubEstimatorPage />} />
         <Route path="plan" element={<HubPlanPage />} />
         <Route path="practice" element={<HubPracticePage />} />
+        <Route path="athletes" element={<HubAthletesPage />} />
         <Route path="run" element={<RunPage />} />
         <Route path="results" element={<ResultsPage />} />
       </Route>

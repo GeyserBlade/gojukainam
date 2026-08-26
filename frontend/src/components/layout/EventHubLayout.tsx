@@ -45,6 +45,10 @@ const TABS: HubTab[] = [
   { to: "/hub/practice", label: "Practice", roles: ALL },
   { to: "/hub/run", label: "Run", roles: ALL },
   { to: "/hub/results", label: "Results", roles: ALL },
+  // Results read the other way round: not "who won this category" but "how is
+  // this one athlete doing", across every category they entered. Same audience
+  // as Draws and Results, out of the same brackets.
+  { to: "/hub/athletes", label: "Athletes", roles: ALL },
 ]
 
 const STATUS_STYLES: Record<EventStatus, string> = {

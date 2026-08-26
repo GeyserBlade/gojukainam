@@ -1,6 +1,6 @@
 import { cn } from "@/lib/utils"
 import { roundLabel } from "@/lib/draws"
-import type { AthleteRunSummary, AthleteRunStatus } from "@/lib/public"
+import type { AthleteRunSummary, AthleteRunStatus } from "@/lib/athlete-runs"
 
 /** 🥇/🥈/🥉 for a finishing place, or null for anything else. */
 export const medalFor = (place: number | null) =>
@@ -9,8 +9,9 @@ export const medalFor = (place: number | null) =>
 const PLACE_WORD: Record<number, string> = { 1: "Gold", 2: "Silver", 3: "Bronze" }
 
 /**
- * The one line that answers a parent's actual question: is my child on now,
- * when are they next, or is it over?
+ * The one line that answers the question both the spectator board and the
+ * hub's athlete search are asked: is this athlete on now, when are they next,
+ * or is it over?
  *
  * Round naming reuses `lib/draws.ts`'s `roundLabel`, the same function the
  * bracket view and the coordinator's call-up sheets use, so "Semi-finals"

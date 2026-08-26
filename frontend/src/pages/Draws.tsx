@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
-import { useNavigate } from "react-router-dom"
+import { useNavigate, useSearchParams } from "react-router-dom"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   AlertTriangle,
@@ -79,6 +79,9 @@ const CategoryCard = ({
   <button
     type="button"
     onClick={onSelect}
+    // Addressable so a `?draw=` arrival can scroll its category into view; the
+    // list is 40-odd cards and the selected one is usually below the fold.
+    data-category-key={categoryKey(row)}
     className={cn(
       "w-full rounded-md border bg-card p-3 text-left transition-colors hover:bg-accent",
       selected && "border-primary ring-1 ring-primary",
@@ -130,6 +133,7 @@ const CategoryCard = ({
 export default function DrawsPage() {
   const { canManageEvent } = useAuth()
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const toast = useToast()
   const apiError = useApiErrorToast()
   const confirm = useConfirm()
@@ -154,6 +158,35 @@ export default function DrawsPage() {
     queryFn: () => listDrawCategories(eventId),
     enabled: !!eventId,
   })
+
+  // Deep link from the hub's athlete search: `?draw=<id>` opens that draw's
+  // category. Categories are keyed by division + weight class, not by draw id,
+  // so this can only resolve once the list has loaded. The param is dropped
+  // after it is consumed — selection is state from then on, and a URL that
+  // still named a draw would contradict the next category the user clicks.
+  const requestedDrawId = searchParams.get("draw")
+  useEffect(() => {
+    if (!requestedDrawId || !categories) return
+    const row = categories.find((c) => c.draw?.id === requestedDrawId)
+    if (row) {
+      const key = categoryKey(row)
+      setSelectedKey(key)
+      // After paint, or the card being scrolled to has not rendered yet.
+      requestAnimationFrame(() => {
+        document
+          .querySelector(`[data-category-key="${CSS.escape(key)}"]`)
+          ?.scrollIntoView({ block: "nearest" })
+      })
+    }
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev)
+        next.delete("draw")
+        return next
+      },
+      { replace: true },
+    )
+  }, [requestedDrawId, categories, setSearchParams])
 
   const selected = useMemo(
     () => categories?.find((c) => categoryKey(c) === selectedKey) ?? null,

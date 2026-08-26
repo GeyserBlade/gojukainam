@@ -4,29 +4,10 @@ import { Search, X } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
-import type { PublicAthleteRow } from "@/lib/public"
-import { RunStatusChip, medalFor } from "./AthleteStatus"
+import { matchesAthlete, searchTerms, type AthleteRow } from "@/lib/athlete-runs"
+import { RunStatusChip, medalFor } from "@/components/athletes/AthleteStatus"
 
-/**
- * Fold accents and case so "Müller" is found by typing "muller" — the search
- * is for a parent thumbing a name into a phone, not for exact matching.
- */
-const fold = (value: string) =>
-  value
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-
-/**
- * Match every typed word somewhere in the athlete's name or club, in any
- * order, so "sarah windhoek" and "windhoek sarah" both work.
- */
-function matches(row: PublicAthleteRow, terms: string[]): boolean {
-  const haystack = `${fold(row.name)} ${fold(row.clubName)}`
-  return terms.every((term) => haystack.includes(term))
-}
-
-function AthleteResult({ row, onSelect }: { row: PublicAthleteRow; onSelect: () => void }) {
+function AthleteResult({ row, onSelect }: { row: AthleteRow; onSelect: () => void }) {
   // Medals first, then whatever is happening now — the two things worth
   // seeing without opening the athlete.
   const headline =
@@ -80,7 +61,7 @@ export function AthleteSearch({
 }: {
   open: boolean
   onClose: () => void
-  athletes: PublicAthleteRow[]
+  athletes: AthleteRow[]
   isLoading: boolean
   onSelect: (athleteId: string) => void
 }) {
@@ -92,9 +73,9 @@ export function AthleteSearch({
     else setQuery("")
   }, [open])
 
-  const terms = useMemo(() => fold(query).split(/\s+/).filter(Boolean), [query])
+  const terms = useMemo(() => searchTerms(query), [query])
   const found = useMemo(
-    () => (terms.length === 0 ? [] : athletes.filter((row) => matches(row, terms))),
+    () => (terms.length === 0 ? [] : athletes.filter((row) => matchesAthlete(row, terms))),
     [athletes, terms],
   )
 
