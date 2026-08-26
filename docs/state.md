@@ -4,7 +4,15 @@ This file is the handoff between coding agents. It describes what is in flight
 right now, not the permanent architecture (that's
 [`architecture.md`](architecture.md)).
 
-**Last updated:** 2026-08-25 — by Claude Code, on branch
+**Last updated:** 2026-08-26 — by Claude Code, on `main` (uncommitted):
+**the spectator board's athlete search now exists in the event hub too**, as a
+new `/hub/athletes` tab. Same question, same answer, same code: one shared
+backend payload (`AthleteIndexService`, off one shared cache entry) and one
+shared renderer (`components/athletes/`), served by share token to a parent and
+by event id to a signed-in coach. Each run card in the hub links through to its
+bracket on the Draws tab. See "In flight" below.
+
+Previously, 2026-08-25 — by Claude Code, on branch
 `feat/federation-agent-reads`: **the sensai agent key can now READ every club,
 and still writes only its own.** New `federation:read` scope, new
 `/api/federation` surface (club directory, cross-club athlete lookup, belt
@@ -276,6 +284,75 @@ port; those have since been pushed.) Everything here is verified locally against
 a database, never against production data.
 
 ## In flight (uncommitted)
+
+**Athlete search in the event hub (2026-08-26, uncommitted on `main`).**
+
+The public board's best feature — type a name, see every category that athlete
+entered, where each one stands, and how each bout went — was reachable only by
+share token. The people running the tournament had the same question all day
+and had to answer it by crossing three tabs: Draws knows one bracket, Results
+knows the podiums, Run knows what is on now.
+
+It is now `/hub/athletes`, and the point of the change is that it is **the same
+feature, not a second one**:
+
+- `services/athlete-index.service.ts` is new and owns the payload. It is
+  `public.service.ts`'s athlete index lifted out verbatim, cache and all —
+  still keyed `${eventId}:athletes` in `BoardCache`, so the hub and the board
+  share one entry and one 20s TTL, and a hub read warms the board. The heavy
+  part (`DrawService.eventAthletes`, one replay of every bracket in the event)
+  is unchanged and still lives next to the compute it depends on.
+- `PublicService.getAthletes` / `getAthlete` now just resolve the token and
+  delegate. The two public endpoints return byte-identical payloads — verified
+  against the local database before and after.
+- `GET /api/draws/athletes?eventId=` and `/api/draws/athletes/:athleteId` are
+  the hub's authenticated pair, gated by `requireRoles(...VIEW_ROLES)` — the
+  same gate as the category overview on the same router. That is deliberate: a
+  bracket, a podium and an athlete's run through them are the same facts at
+  three altitudes, and the board already publishes all three by share token.
+  Declared **before** `/:id` or the param route swallows `/athletes`.
+- Each run card in the hub carries a **Bracket** link to that category on the
+  Draws tab, via a new `?draw=<drawId>` deep link. `DrawsPage` keys its
+  categories by division + weight class, not by draw id, so the param can only
+  resolve once the category list has loaded; it is then consumed, the selected
+  card is scrolled into view (the list runs to 40-odd cards and the target is
+  usually below the fold), and the param is dropped with `replace: true` so a
+  stale URL cannot contradict the next category the user clicks.
+- The link is a `bracketHref` **prop** on `AthleteRuns`, not a branch on "am I
+  public?". The spectator board passes nothing and renders no link — it has no
+  bracket view to link to — and the shared renderer never learns which surface
+  it is on. `bracketHref` returning null for a run is normal, not an error: an
+  undrawn category has no bracket yet.
+- Frontend: types and the search helpers move to `lib/athlete-runs.ts` (they
+  describe `eventAthletes`' output, not the board); `lib/public.ts` re-exports
+  them. `components/athletes/` now holds `AthleteStatus` (moved) and
+  `AthleteRuns` (extracted from `AthleteSheet`). `AthleteSheet` is now a thin
+  token-fetching wrapper around `AthleteRuns`, so the sheet a parent holds and
+  the pane a coach reads cannot drift apart.
+
+The hub page is two panes rather than the board's full-screen-search-then-sheet:
+the hub is a desk with a keyboard, so the list stays visible and the detail pane
+holds still while you type another name. A selected athlete who stops matching
+the query stays on screen for the same reason. The list shows everyone when the
+query is empty (the board shows a prompt — a spectator wants one child, a
+coordinator browses), caps rendering at 100 rows, and says the true match count
+above it.
+
+Verified against the local seeded event (187 athletes, 41 categories decided):
+both new endpoints 200 with correct bracket data, unknown athlete 404, missing
+`eventId` 400, no cookie 401; in the browser, search by name and by club with
+terms in any order, selection, medals, repechage bouts with bronze badges, and
+the public board's own sheet still rendering identically through the shared
+component — and, on the board, with no Bracket link and no interactive element
+in the sheet but its close button. The deep link was followed end to end: it
+opens Draws on KATA BOYS 12-13 with the podium matching the athlete card's
+silver, scrolls that category into view, and leaves the URL as `/hub/draws`.
+`npx tsc --noEmit` and `npm run build` clean in both projects.
+
+One branch is unexercised by the seed data rather than untested by choice:
+every category in the seeded event is drawn (346 runs, 0 with a null `drawId`),
+so the "undrawn category renders no link" path has no live data to hit. It is a
+`run.drawId ? … : null` guard.
 
 **Federation-wide agent reads (2026-08-25, branch `feat/federation-agent-reads`).**
 

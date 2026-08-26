@@ -2,6 +2,7 @@ import { Router } from "express";
 import { requireRoles } from "../utils/auth.js";
 import { requireBoutScorer, requireDrawViewer, requireEventManager } from "../utils/event-scope.js";
 import { DrawService } from "../services/draw.service.js";
+import { AthleteIndexService } from "../services/athlete-index.service.js";
 import { validate, validateMultiple } from "../middleware/validate.js";
 import {
   CreateDraw,
@@ -55,6 +56,29 @@ router.put("/seeds", requireEventManager({ in: "body", key: "eventId" }), valida
       seeds,
       { id: req.user!.id }
     ));
+  } catch (err: any) {
+    if (err.status && err.message) return res.status(err.status).json({ error: err.message });
+    next(err);
+  }
+});
+
+// Athlete search index for an event: one row per competitor with a one-line
+// status per category. Declared before "/:id" or the param route swallows
+// "/athletes". Same gate as the category overview above — a bracket, a podium
+// and an athlete's run through them are the same facts at three altitudes, and
+// the spectator board already publishes all three by share token.
+router.get("/athletes", requireRoles(...VIEW_ROLES), validate(EventIdQuery, "query"), async (req, res, next) => {
+  try {
+    const { eventId } = req.query as { eventId: string };
+    res.json(await AthleteIndexService.list(eventId));
+  } catch (err) { next(err); }
+});
+
+// One athlete's full run: every category they entered and every bout in each
+router.get("/athletes/:athleteId", requireRoles(...VIEW_ROLES), validate(EventIdQuery, "query"), async (req, res, next) => {
+  try {
+    const { eventId } = req.query as { eventId: string };
+    res.json(await AthleteIndexService.get(eventId, getParam(req.params.athleteId)));
   } catch (err: any) {
     if (err.status && err.message) return res.status(err.status).json({ error: err.message });
     next(err);

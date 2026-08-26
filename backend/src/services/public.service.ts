@@ -1,6 +1,7 @@
 import { prisma } from "../lib/prisma.js";
 import { RunService } from "./run.service.js";
-import { DrawService, type AthleteRun } from "./draw.service.js";
+import { DrawService } from "./draw.service.js";
+import { AthleteIndexService } from "./athlete-index.service.js";
 import { PlanService } from "./plan.service.js";
 import { BoardCache } from "../utils/board-cache.js";
 
@@ -27,9 +28,8 @@ async function eventForToken(token: string) {
 
 /**
  * Build `key`'s payload, or serve the cached one. Keys are namespaced by event
- * id so the live board, the athlete index and the schedule expire separately —
- * they change at wildly different rates, and the live board is the only one
- * polled hard.
+ * id so the live board and the schedule expire separately — they change at
+ * wildly different rates, and the live board is the only one polled hard.
  */
 async function cached<T>(key: string, ttlMs: number, build: () => Promise<T>): Promise<T> {
   const hit = BoardCache.get(key) as T | undefined;
@@ -41,11 +41,12 @@ async function cached<T>(key: string, ttlMs: number, build: () => Promise<T>): P
 
 /**
  * How long each payload may be stale. The live board is polled every 15s by
- * every phone in the hall, so it stays tight; the athlete index only moves
- * when a result lands; the schedule is set the night before and is the one
- * thing a spectator is happy to see a minute old.
+ * every phone in the hall, so it stays tight; the schedule is set the night
+ * before and is the one thing a spectator is happy to see a minute old. The
+ * athlete index has its own TTL in `athlete-index.service.ts`, which owns that
+ * payload for the hub as well as for here.
  */
-const TTL = { board: 10_000, athletes: 20_000, schedule: 120_000 } as const;
+const TTL = { board: 10_000, schedule: 120_000 } as const;
 
 export class PublicService {
   static async getBoard(token: string) {
@@ -99,40 +100,17 @@ export class PublicService {
   /**
    * Search index: every competitor, with a one-line status per category.
    *
-   * Lean on purpose — this is what the search list filters over, so it holds
-   * no bout-by-bout history. `getAthlete` serves that for the one athlete a
-   * spectator actually taps, off the same cached computation.
+   * Both this and `getAthlete` are `AthleteIndexService`'s payloads unchanged
+   * — the event hub's athlete search serves the same two, off the same cache
+   * entry, to a signed-in coach rather than to a phone at the venue.
    */
-  static async getAthletes(token: string) {
-    const event = await eventForToken(token);
-    const athletes = await PublicService.athleteIndex(event.id);
-    return {
-      athletes: athletes.map((a) => ({
-        id: a.id,
-        name: a.name,
-        clubId: a.clubId,
-        clubName: a.clubName,
-        runs: a.runs.map(summariseRun),
-      })),
-    };
+  static getAthletes(token: string) {
+    return eventForToken(token).then((event) => AthleteIndexService.list(event.id));
   }
 
   /** One athlete's full story: every category, every bout, in bracket order. */
-  static async getAthlete(token: string, athleteId: string) {
-    const event = await eventForToken(token);
-    const athletes = await PublicService.athleteIndex(event.id);
-    const athlete = athletes.find((a) => a.id === athleteId);
-    if (!athlete) throw { status: 404, message: "Athlete not found on this board" };
-    return athlete;
-  }
-
-  /**
-   * The full per-athlete index, cached once and projected two ways above. One
-   * bracket replay of the whole event is not cheap, and the search list and a
-   * tapped athlete want the same computation at different depths.
-   */
-  private static athleteIndex(eventId: string) {
-    return cached(`${eventId}:athletes`, TTL.athletes, () => DrawService.eventAthletes(eventId));
+  static getAthlete(token: string, athleteId: string) {
+    return eventForToken(token).then((event) => AthleteIndexService.get(event.id, athleteId));
   }
 }
 
@@ -143,16 +121,4 @@ const publicQueueItem = (item: QueueItem) => ({
   ...item,
   aka: { entryId: item.aka.entryId, name: item.aka.name, clubName: item.aka.clubName },
   ao: { entryId: item.ao.entryId, name: item.ao.name, clubName: item.ao.clubName },
-});
-
-/** A run without its bout list — enough for a search row and a status chip. */
-const summariseRun = (r: AthleteRun) => ({
-  drawId: r.drawId,
-  category: r.category,
-  discipline: r.discipline,
-  matName: r.matName,
-  place: r.place,
-  status: r.status,
-  next: r.next,
-  size: r.size,
 });

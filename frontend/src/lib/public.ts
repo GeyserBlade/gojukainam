@@ -4,6 +4,7 @@ import type { EventResults } from "./results"
 import type { EventStatus } from "./events"
 import type { PlanBoard } from "./plan"
 import { normalizeEventTiming } from "./timing"
+import type { AthleteDetail, AthleteRow } from "./athlete-runs"
 
 // The spectator board's client layer. Four endpoints rather than one payload,
 // because they change at very different rates: the live board is polled hard,
@@ -32,69 +33,18 @@ export interface PublicBoard {
   results: EventResults
 }
 
-/** See `AthleteRunStatus` in the draw service for what each value means. */
-export type AthleteRunStatus =
-  | "NOT_DRAWN"
-  | "READY"
-  | "WAITING"
-  | "REPECHAGE_HOPE"
-  | "OUT"
-  | "MEDAL"
-
-export interface AthleteNextBout {
-  phase: "MAIN" | "REPECHAGE"
-  round: number
-  opponentName: string | null
-}
-
-/** A category run as the search list shows it — no bout history. */
-export interface AthleteRunSummary {
-  /** null before the category has been drawn. */
-  drawId: string | null
-  category: string
-  discipline: "KATA" | "KUMITE"
-  matName: string | null
-  place: number | null
-  status: AthleteRunStatus
-  next: AthleteNextBout | null
-  size: number
-}
-
-export interface PublicAthleteRow {
-  id: string
-  name: string
-  clubId: string
-  clubName: string
-  runs: AthleteRunSummary[]
-}
-
-export interface AthleteBout {
-  phase: "MAIN" | "REPECHAGE"
-  round: number
-  bye: boolean
-  opponentName: string | null
-  opponentClubName: string | null
-  won: boolean | null
-  scoreFor: number | null
-  scoreAgainst: number | null
-  outcome: string | null
-  startedAt: string | null
-}
-
-export interface AthleteRun extends AthleteRunSummary {
-  entryId: string
-  drawStatus: "DRAWN" | "IN_PROGRESS" | "COMPLETED"
-  matId: string | null
-  bouts: AthleteBout[]
-}
-
-export interface PublicAthlete {
-  id: string
-  name: string
-  clubId: string
-  clubName: string
-  runs: AthleteRun[]
-}
+// One athlete's run through the event is shared with the hub's athlete search,
+// so its types live in `lib/athlete-runs.ts` and are re-exported here for the
+// board's own components.
+export type {
+  AthleteRunStatus,
+  AthleteNextBout,
+  AthleteRunSummary,
+  AthleteBout,
+  AthleteRun,
+  AthleteRow,
+  AthleteDetail,
+} from "./athlete-runs"
 
 export interface PublicSchedule {
   event: { name: string; startDate: string }
@@ -117,12 +67,12 @@ export async function getPublicSchedule(token: string): Promise<PublicSchedule> 
   return { ...res.data, plan: { ...res.data.plan, timing: normalizeEventTiming(res.data.plan.timing) } }
 }
 
-export async function getPublicAthletes(token: string): Promise<PublicAthleteRow[]> {
+export async function getPublicAthletes(token: string): Promise<AthleteRow[]> {
   const res = await api.get(`/public/board/${token}/athletes`)
   return res.data.athletes
 }
 
-export async function getPublicAthlete(token: string, athleteId: string): Promise<PublicAthlete> {
+export async function getPublicAthlete(token: string, athleteId: string): Promise<AthleteDetail> {
   const res = await api.get(`/public/board/${token}/athletes/${athleteId}`)
   return res.data
 }
