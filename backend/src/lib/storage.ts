@@ -47,9 +47,15 @@ export function buildStorageKey(
 }
 
 export async function createUploadUrl(key: string): Promise<string> {
-  const { data, error } = await getStorage().from(BUCKET).createSignedUploadUrl(key);
-  if (error || !data) throw new Error(`Failed to create upload URL: ${error?.message}`);
-  return data.signedUrl;
+  try {
+    const { data, error } = await getStorage().from(BUCKET).createSignedUploadUrl(key);
+    if (error || !data) throw error ?? new Error("Storage returned no upload URL");
+    return data.signedUrl;
+  } catch (cause) {
+    // Keep provider diagnostics in server logs without exposing credentials or URLs.
+    const error = new Error("Document storage is currently unavailable. Please try again later or contact an administrator.");
+    throw Object.assign(error, { status: 503, cause });
+  }
 }
 
 export async function createDownloadUrl(key: string): Promise<string> {

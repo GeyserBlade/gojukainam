@@ -1,7 +1,7 @@
 import { useMemo } from "react"
 import { useNavigate } from "react-router-dom"
 import { type ColumnDef } from "@tanstack/react-table"
-import { ArrowUpDown, MoreHorizontal } from "lucide-react"
+import { ArrowUpDown, FileText, MoreHorizontal } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -33,6 +33,7 @@ const formatDate = (value?: string | null) =>
 
 interface AthletesDataTableProps {
   athletes: Athlete[]
+  onDocuments: (athlete: Athlete) => void
   onDelete: (athlete: Athlete) => void
   isDeleting?: boolean
   toolbar?: React.ReactNode
@@ -41,6 +42,7 @@ interface AthletesDataTableProps {
 
 export function AthletesDataTable({
   athletes,
+  onDocuments,
   onDelete,
   isDeleting,
   toolbar,
@@ -171,7 +173,16 @@ export function AthletesDataTable({
         cell: ({ row }) => {
           const a = row.original
           return (
-            <div className="flex justify-end">
+            <div className="flex items-center justify-end gap-1">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => onDocuments(a)}
+                aria-label={`Documents for ${a.firstName} ${a.lastName}`}
+              >
+                <FileText />
+                Documents
+              </Button>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button
@@ -203,7 +214,7 @@ export function AthletesDataTable({
         },
       },
     ],
-    [navigate, onDelete, isDeleting],
+    [navigate, onDocuments, onDelete, isDeleting],
   )
 
   return (

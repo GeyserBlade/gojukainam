@@ -283,6 +283,47 @@ previously claimed several unpushed commits — the pool endpoint and the redesi
 port; those have since been pushed.) Everything here is verified locally against
 a database, never against production data.
 
+## Document access release — 2026-09-14
+
+**Athlete documents shortcut (2026-09-14, Codex).** Visible Documents actions
+on desktop athlete rows and mobile cards open the existing DocumentSection in
+a scrollable dialog, identifying the athlete and club while preserving list
+search/filters. Upload/delete UI permissions match AthleteForm; backend routes
+and club authorization are reused. Mobile card keyboard handling now responds
+only when the card itself is the target, so child controls do not open Edit.
+Both projects passed `npx tsc --noEmit` and `npm run build`. Browser verification
+reached local sign-in but the documented dev@localhost.test account was rejected
+as Invalid credentials; the dialog and mobile interactions have not been verified
+in-browser. Temporary dev servers were stopped. Port 4000 belongs to another
+Docker/uvicorn app, so this check used backend 4001 and a process-only frontend
+API override; no env files changed. No new dependencies. Included in the document-access release commit on main;
+production deployment verification remains pending.
+
+**Storage incident resolved:** user confirmed the production Supabase project
+was inactive; reactivating it restored uploads, verified by their successful
+production retry. The earlier local DNS failure below was diagnostic evidence,
+not a separate outstanding production issue.
+
+
+**Athlete document upload investigation (2026-09-14, Codex).** The Supabase
+URL configured in local `backend/.env` fails DNS resolution (`ENOTFOUND`),
+confirmed outside the sandbox by calling `createSignedUploadUrl` without
+uploading any file or creating a database record. This prevents upload URL
+creation and previously became an opaque 500. Production configuration has
+not been inspected; do not assume it matches the local file. Storage must be
+restored/reconfigured to complete uploads. No credentials or environment
+files changed.
+
+`createUploadUrl` now returns a safe 503 message on provider/configuration
+failure and retains the original cause for server logging. `DocumentSection`
+now displays API error messages and resets the file input so a failed file can
+be selected again. Both projects passed `npx tsc --noEmit` and `npm run build`.
+Isolated mocked-storage checks passed for missing configuration, successful
+signing, and provider failure. Browser behavior and an end-to-end upload were
+not verified; the configured storage host is unavailable. No production changes
+made.
+
+
 ## In flight (uncommitted)
 
 **Athlete search in the event hub (2026-08-26, uncommitted on `main`).**

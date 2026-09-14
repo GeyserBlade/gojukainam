@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react"
+import { useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { PlusCircle, Search, Users } from "lucide-react"
@@ -14,6 +14,10 @@ import {
   defaultFilters,
   type AthletesFilters,
 } from "@/components/athletes/AthletesFiltersSheet"
+import { DocumentSection } from "@/components/DocumentSection"
+import {
+  Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -49,6 +53,15 @@ const AthletesListPage = () => {
     role === "CLUB_MANAGER" || role === "ADMIN" || role === "SUPERADMIN"
   const isDesktop = useMediaQuery("(min-width: 768px)")
   const showClubFilter = role === "SUPERADMIN" || role === "ADMIN"
+
+  const [documentAthlete, setDocumentAthlete] = useState<Athlete | null>(null)
+  const documentsTrigger = useRef<HTMLElement | null>(null)
+
+  function openDocuments(athlete: Athlete) {
+    documentsTrigger.current = document.activeElement instanceof HTMLElement
+      ? document.activeElement : null
+    setDocumentAthlete(athlete)
+  }
 
   const [q, setQ] = useState("")
   const [filters, setFilters] = useState<AthletesFilters>(() => defaultFilters(clubId))
@@ -215,6 +228,7 @@ const AthletesListPage = () => {
           {isDesktop ? (
             <AthletesDataTable
               athletes={filtered}
+              onDocuments={openDocuments}
               onDelete={onDelete}
               isDeleting={deleteMutation.isPending}
               toolbar={searchAndFilters}
@@ -252,6 +266,7 @@ const AthletesListPage = () => {
                   <AthleteCard
                     key={a.id}
                     athlete={a}
+                    onDocuments={() => openDocuments(a)}
                     onEdit={() => navigate(`/athletes/${a.id}/edit`)}
                     onDelete={() => onDelete(a)}
                     isDeleting={deleteMutation.isPending}
@@ -262,6 +277,33 @@ const AthletesListPage = () => {
           )}
         </>
       )}
+      <Dialog open={!!documentAthlete} onOpenChange={(open) => { if (!open) setDocumentAthlete(null) }}>
+        <DialogContent
+          className="max-h-[90dvh] overflow-y-auto sm:max-w-2xl"
+          onCloseAutoFocus={(event) => {
+            event.preventDefault()
+            documentsTrigger.current?.focus()
+          }}
+        >
+          <DialogHeader className="pr-6">
+            <DialogTitle className="leading-tight break-words">
+              {documentAthlete?.firstName} {documentAthlete?.lastName}
+            </DialogTitle>
+            <DialogDescription>
+              {documentAthlete?.club?.name ? `${documentAthlete.club.name} · ` : ""}
+              Athlete documents
+            </DialogDescription>
+          </DialogHeader>
+          {documentAthlete && (
+            <DocumentSection
+              key={documentAthlete.id}
+              entityFilter={{ athleteId: documentAthlete.id }}
+              canUpload={canManage}
+              canDelete={role === "SUPERADMIN" || role === "ADMIN"}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
     </AppShell>
   )
 }

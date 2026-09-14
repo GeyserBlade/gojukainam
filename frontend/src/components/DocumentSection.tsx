@@ -1,4 +1,5 @@
 import { useRef, useState } from "react"
+import { isAxiosError } from "axios"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { FileText, Loader2, Trash2, Upload } from "lucide-react"
 
@@ -152,6 +153,8 @@ export function DocumentSection({ entityFilter, canUpload, canDelete, title = "D
   async function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
+    // Reset immediately so selecting the same file after a failure retries it.
+    e.target.value = ""
 
     setUploadError(null)
 
@@ -179,7 +182,9 @@ export function DocumentSection({ entityFilter, canUpload, canDelete, title = "D
       setLabel("")
       e.target.value = ""
     } catch (err) {
-      const msg = (err as Error)?.message || "Upload failed"
+      const apiMessage = isAxiosError(err) ? err.response?.data?.error : undefined
+      const msg = typeof apiMessage === "string" ? apiMessage :
+        err instanceof Error ? err.message : "Upload failed"
       setUploadError(msg)
     } finally {
       setUploading(false)

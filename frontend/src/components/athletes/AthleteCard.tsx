@@ -1,4 +1,4 @@
-import { MoreVertical } from "lucide-react"
+import { FileText, MoreVertical } from "lucide-react"
 
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -16,6 +16,7 @@ import type { Athlete } from "@/lib/athletes"
 
 interface AthleteCardProps {
   athlete: Athlete
+  onDocuments: () => void
   onEdit: () => void
   onDelete: () => void
   isDeleting?: boolean
@@ -35,7 +36,7 @@ function calculateAge(dob?: string | null) {
 const formatDate = (value?: string | null) =>
   value ? new Date(value).toLocaleDateString() : null
 
-export function AthleteCard({ athlete, onEdit, onDelete, isDeleting }: AthleteCardProps) {
+export function AthleteCard({ athlete, onDocuments, onEdit, onDelete, isDeleting }: AthleteCardProps) {
   const age = calculateAge(athlete.dob)
   const inactive = athlete.isActive === false
 
@@ -45,7 +46,7 @@ export function AthleteCard({ athlete, onEdit, onDelete, isDeleting }: AthleteCa
       tabIndex={0}
       onClick={onEdit}
       onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
+        if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) {
           e.preventDefault()
           onEdit()
         }
@@ -128,6 +129,19 @@ export function AthleteCard({ athlete, onEdit, onDelete, isDeleting }: AthleteCa
           )}
         </div>
       )}
+      <Button
+        variant="outline"
+        size="sm"
+        className="w-full"
+        aria-label={`Documents for ${athlete.firstName} ${athlete.lastName}`}
+        onClick={(e) => {
+          e.stopPropagation()
+          onDocuments()
+        }}
+      >
+        <FileText />
+        Documents
+      </Button>
     </Card>
   )
 }
