@@ -8,7 +8,7 @@ import { startOfUtcDay } from "../utils/dates.js";
 import {
   AllocatePayment, ApplyInvoiceDiscount, ArrearsQuery, BillingClubQuery, BillingInvoicesQuery, BillingMemberSearchQuery,
   BillingMembersQuery, BillingPaymentsQuery, BillingSummaryQuery, BirthdaysQuery,
-  CreateFeeSchedule, CreateInvoiceRun, CreateSubscription, OpenInvoicesQuery,
+  CreateFeeSchedule, CreateInvoiceRun, CreateSubscription, InstructorIncomeQuery, OpenInvoicesQuery,
   RecordPayment, RosterGapsQuery, SetMemberInvoiceStatus,
 } from "../utils/validators.js";
 import { BillingMemberService } from "../services/billing-member.service.js";
@@ -19,6 +19,7 @@ import {
   FeeScheduleService, SubscriptionService,
 } from "../services/billing.service.js";
 import { prisma } from "../lib/prisma.js";
+import { InstructorIncomeService } from "../services/instructor-income.service.js";
 
 export const router = Router();
 
@@ -266,6 +267,19 @@ router.get("/summary", readGate, validate(BillingSummaryQuery, "query"), async (
         asOfFrom(undefined),
       ),
     );
+  } catch (err) { next(err); }
+});
+
+/**
+ * Monthly fee income split between instructors by class. Billing-gated like
+ * every other money read: a club not on invoicing has no allocations to split.
+ * The basis is returned with the figures — see InstructorIncomeService.
+ */
+router.get("/instructor-income", readGate, validate(InstructorIncomeQuery, "query"), async (req, res, next) => {
+  try {
+    const q = InstructorIncomeQuery.parse(req.query);
+    await gateRead(req, q.clubId);
+    res.json(await InstructorIncomeService.income(q.clubId, asOfFrom(q.from), asOfFrom(q.to)));
   } catch (err) { next(err); }
 });
 

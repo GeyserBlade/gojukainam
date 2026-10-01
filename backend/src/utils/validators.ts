@@ -798,3 +798,63 @@ export const FederationAthleteQuery = z.object({
 export const FederationSummaryQuery = z.object({
   asOf: asOfDate.optional(),
 });
+
+// ---------------------------------------------------------------------------
+// Classes — which class a member trains in, and who teaches it.
+//
+// Dates are calendar days as yyyy-mm-dd strings, not Date-parsed timestamps:
+// a class change "from 1 March" must land on 1 March whatever time zone the
+// browser is in (see utils/dates.ts for the dob bug that taught this).
+// ---------------------------------------------------------------------------
+
+const calendarDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "A date as yyyy-mm-dd");
+
+export const ClassClubQuery = z.object({
+  clubId: z.string().min(1),
+  includeInactive: z.enum(["true", "false"]).optional(),
+});
+
+export const CreateInstructor = z.object({
+  clubId: z.string().min(1),
+  name: z.string().trim().min(1).max(80),
+  athleteId: z.string().min(1).optional().nullable(),
+  userId: z.string().min(1).optional().nullable(),
+});
+
+export const UpdateInstructor = z.object({
+  name: z.string().trim().min(1).max(80).optional(),
+  athleteId: z.string().min(1).optional().nullable(),
+  userId: z.string().min(1).optional().nullable(),
+  active: z.boolean().optional(),
+});
+
+export const CreateClass = z.object({
+  clubId: z.string().min(1),
+  name: z.string().trim().min(1).max(80),
+  schedule: z.string().trim().max(120).optional().nullable(),
+});
+
+export const UpdateClass = z.object({
+  name: z.string().trim().min(1).max(80).optional(),
+  schedule: z.string().trim().max(120).optional().nullable(),
+  active: z.boolean().optional(),
+});
+
+/** Who teaches a class from a date. Two instructors = shared, split evenly. */
+export const SetClassInstructors = z.object({
+  instructorIds: z.array(z.string().min(1)).max(4)
+    .refine((ids) => new Set(ids).size === ids.length, "An instructor is listed twice"),
+  from: calendarDay,
+});
+
+/** A member's class from a date. `classId: null` ends their enrolment. */
+export const EnrolAthlete = z.object({
+  classId: z.string().min(1).nullable(),
+  from: calendarDay,
+});
+
+export const InstructorIncomeQuery = z.object({
+  clubId: z.string().min(1),
+  from: calendarDay,
+  to: calendarDay,
+});

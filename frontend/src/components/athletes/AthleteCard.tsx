@@ -71,6 +71,7 @@ export function AthleteCard({ athlete, onDocuments, onEdit, onDelete, isDeleting
           </div>
           <p className="text-xs text-muted-foreground mt-0.5 truncate">
             {athlete.club?.name ?? "No club"}
+            {athlete.className ? ` · ${athlete.className}` : ""}
           </p>
         </div>
         <DropdownMenu>

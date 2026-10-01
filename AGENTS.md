@@ -227,6 +227,13 @@ working directory, so scripts still run from either the repository root or
   this kata") are queries.
 - **Invoice** — per-club billing for an event's entries.
 - **Document** — an uploaded file attached to an athlete, event, or club.
+- **Instructor / Class / ClassInstructor / ClassEnrolment** — who teaches which
+  class, and which class a member trains in, all **dated** (start/end) rather
+  than overwritten. One open enrolment per member and one open row per
+  (class, instructor) are partial unique indexes. A class with two instructors
+  on a day is shared, always 50/50. This is the basis for splitting monthly fee
+  income (`GET /api/billing/instructor-income`, `InstructorIncomeService`);
+  writes are human-only, the sensai agent key can read.
 - **Roles** — `SUPERADMIN`, `ADMIN`, `CLUB_MANAGER`, `COACH`, `ATHLETE`,
   `TATAMI_OPERATOR`. Admin roles see everything; club roles see only their own
   club; a tatami operator sees only the mats they hold a `MatOperator` grant on

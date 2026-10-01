@@ -19,6 +19,7 @@ const UsersPage = lazy(() => import("./pages/Users"));
 const BeltsPage = lazy(() => import("./pages/Belts"));
 const KatasPage = lazy(() => import("./pages/Katas"));
 const AthletesListPage = lazy(() => import("./pages/AthletesList"));
+const ClassesPage = lazy(() => import("./pages/Classes"));
 const AthleteFormPage = lazy(() => import("./pages/AthleteForm"));
 const ClubsPage = lazy(() => import("./pages/Clubs"));
 const AthleteImportPage = lazy(() => import("./pages/AthleteImport"));
@@ -71,6 +72,7 @@ const AppRoutes: React.FC = () => (
       <Route path="/belts" element={<Protected><BeltsPage /></Protected>} />
       <Route path="/katas" element={<Protected><KatasPage /></Protected>} />
       <Route path="/athletes" element={<Protected><AthletesListPage /></Protected>} />
+      <Route path="/classes" element={<Protected><ClassesPage /></Protected>} />
       <Route path="/athletes/new" element={<Protected><AthleteFormPage /></Protected>} />
       <Route path="/athletes/:id/edit" element={<Protected><AthleteFormPage /></Protected>} />
       <Route path="/athletes/import" element={<Protected><AthleteImportPage /></Protected>} />

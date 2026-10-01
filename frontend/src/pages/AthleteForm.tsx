@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { ArrowLeft } from "lucide-react"
 
 import { useAuth } from "@/contexts/AuthContext"
@@ -27,6 +28,7 @@ import {
 } from "@/lib/athletes"
 import { listClubs, type Club } from "@/lib/clubs"
 import { listBelts, type Belt } from "@/lib/belts"
+import { enrolAthlete, getEnrolmentHistory, listClasses, todayIso } from "@/lib/classes"
 
 type Mode = "create" | "edit"
 
@@ -35,6 +37,7 @@ type Mode = "create" | "edit"
 // string would be scrubbed to `undefined` server-side and leave the existing
 // belt in place, which is the opposite of clearing it.
 const NO_BELT = "__none__"
+const NO_CLASS = "__none__"
 
 const formatApiError = (err: unknown) => {
   const data = (err as { response?: { data?: { error?: string; details?: Array<{ path?: string; message: string }> } } })?.response?.data
@@ -84,6 +87,26 @@ const AthleteFormPage = () => {
     clubId: clubId || undefined,
     gender: "Male",
   })
+
+  // Class is saved separately from the athlete: it is a dated enrolment, not
+  // a field, so moving someone "from 1 March" keeps February where it was.
+  const queryClient = useQueryClient()
+  const enrolClubId = form.clubId || clubId || ""
+  const { data: classes = [] } = useQuery({
+    queryKey: ["classes", enrolClubId, "active"],
+    queryFn: () => listClasses(enrolClubId),
+    enabled: canManage && !!enrolClubId,
+  })
+  const { data: classHistory = [] } = useQuery({
+    queryKey: ["class-enrolments", enrolClubId, id ?? ""],
+    queryFn: () => getEnrolmentHistory(enrolClubId, id!),
+    enabled: canManage && mode === "edit" && !!id && !!enrolClubId,
+  })
+  const currentClassId = classHistory.find((h) => h.to === null)?.classId ?? ""
+  const [classChoice, setClassChoice] = useState<string | null>(null)
+  const [classFrom, setClassFrom] = useState(todayIso())
+  const chosenClassId = classChoice ?? currentClassId
+  const classChanged = chosenClassId !== currentClassId
 
   useEffect(() => {
     if (!canManage) return
@@ -135,10 +158,16 @@ const AthleteFormPage = () => {
         payload.weightKg = Number(payload.weightKg) || undefined
       }
       if (!payload.clubId && clubId) payload.clubId = clubId
+      let athleteId = id
       if (mode === "create") {
-        await createAthlete(payload as Parameters<typeof createAthlete>[0])
+        athleteId = (await createAthlete(payload as Parameters<typeof createAthlete>[0])).id
       } else if (mode === "edit" && id) {
         await updateAthlete(id, payload)
+      }
+      if (classChanged && athleteId && payload.clubId) {
+        await enrolAthlete(payload.clubId, athleteId, { classId: chosenClassId || null, from: classFrom })
+        queryClient.invalidateQueries({ queryKey: ["class-enrolments"] })
+        queryClient.invalidateQueries({ queryKey: ["classes"] })
       }
       nav("/athletes")
     } catch (err) {
@@ -497,6 +526,61 @@ const AthleteFormPage = () => {
                 }
               />
             </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">
+              Class
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <FieldLabel htmlFor="class">Trains in</FieldLabel>
+              <Select
+                key={chosenClassId || "no-class"}
+                value={chosenClassId || NO_CLASS}
+                onValueChange={(v) => setClassChoice(v === NO_CLASS ? "" : v)}
+              >
+                <SelectTrigger id="class" className="w-full">
+                  <SelectValue placeholder="Select a class" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NO_CLASS}>No class</SelectItem>
+                  {classes.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>
+                      {c.name}
+                      {c.instructors.length > 0 ? ` — ${c.instructors.map((i) => i.name).join(" & ")}` : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {classes.length === 0 && (
+                <p className="mt-1.5 text-xs text-muted-foreground">No classes yet — add them on the Classes page.</p>
+              )}
+            </div>
+            {classChanged && (
+              <div>
+                <FieldLabel htmlFor="class-from" required>From</FieldLabel>
+                <Input
+                  id="class-from"
+                  type="date"
+                  required
+                  value={classFrom}
+                  onChange={(e) => setClassFrom(e.target.value)}
+                />
+                <p className="mt-1.5 text-xs text-muted-foreground">
+                  Monthly fees from this date are split by the new class. Earlier months stay as they were.
+                </p>
+              </div>
+            )}
+            {classHistory.length > 1 && (
+              <div className="sm:col-span-2 text-xs text-muted-foreground">
+                Earlier:{" "}
+                {classHistory.filter((h) => h.to !== null).map((h) => `${h.className} (${h.from} to ${h.to})`).join("; ")}
+              </div>
+            )}
           </CardContent>
         </Card>
 

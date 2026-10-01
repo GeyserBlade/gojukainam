@@ -126,6 +126,16 @@ export function AthletesDataTable({
         ),
       },
       {
+        id: "class",
+        header: "Class",
+        accessorFn: (a) => a.className ?? "",
+        cell: ({ row }) => (
+          <span className="text-muted-foreground truncate max-w-[10rem] inline-block align-middle">
+            {row.original.className ?? "—"}
+          </span>
+        ),
+      },
+      {
         id: "club",
         header: "Club",
         accessorFn: (a) => a.club?.name ?? "",

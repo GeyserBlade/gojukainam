@@ -5,6 +5,9 @@ export type Gender = "Male" | "Female";
 export type Athlete = {
   id: string;
   clubId: string;
+  /** Current class, merged in client-side from /classes/enrolments. Not sent by /athletes. */
+  className?: string | null;
+  classId?: string | null;
   firstName: string;
   lastName: string;
   invoiceRef?: string | null;

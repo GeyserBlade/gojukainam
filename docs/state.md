@@ -4,7 +4,20 @@ This file is the handoff between coding agents. It describes what is in flight
 right now, not the permanent architecture (that's
 [`architecture.md`](architecture.md)).
 
-**Last updated:** 2026-08-26 — by Claude Code, on `main` (uncommitted):
+**Last updated:** 2026-10-01 — by Claude Code, on branch `feat/classes`
+(uncommitted): **classes, instructors and enrolment, and the instructor income
+split.** New models `Instructor`, `Class`, `ClassInstructor`, `ClassEnrolment`
+(migration `20261001120000_add_classes`), `ClassService`, `routes/classes.ts`
+(`/api/classes`: reads for staff and the agent key via `members:read`, writes
+human-only), `GET /api/billing/instructor-income`, and `currentClass` on billing
+member payloads. Frontend: `/classes` page, a dated class picker on the athlete
+form, and a Class column/filter on the athletes list. Verified:
+`scripts/test-classes.ts` (44 checks, local DB + HTTP with ALLOW_DEV_AUTH),
+both projects `tsc` clean and building, and clicked through in the browser.
+Open: nothing in this repo; sensai reads these next (payer matching and
+`get_instructor_income`).
+
+Previously, 2026-08-26 — by Claude Code, on `main` (uncommitted):
 **the spectator board's athlete search now exists in the event hub too**, as a
 new `/hub/athletes` tab. Same question, same answer, same code: one shared
 backend payload (`AthleteIndexService`, off one shared cache entry) and one
