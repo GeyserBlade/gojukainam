@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react"
+import { Link } from "react-router-dom"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { GraduationCap, PlusCircle, Users } from "lucide-react"
+import { GraduationCap, PlusCircle, UserCheck, Users } from "lucide-react"
 
 import { useAuth } from "@/contexts/AuthContext"
 import { useToast, useApiErrorToast } from "@/components/Toast"
@@ -229,7 +230,14 @@ const ClassesPage = () => {
           {/* Classes */}
           <Card>
             <CardContent className="space-y-4 p-4">
-              <h2 className="text-sm font-semibold">Classes</h2>
+              <div className="flex items-center justify-between gap-2">
+                <h2 className="text-sm font-semibold">Classes</h2>
+                {classes.some((c) => c.active) && (
+                  <Button asChild variant="outline" size="sm">
+                    <Link to="/classes/allocate"><UserCheck />Allocate members</Link>
+                  </Button>
+                )}
+              </div>
               <form
                 className="flex flex-wrap gap-2"
                 onSubmit={(e: FormEvent) => {

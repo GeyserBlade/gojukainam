@@ -242,6 +242,65 @@ async function main() {
       ? (members.json as Array<{ id: string; currentClass?: { name: string } | null }>).find((m) => m.id === x.id)
       : ((members.json as { members?: Array<{ id: string; currentClass?: { name: string } | null }> })?.members ?? []).find((m) => m.id === x.id);
     check("billing members carry their current class", xRow?.currentClass?.name === "Seniors", xRow);
+
+    // ── Allocating many members at once ────────────────────────────────────
+    console.log("\nAllocating many members at once:");
+    const p = await mkAthlete(clubA.id, "Pieter", "Bulk");
+    const q = await mkAthlete(clubA.id, "Queen", "Bulk");
+    const first = await ClassService.allocate(clubA.id, {
+      from: "2026-09-01",
+      assignments: [{ athleteId: p.id, classId: juniors.id }, { athleteId: q.id, classId: seniors.id }],
+    });
+    check("two new members are placed", first.changed === 2 && first.unchanged === 0, first);
+    const again = await ClassService.allocate(clubA.id, {
+      from: "2026-09-15",
+      assignments: [{ athleteId: p.id, classId: juniors.id }, { athleteId: q.id, classId: seniors.id }],
+    });
+    check("saving the same classes again changes nothing", again.changed === 0 && again.unchanged === 2, again);
+
+    await ClassService.allocate(clubA.id, {
+      from: "2026-10-01",
+      assignments: [{ athleteId: p.id, classId: seniors.id }, { athleteId: q.id, classId: null }],
+    });
+    const pHistory = await ClassService.enrolmentHistory(clubA.id, p.id);
+    check("a bulk move closes the old class the day before, like a single one",
+      pHistory[0]?.className === "Seniors" && pHistory[0]?.from === "2026-10-01" && pHistory[1]?.to === "2026-09-30", pHistory);
+    const qHistory = await ClassService.enrolmentHistory(clubA.id, q.id);
+    check("no class ends the member's enrolment", qHistory.length === 1 && qHistory[0]?.to === "2026-09-30", qHistory);
+
+    let backdated: { status?: number; message?: string } = {};
+    try {
+      await ClassService.allocate(clubA.id, {
+        from: "2026-09-20",
+        assignments: [{ athleteId: q.id, classId: juniors.id }, { athleteId: p.id, classId: juniors.id }],
+      });
+    } catch (err) { backdated = err as typeof backdated; }
+    check("a backdated move refuses the whole batch and names the member",
+      backdated.status === 409 && backdated.message?.startsWith("Pieter Bulk:") === true, backdated);
+    check("…and the member before it in the batch was not moved",
+      (await ClassService.enrolmentHistory(clubA.id, q.id)).length === 1);
+
+    await refused("a batch with another club's member", 404,
+      () => ClassService.allocate(clubA.id, { from: "2026-11-01", assignments: [{ athleteId: foreign.id, classId: juniors.id }] }));
+    await refused("a batch into another club's class", 404,
+      () => ClassService.allocate(clubA.id, { from: "2026-11-01", assignments: [{ athleteId: q.id, classId: otherClub.id }] }));
+    const retired = await ClassService.createClass({ clubId: clubA.id, name: "Retired" });
+    await ClassService.updateClass(clubA.id, retired.id, { active: false });
+    await refused("a batch into an inactive class", 400,
+      () => ClassService.allocate(clubA.id, { from: "2026-11-01", assignments: [{ athleteId: q.id, classId: retired.id }] }));
+
+    const bulk = (headers: Record<string, string>, clubId: string, body: unknown) =>
+      http("PUT", `/classes/enrolments?clubId=${clubId}`, headers, body);
+    const oneMove = { from: "2026-11-01", assignments: [{ athleteId: q.id, classId: juniors.id }] };
+    check("a coach cannot allocate", (await bulk(coachA, clubA.id, oneMove)).status === 403);
+    check("the agent key cannot allocate", (await bulk(agent, clubA.id, oneMove)).status === 403);
+    check("a club manager cannot allocate in another club", (await bulk(managerA, clubB.id, oneMove)).status === 403);
+    check("a member listed twice is refused", (await bulk(managerA, clubA.id, {
+      from: "2026-11-01", assignments: [oneMove.assignments[0], { athleteId: q.id, classId: seniors.id }],
+    })).status === 400);
+    const ok = await bulk(managerA, clubA.id, oneMove);
+    check("a club manager allocates in their own club",
+      ok.status === 200 && (ok.json as { changed?: number }).changed === 1, ok);
   } finally {
     // Children first; every row here hangs off the two test clubs.
     for (const clubId of [clubA.id, clubB.id]) {
