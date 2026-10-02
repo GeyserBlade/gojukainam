@@ -4,7 +4,16 @@ This file is the handoff between coding agents. It describes what is in flight
 right now, not the permanent architecture (that's
 [`architecture.md`](architecture.md)).
 
-**Last updated:** 2026-10-01 — by Claude Code, on branch `feat/classes`
+**Last updated:** 2026-10-02 — by Claude Code: **production data fix only, no
+code.** The first real classes (WHK Beginners/Advanced/Seniors) and their
+instructors had been created under Khomasdal Dojo by mistake; moved all 3
+`Class` and 5 `Instructor` rows to Windhoek Dojo in one guarded transaction.
+`ClassInstructor` carries no club, so its 4 rows came along untouched; there
+were no enrolments. Three inactive instructors named after the classes
+(created by mistake, no teaching assignments) were then deleted at the user's
+request, leaving Ryan and Bruno.
+
+Previously, 2026-10-01 — by Claude Code, on branch `feat/classes`
 (uncommitted): **classes, instructors and enrolment, and the instructor income
 split.** New models `Instructor`, `Class`, `ClassInstructor`, `ClassEnrolment`
 (migration `20261001120000_add_classes`), `ClassService`, `routes/classes.ts`
