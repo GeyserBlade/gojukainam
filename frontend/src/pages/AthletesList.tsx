@@ -12,6 +12,7 @@ import { AthleteCard } from "@/components/athletes/AthleteCard"
 import {
   AthletesFiltersSheet,
   defaultFilters,
+  NO_CLASS_FILTER,
   type AthletesFilters,
 } from "@/components/athletes/AthletesFiltersSheet"
 import { DocumentSection } from "@/components/DocumentSection"
@@ -32,6 +33,7 @@ import {
 } from "@/lib/athletes"
 import { listBelts } from "@/lib/belts"
 import { listClubs } from "@/lib/clubs"
+import { listClasses, listCurrentEnrolments } from "@/lib/classes"
 
 const calculateAge = (dob: string, refDate = new Date()) => {
   const birth = new Date(dob)
@@ -96,6 +98,26 @@ const AthletesListPage = () => {
     enabled: canManage,
   })
 
+  // Classes belong to one club, so they are shown only when one club is in view.
+  const classClubId = filters.clubId || (role === "SUPERADMIN" ? "" : clubId || "")
+  const { data: classes = [] } = useQuery({
+    queryKey: ["classes", classClubId, "active"],
+    queryFn: () => listClasses(classClubId),
+    enabled: canManage && !!classClubId,
+  })
+  const { data: enrolments = [] } = useQuery({
+    queryKey: ["class-enrolments", classClubId],
+    queryFn: () => listCurrentEnrolments(classClubId),
+    enabled: canManage && !!classClubId,
+  })
+  const withClasses = useMemo(() => {
+    const byAthlete = new Map(enrolments.map((e) => [e.athleteId, e]))
+    return athletes.map((a) => {
+      const e = byAthlete.get(a.id)
+      return { ...a, classId: e?.classId ?? null, className: e?.className ?? null }
+    })
+  }, [athletes, enrolments])
+
   const error = queryError
     ? (queryError as { response?: { data?: { error?: string } } })?.response?.data?.error ??
       (queryError as Error).message ??
@@ -107,8 +129,10 @@ const AthletesListPage = () => {
     const minAge = filters.minAge ? Number(filters.minAge) : null
     const maxAge = filters.maxAge ? Number(filters.maxAge) : null
     const now = new Date()
-    return athletes.filter((a) => {
+    return withClasses.filter((a) => {
       if (filters.beltId && a.beltId !== filters.beltId) return false
+      if (filters.classId === NO_CLASS_FILTER && a.classId) return false
+      if (filters.classId && filters.classId !== NO_CLASS_FILTER && a.classId !== filters.classId) return false
       if (minAge !== null || maxAge !== null) {
         const age = calculateAge(a.dob, now)
         if (minAge !== null && (age ?? Infinity) < minAge) return false
@@ -118,17 +142,19 @@ const AthletesListPage = () => {
         const nm = `${a.firstName} ${a.lastName}`.toLowerCase()
         const clubName = a.club?.name?.toLowerCase() ?? ""
         const beltName = a.belt?.name?.toLowerCase() ?? ""
+        const classLabel = a.className?.toLowerCase() ?? ""
         if (
           !nm.includes(s) &&
           !clubName.includes(s) &&
           !beltName.includes(s) &&
+          !classLabel.includes(s) &&
           !(a.nationality ?? "").toLowerCase().includes(s)
         )
           return false
       }
       return true
     })
-  }, [athletes, q, filters.beltId, filters.minAge, filters.maxAge])
+  }, [withClasses, q, filters.beltId, filters.classId, filters.minAge, filters.maxAge])
 
   const deleteMutation = useMutation({
     mutationFn: deleteAthlete,
@@ -180,6 +206,7 @@ const AthletesListPage = () => {
         onChange={setFilters}
         clubs={clubs}
         belts={belts}
+        classes={classes}
         showClubFilter={showClubFilter}
       />
     </div>

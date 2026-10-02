@@ -22,10 +22,13 @@ import {
 } from "@/components/ui/sheet"
 import type { Belt } from "@/lib/belts"
 import type { Club } from "@/lib/clubs"
+import type { ClassRow } from "@/lib/classes"
 
 export interface AthletesFilters {
   clubId: string
   beltId: string
+  /** A class id, NO_CLASS_FILTER for members in no class, or "" for everyone. */
+  classId: string
   minAge: string
   maxAge: string
   showInactive: boolean
@@ -34,6 +37,7 @@ export interface AthletesFilters {
 export const defaultFilters = (clubId?: string | null): AthletesFilters => ({
   clubId: clubId ?? "",
   beltId: "",
+  classId: "",
   minAge: "",
   maxAge: "",
   showInactive: false,
@@ -44,19 +48,25 @@ interface AthletesFiltersSheetProps {
   onChange: (next: AthletesFilters) => void
   clubs: Club[]
   belts: Belt[]
+  /** Classes of the one club being shown; empty hides the filter. */
+  classes?: ClassRow[]
   showClubFilter: boolean
 }
+
+export const NO_CLASS_FILTER = "__no_class__"
 
 export function AthletesFiltersSheet({
   filters,
   onChange,
   clubs,
   belts,
+  classes = [],
   showClubFilter,
 }: AthletesFiltersSheetProps) {
   const activeCount =
     (filters.clubId ? 1 : 0) +
     (filters.beltId ? 1 : 0) +
+    (filters.classId ? 1 : 0) +
     (filters.minAge ? 1 : 0) +
     (filters.maxAge ? 1 : 0) +
     (filters.showInactive ? 1 : 0)
@@ -128,6 +138,27 @@ export function AthletesFiltersSheet({
               </SelectContent>
             </Select>
           </div>
+
+          {classes.length > 0 && (
+            <div className="space-y-2">
+              <Label htmlFor="filter-class">Class</Label>
+              <Select
+                value={filters.classId || "all"}
+                onValueChange={(v) => onChange({ ...filters, classId: v === "all" ? "" : v })}
+              >
+                <SelectTrigger id="filter-class" className="w-full">
+                  <SelectValue placeholder="All classes" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All classes</SelectItem>
+                  <SelectItem value={NO_CLASS_FILTER}>Not in a class</SelectItem>
+                  {classes.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
 
           <div className="space-y-2">
             <Label>Age range</Label>

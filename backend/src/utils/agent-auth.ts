@@ -162,6 +162,9 @@ export async function verifyApiKey(raw: string): Promise<AgentIdentity | null> {
  */
 const AGENT_ALLOWED_PREFIXES: readonly string[] = [
   "/api/billing",
+  // Reads only: every write in routes/classes.ts is requireRoles, which a key
+  // can never satisfy. Sensai reads classes to split instructor income.
+  "/api/classes",
   "/api/competition",
   "/api/federation",
 ];

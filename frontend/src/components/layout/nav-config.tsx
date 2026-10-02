@@ -1,6 +1,7 @@
 import {
   CalendarDays,
   ClipboardCheck,
+  GraduationCap,
   LayoutDashboard,
   Medal,
   Scroll,
@@ -36,6 +37,7 @@ export const NAV_ITEMS: NavItem[] = [
   { to: "/dashboard", label: "Dashboard", icon: ClipboardCheck, roles: STAFF_ROLES },
   { to: "/mat", label: "My Tatami", icon: Swords, roles: ["TATAMI_OPERATOR"], accent: "flag-green" },
   { to: "/athletes", label: "Athletes", icon: Users, roles: MANAGE_ROLES },
+  { to: "/classes", label: "Classes", icon: GraduationCap, roles: MANAGE_ROLES, accent: "belt-green" },
   { to: "/hub", label: "Event Hub", icon: LayoutDashboard, roles: STAFF_ROLES, accent: "primary" },
   { to: "/events/manage", label: "Event Admin", icon: CalendarDays, roles: MANAGE_ROLES, accent: "belt-orange" },
   { to: "/athletes/extract", label: "Athlete Extract", icon: Upload, roles: MANAGE_ROLES },

@@ -28,6 +28,7 @@ import { router as run } from "./routes/run.js";
 import { router as plan } from "./routes/plan.js";
 import { router as publicBoard } from "./routes/public.js";
 import { router as billing } from "./routes/billing.js";
+import { router as classes } from "./routes/classes.js";
 import { router as competition } from "./routes/competition.js";
 import { router as federation } from "./routes/federation.js";
 
@@ -161,6 +162,7 @@ app.use("/api/belts", belts);
 app.use("/api/katas", katas);
 app.use("/api/documents", documents);
 app.use("/api/billing", billing);
+app.use("/api/classes", classes);
 app.use("/api/competition", competition);
 app.use("/api/federation", federation);
 app.use("/api/draws", draws);

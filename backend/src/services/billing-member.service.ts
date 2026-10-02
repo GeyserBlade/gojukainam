@@ -36,6 +36,13 @@ const memberSelect = {
   guardianName2: true,
   guardianPhone2: true,
   belt: { select: { id: true, name: true, colour: true, order: true } },
+  // The class they train in now — what sensai splits instructor income by.
+  // At most one open row per member (migration add_classes).
+  classEnrolments: {
+    where: { endDate: null },
+    select: { class: { select: { id: true, name: true } } },
+    take: 1,
+  },
 };
 
 type MemberRow = {
@@ -52,8 +59,12 @@ function fullName(m: { firstName: string; lastName: string }): string {
 /** The computed date fields every member payload carries. */
 function withAge<T extends MemberRow>(m: T, asOf: Date) {
   const nb = nextBirthday(m.dob, asOf);
+  // The enrolment rows become one plain field; the array shape is a query
+  // detail no caller should have to unwrap.
+  const { classEnrolments, ...rest } = m as T & { classEnrolments?: Array<{ class: { id: string; name: string } }> };
   return {
-    ...m,
+    ...rest,
+    currentClass: classEnrolments?.[0]?.class ?? null,
     name: fullName(m),
     dob: toIsoDate(m.dob),
     ageYears: ageInYears(m.dob, asOf),

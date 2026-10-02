@@ -110,6 +110,8 @@ model User {
   coordinatorGrants EventCoordinator[] @relation("CoordinatorGrantedBy")
   operatorFor       MatOperator[]      @relation("OperatorUser")
   operatorGrants    MatOperator[]      @relation("OperatorGrantedBy")
+
+  instructorProfile Instructor[]
 }
 
 /// Per-event delegation: grants one user admin-equivalent powers over ONE event
@@ -188,6 +190,10 @@ model Club {
   invoiceRuns    InvoiceRun[]
   memberInvoices MemberInvoice[]
   payments       Payment[]
+
+  // Classes — see the classes section at the end of this file.
+  instructors Instructor[]
+  classes     Class[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -432,6 +438,10 @@ model Athlete {
   // Club billing — see the billing section at the end of this file.
   subscriptions  MemberSubscription[]
   memberInvoices MemberInvoice[]
+
+  // Which class they train in, over time. See the classes section.
+  classEnrolments   ClassEnrolment[]
+  instructorProfile Instructor[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1088,4 +1098,99 @@ model PaymentAllocation {
 
   @@unique([paymentId, invoiceId])
   @@index([invoiceId])
+}
+
+// ---------------------------------------------------------------------------
+// Classes
+//
+// Which class a member trains in, and who teaches it — the basis for splitting
+// monthly fee income between instructors. A member is in ONE class at a time
+// and pays ONE fee, so the class hangs off the member (ClassEnrolment), not
+// off the subscription. A class with two instructors on a date is shared, and
+// shared is always an even split: there is deliberately no percentage column
+// for anyone to set to something other than what the dojo actually does.
+//
+// Everything is dated rather than overwritten. A class that becomes shared in
+// March must not re-split January's fees, and a child who moves class in June
+// was still in the old one in May. So changes close the open row and open a
+// new one (ClassService), and the "one open row" rules are partial unique
+// indexes in the migration, because Prisma cannot express them.
+// ---------------------------------------------------------------------------
+
+/// Someone who teaches. Its own table because none of the instructors is
+/// necessarily a member, and payouts go to the person, not to a roster row.
+model Instructor {
+  id        String   @id @default(cuid())
+  clubId    String
+  club      Club     @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  name      String
+  /// Optional links, for when the instructor is also on the roster or signs in.
+  athleteId String?
+  athlete   Athlete? @relation(fields: [athleteId], references: [id], onDelete: SetNull)
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  active    Boolean  @default(true)
+
+  classes ClassInstructor[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([clubId, name])
+  @@index([clubId])
+}
+
+model Class {
+  id       String  @id @default(cuid())
+  clubId   String
+  club     Club    @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  name     String
+  /// Free text, e.g. "Mon & Wed 17:00". Not a timetable model.
+  schedule String?
+  active   Boolean @default(true)
+
+  instructors ClassInstructor[]
+  enrolments  ClassEnrolment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([clubId, name])
+  @@index([clubId])
+}
+
+/// Who taught a class, from when to when. Rows overlapping a date are that
+/// date's instructors; two of them means the class was shared that day.
+model ClassInstructor {
+  id           String     @id @default(cuid())
+  classId      String
+  class        Class      @relation(fields: [classId], references: [id], onDelete: Cascade)
+  instructorId String
+  instructor   Instructor @relation(fields: [instructorId], references: [id], onDelete: Restrict)
+  startDate    DateTime   @db.Date
+  /// Inclusive. Null while current.
+  endDate      DateTime?  @db.Date
+
+  createdAt DateTime @default(now())
+
+  @@index([classId, startDate])
+  @@index([instructorId])
+}
+
+/// Which class a member trained in, from when to when. At most one open row
+/// per member (partial unique index in the migration).
+model ClassEnrolment {
+  id        String    @id @default(cuid())
+  athleteId String
+  athlete   Athlete   @relation(fields: [athleteId], references: [id], onDelete: Cascade)
+  classId   String
+  class     Class     @relation(fields: [classId], references: [id], onDelete: Restrict)
+  startDate DateTime  @db.Date
+  /// Inclusive. Null while current.
+  endDate   DateTime? @db.Date
+
+  createdAt DateTime @default(now())
+
+  @@index([athleteId, startDate])
+  @@index([classId])
 }
