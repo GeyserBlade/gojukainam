@@ -853,6 +853,20 @@ export const EnrolAthlete = z.object({
   from: calendarDay,
 });
 
+/**
+ * Many members' classes from one date, applied together or not at all. One
+ * date for the lot because that is how a dojo reorganises: "from 1 November
+ * these twelve train in Seniors".
+ */
+export const AllocateMembers = z.object({
+  from: calendarDay,
+  assignments: z.array(z.object({
+    athleteId: z.string().min(1),
+    classId: z.string().min(1).nullable(),
+  })).min(1).max(1000)
+    .refine((rows) => new Set(rows.map((r) => r.athleteId)).size === rows.length, "A member is listed twice"),
+});
+
 export const InstructorIncomeQuery = z.object({
   clubId: z.string().min(1),
   from: calendarDay,

@@ -4,7 +4,38 @@ This file is the handoff between coding agents. It describes what is in flight
 right now, not the permanent architecture (that's
 [`architecture.md`](architecture.md)).
 
-**Last updated:** 2026-10-01 — by Claude Code, on branch `feat/classes`
+**Last updated:** 2026-10-02 — by Claude Code, on branch
+`feat/class-allocation`: **allocating a dojo's members to its classes in
+bulk.** New `PUT /api/classes/enrolments?clubId=` (`AllocateMembers`
+validator, `ClassService.allocate`): many members' classes from one date, in
+one transaction, all or nothing. Same rules as the single-member
+`PUT /classes/athletes/:id` — both now share one `moveMember` step — and the
+same human-only write gate. Every member and class is checked against the
+club before anything is written; a backdated move fails the whole batch and
+names the member. Frontend: `/classes/allocate` (linked from the Classes card),
+which stages changes per row or for ticked members, shows head counts per
+class before → after, and saves once with a From date. Verified:
+`scripts/test-classes.ts` all pass (14 new checks), both projects `tsc` clean
+and building, and clicked through locally as a club manager — bulk + single
+changes saved in one PUT, a backdated save refused with the member named and
+the draft kept, no page-level horizontal scroll at 375px. Local test classes
+removed afterwards. Not yet pushed.
+
+Note for local testing: port 4000 is currently taken by sensai's litellm
+container, and the backend's dev CORS list only allows 5173/5174/3000. Run the
+backend on another port (`PORT=4100 ALLOW_DEV_AUTH=true`) with the frontend on
+5174 and `VITE_API_BASE` pointed at it.
+
+Earlier the same day — by Claude Code: **production data fix only, no
+code.** The first real classes (WHK Beginners/Advanced/Seniors) and their
+instructors had been created under Khomasdal Dojo by mistake; moved all 3
+`Class` and 5 `Instructor` rows to Windhoek Dojo in one guarded transaction.
+`ClassInstructor` carries no club, so its 4 rows came along untouched; there
+were no enrolments. Three inactive instructors named after the classes
+(created by mistake, no teaching assignments) were then deleted at the user's
+request, leaving Ryan and Bruno.
+
+Previously, 2026-10-01 — by Claude Code, on branch `feat/classes`
 (uncommitted): **classes, instructors and enrolment, and the instructor income
 split.** New models `Instructor`, `Class`, `ClassInstructor`, `ClassEnrolment`
 (migration `20261001120000_add_classes`), `ClassService`, `routes/classes.ts`

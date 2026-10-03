@@ -6,8 +6,8 @@ import { requireAgentOrRoles, assertAgentClubRead } from "../utils/agent-auth.js
 import { getParam } from "../utils/params.js";
 import { startOfUtcDay } from "../utils/dates.js";
 import {
-  ClassClubQuery, CreateClass, CreateInstructor, EnrolAthlete, SetClassInstructors, UpdateClass,
-  UpdateInstructor,
+  AllocateMembers, ClassClubQuery, CreateClass, CreateInstructor, EnrolAthlete, SetClassInstructors,
+  UpdateClass, UpdateInstructor,
 } from "../utils/validators.js";
 import { ClassService } from "../services/class.service.js";
 
@@ -123,6 +123,20 @@ router.put(
       const clubId = clubFromQuery(req);
       assertHumanClub(req, clubId);
       res.json(await ClassService.enrol(clubId, getParam(req.params.athleteId), req.body));
+    } catch (err) { next(err); }
+  },
+);
+
+/** Many members' classes from one date, all or nothing. */
+router.put(
+  "/enrolments",
+  writeGate,
+  validateMultiple({ body: AllocateMembers, query: ClassClubQuery }),
+  async (req, res, next) => {
+    try {
+      const clubId = clubFromQuery(req);
+      assertHumanClub(req, clubId);
+      res.json(await ClassService.allocate(clubId, req.body));
     } catch (err) { next(err); }
   },
 );

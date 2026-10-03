@@ -112,3 +112,15 @@ export async function enrolAthlete(
   const { data } = await api.put(`/classes/athletes/${athleteId}`, payload, { params: { clubId } });
   return data;
 }
+
+/**
+ * Many members' classes from one date, all or nothing: if any one move is
+ * refused (say, dated before that member's current class began) none land.
+ */
+export async function allocateMembers(
+  clubId: string,
+  payload: { from: string; assignments: Array<{ athleteId: string; classId: string | null }> },
+): Promise<{ from: string; changed: number; unchanged: number }> {
+  const { data } = await api.put(`/classes/enrolments`, payload, { params: { clubId } });
+  return data;
+}

@@ -1,7 +1,9 @@
+import type { Prisma } from "@prisma/client";
 import { prisma } from "../lib/prisma.js";
 import { toIsoDate, utcDate } from "../utils/dates.js";
 import {
-  CreateClass, CreateInstructor, EnrolAthlete, SetClassInstructors, UpdateClass, UpdateInstructor,
+  AllocateMembers, CreateClass, CreateInstructor, EnrolAthlete, SetClassInstructors, UpdateClass,
+  UpdateInstructor,
 } from "../utils/validators.js";
 
 /**
@@ -208,29 +210,52 @@ export class ClassService {
       if (!cls.active) throw { status: 400, message: "That class is no longer active." };
     }
 
-    return prisma.$transaction(async (tx) => {
-      const open = await tx.classEnrolment.findFirst({
-        where: { athleteId, endDate: null },
-        select: { id: true, classId: true, startDate: true },
-      });
-      if (open && open.classId === data.classId) {
-        return { athleteId, classId: data.classId, from: toIsoDate(open.startDate), changed: false };
-      }
-      if (open) {
-        if (open.startDate > from) {
-          throw { status: 409, message: `That change is dated before this member's current class began (${toIsoDate(open.startDate)}). Correct history deliberately rather than by moving the date back.` };
-        }
-        if (open.startDate.getTime() === from.getTime()) {
-          await tx.classEnrolment.delete({ where: { id: open.id } });
-        } else {
-          await tx.classEnrolment.update({ where: { id: open.id }, data: { endDate: dayBefore(from) } });
-        }
-      }
-      if (data.classId !== null) {
-        await tx.classEnrolment.create({ data: { athleteId, classId: data.classId, startDate: from } });
-      }
-      return { athleteId, classId: data.classId, from: data.from, changed: true };
+    return prisma.$transaction((tx) => moveMember(tx, athleteId, data.classId, from));
+  }
+
+  /**
+   * Many members' classes from one date, in one transaction: either every
+   * move lands or none does. Half a reorganisation would leave a split that
+   * matches neither the old classes nor the new ones.
+   *
+   * Every member and class is checked against the club up front, so a foreign
+   * id is a 404 before anything is written, and a backdated move names the
+   * member it concerns.
+   */
+  static async allocate(clubId: string, input: unknown) {
+    const data = AllocateMembers.parse(input);
+    const from = day(data.from);
+
+    const athleteIds = data.assignments.map((a) => a.athleteId);
+    const athletes = await prisma.athlete.findMany({
+      where: { id: { in: athleteIds }, clubId },
+      select: { id: true, firstName: true, lastName: true },
     });
+    if (athletes.length !== athleteIds.length) throw { status: 404, message: "Athlete not found" };
+    const names = new Map(athletes.map((a) => [a.id, `${a.firstName} ${a.lastName}`]));
+
+    const classIds = [...new Set(data.assignments.flatMap((a) => (a.classId ? [a.classId] : [])))];
+    const classes = await prisma.class.findMany({
+      where: { id: { in: classIds }, clubId },
+      select: { id: true, name: true, active: true },
+    });
+    if (classes.length !== classIds.length) throw { status: 404, message: "Class not found" };
+    const inactive = classes.find((c) => !c.active);
+    if (inactive) throw { status: 400, message: `${inactive.name} is no longer active.` };
+
+    return prisma.$transaction(async (tx) => {
+      let changed = 0;
+      for (const a of data.assignments) {
+        try {
+          if ((await moveMember(tx, a.athleteId, a.classId, from)).changed) changed++;
+        } catch (err) {
+          const e = err as { status?: number; message?: string };
+          if (e.status) throw { status: e.status, message: `${names.get(a.athleteId)}: ${e.message}` };
+          throw err;
+        }
+      }
+      return { from: data.from, changed, unchanged: data.assignments.length - changed };
+    }, { timeout: 30_000 });
   }
 
   /** Each member's current class, for the athlete list. */
@@ -281,6 +306,39 @@ export class ClassService {
       if (!u || u.clubId !== clubId) throw { status: 400, message: "That user is not in this club." };
     }
   }
+}
+
+/**
+ * Put one member in `classId` (or none) from `from`, inside the caller's
+ * transaction: close the open row the day before, or replace it if it began
+ * that same day, then open the new one. Club checks are the caller's job.
+ */
+async function moveMember(tx: Prisma.TransactionClient, athleteId: string, classId: string | null, from: Date) {
+  const open = await tx.classEnrolment.findFirst({
+    where: { athleteId, endDate: null },
+    select: { id: true, classId: true, startDate: true },
+  });
+  if (open && open.classId === classId) {
+    return { athleteId, classId, from: toIsoDate(open.startDate), changed: false };
+  }
+  if (!open && classId === null) {
+    return { athleteId, classId, from: toIsoDate(from), changed: false };
+  }
+  if (open) {
+    if (open.startDate > from) {
+      throw { status: 409, message: `That change is dated before this member's current class began (${toIsoDate(open.startDate)}). Correct history deliberately rather than by moving the date back.` };
+    }
+    if (open.startDate.getTime() === from.getTime()) {
+      // Started and stopped the same day: the row never covered a day.
+      await tx.classEnrolment.delete({ where: { id: open.id } });
+    } else {
+      await tx.classEnrolment.update({ where: { id: open.id }, data: { endDate: dayBefore(from) } });
+    }
+  }
+  if (classId !== null) {
+    await tx.classEnrolment.create({ data: { athleteId, classId, startDate: from } });
+  }
+  return { athleteId, classId, from: toIsoDate(from), changed: true };
 }
 
 /** Prisma's unique-violation, as the message a person can act on. */
